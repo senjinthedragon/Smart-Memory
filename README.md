@@ -36,10 +36,10 @@ A manual tool that checks whether the last AI response contradicts any establish
 
 ## Installation
 
-Drop the `smart-memory` folder into your SillyTavern extensions directory:
+Drop the `Smart-Memory` folder into your SillyTavern extensions directory:
 
 ```text
-SillyTavern/public/scripts/extensions/third-party/smart-memory/
+SillyTavern/public/scripts/extensions/third-party/Smart-Memory/
 ```
 
 Restart SillyTavern. The extension will appear under **Extensions** in the settings panel.
@@ -139,7 +139,7 @@ All settings are per-profile and saved automatically.
 ## Files
 
 ```text
-smart-memory/
+Smart-Memory/
 ├── index.js          Main entry point, event wiring, UI
 ├── compaction.js     Short-term summary & progressive compaction
 ├── longterm.js       Long-term per-character memory

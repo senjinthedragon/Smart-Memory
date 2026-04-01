@@ -1,7 +1,7 @@
 /**
  * Smart Memory - SillyTavern Extension
  * Copyright (C) 2026 Senjin the Dragon
- * https://github.com/senjinthedragon/smart-memory
+ * https://github.com/senjinthedragon/Smart-Memory
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -33,7 +33,12 @@
  * injectArcs  - pushes active arcs into the prompt via setExtensionPrompt
  */
 
-import { generateRaw, setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
+import {
+  generateRaw,
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_ARCS } from './constants.js';
 import { ARC_EXTRACTION_SYSTEM, buildArcExtractionPrompt } from './prompts.js';
@@ -45,8 +50,8 @@ import { ARC_EXTRACTION_SYSTEM, buildArcExtractionPrompt } from './prompts.js';
  * @returns {Array<{content: string, ts: number}>}
  */
 export function loadArcs() {
-    const context = getContext();
-    return context.chatMetadata?.[META_KEY]?.storyArcs ?? [];
+  const context = getContext();
+  return context.chatMetadata?.[META_KEY]?.storyArcs ?? [];
 }
 
 /**
@@ -54,10 +59,10 @@ export function loadArcs() {
  * @param {Array<{content: string, ts: number}>} arcs
  */
 export async function saveArcs(arcs) {
-    const context = getContext();
-    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-    context.chatMetadata[META_KEY].storyArcs = arcs;
-    await context.saveMetadata();
+  const context = getContext();
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].storyArcs = arcs;
+  await context.saveMetadata();
 }
 
 /**
@@ -66,20 +71,20 @@ export async function saveArcs(arcs) {
  * @param {number} index
  */
 export async function deleteArc(index) {
-    const arcs = loadArcs();
-    arcs.splice(index, 1);
-    await saveArcs(arcs);
+  const arcs = loadArcs();
+  arcs.splice(index, 1);
+  await saveArcs(arcs);
 }
 
 /**
  * Empties all story arcs for the current chat.
  */
 export async function clearArcs() {
-    const context = getContext();
-    if (context.chatMetadata?.[META_KEY]) {
-        context.chatMetadata[META_KEY].storyArcs = [];
-        await context.saveMetadata();
-    }
+  const context = getContext();
+  if (context.chatMetadata?.[META_KEY]) {
+    context.chatMetadata[META_KEY].storyArcs = [];
+    await context.saveMetadata();
+  }
 }
 
 // ---- Parsing ------------------------------------------------------------
@@ -98,34 +103,35 @@ export async function clearArcs() {
  * @returns {{add: Array, resolve: number[]}} Arcs to add and indices to remove.
  */
 function parseArcOutput(text, existingArcs) {
-    if (!text || text.trim().toUpperCase() === 'NONE') return { add: [], resolve: [] };
+  if (!text || text.trim().toUpperCase() === 'NONE')
+    return { add: [], resolve: [] };
 
-    const toAdd = [];
-    const toResolve = [];
+  const toAdd = [];
+  const toResolve = [];
 
-    const addPattern = /^\[arc\]\s+(.+)$/gim;
-    const resolvedPattern = /^\[resolved\]\s+(.+)$/gim;
+  const addPattern = /^\[arc\]\s+(.+)$/gim;
+  const resolvedPattern = /^\[resolved\]\s+(.+)$/gim;
 
-    let match;
-    while ((match = addPattern.exec(text)) !== null) {
-        const content = match[1].trim();
-        if (content.length > 5) toAdd.push({ content, ts: Date.now() });
-    }
+  let match;
+  while ((match = addPattern.exec(text)) !== null) {
+    const content = match[1].trim();
+    if (content.length > 5) toAdd.push({ content, ts: Date.now() });
+  }
 
-    while ((match = resolvedPattern.exec(text)) !== null) {
-        const resolvedText = match[1].trim().toLowerCase();
-        // Match against existing arcs by word overlap - 2+ shared words is enough
-        // to identify which arc is being referred to even if phrasing differs.
-        existingArcs.forEach((arc, idx) => {
-            const arcWords = arc.content.toLowerCase().split(/\s+/);
-            const resolvedWords = resolvedText.split(/\s+/);
-            const overlap = arcWords.filter(w => resolvedWords.includes(w)).length;
-            if (overlap >= 2) toResolve.push(idx);
-        });
-    }
+  while ((match = resolvedPattern.exec(text)) !== null) {
+    const resolvedText = match[1].trim().toLowerCase();
+    // Match against existing arcs by word overlap - 2+ shared words is enough
+    // to identify which arc is being referred to even if phrasing differs.
+    existingArcs.forEach((arc, idx) => {
+      const arcWords = arc.content.toLowerCase().split(/\s+/);
+      const resolvedWords = resolvedText.split(/\s+/);
+      const overlap = arcWords.filter((w) => resolvedWords.includes(w)).length;
+      if (overlap >= 2) toResolve.push(idx);
+    });
+  }
 
-    // Deduplicate resolved indices in case multiple [resolved] lines matched the same arc.
-    return { add: toAdd, resolve: [...new Set(toResolve)] };
+  // Deduplicate resolved indices in case multiple [resolved] lines matched the same arc.
+  return { add: toAdd, resolve: [...new Set(toResolve)] };
 }
 
 // ---- Extraction ---------------------------------------------------------
@@ -138,45 +144,45 @@ function parseArcOutput(text, existingArcs) {
  * @returns {Promise<number>} Count of new arcs added (0 on failure or nothing found).
  */
 export async function extractArcs(messages) {
-    const settings = extension_settings[MODULE_NAME];
-    if (!settings.arcs_enabled) return 0;
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.arcs_enabled) return 0;
 
-    try {
-        const chatHistory = messages
-            .filter(m => m.mes && !m.is_system)
-            .map(m => `${m.name}: ${m.mes}`)
-            .join('\n\n');
+  try {
+    const chatHistory = messages
+      .filter((m) => m.mes && !m.is_system)
+      .map((m) => `${m.name}: ${m.mes}`)
+      .join('\n\n');
 
-        if (!chatHistory.trim()) return 0;
+    if (!chatHistory.trim()) return 0;
 
-        const existing = loadArcs();
-        const existingText = existing.map(a => `[arc] ${a.content}`).join('\n');
+    const existing = loadArcs();
+    const existingText = existing.map((a) => `[arc] ${a.content}`).join('\n');
 
-        const response = await generateRaw({
-            prompt: buildArcExtractionPrompt(chatHistory, existingText),
-            systemPrompt: ARC_EXTRACTION_SYSTEM,
-            quietToLoud: false,
-            responseLength: settings.arcs_response_length ?? 400,
-        });
+    const response = await generateRaw({
+      prompt: buildArcExtractionPrompt(chatHistory, existingText),
+      systemPrompt: ARC_EXTRACTION_SYSTEM,
+      quietToLoud: false,
+      responseLength: settings.arcs_response_length ?? 400,
+    });
 
-        console.log('[SmartMemory] Arc extraction response:', response);
+    console.log('[SmartMemory] Arc extraction response:', response);
 
-        if (!response || response.trim().toUpperCase() === 'NONE') return 0;
+    if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-        const { add, resolve } = parseArcOutput(response, existing);
+    const { add, resolve } = parseArcOutput(response, existing);
 
-        // Filter out resolved arcs, then append new ones.
-        const afterResolve = existing.filter((_, i) => !resolve.includes(i));
-        const max = settings.arcs_max ?? 10;
-        // slice(-max) keeps the most recent arcs when over the limit.
-        const merged = [...afterResolve, ...add].slice(-max);
+    // Filter out resolved arcs, then append new ones.
+    const afterResolve = existing.filter((_, i) => !resolve.includes(i));
+    const max = settings.arcs_max ?? 10;
+    // slice(-max) keeps the most recent arcs when over the limit.
+    const merged = [...afterResolve, ...add].slice(-max);
 
-        await saveArcs(merged);
-        return add.length;
-    } catch (err) {
-        console.error('[SmartMemory] Arc extraction failed:', err);
-        return 0;
-    }
+    await saveArcs(merged);
+    return add.length;
+  } catch (err) {
+    console.error('[SmartMemory] Arc extraction failed:', err);
+    return 0;
+  }
 }
 
 // ---- Injection ----------------------------------------------------------
@@ -186,27 +192,27 @@ export async function extractArcs(messages) {
  * Clears the slot if arc tracking is disabled or no arcs exist.
  */
 export function injectArcs() {
-    const settings = extension_settings[MODULE_NAME];
-    if (!settings.arcs_enabled) {
-        setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.arcs_enabled) {
+    setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const arcs = loadArcs();
-    if (arcs.length === 0) {
-        setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  const arcs = loadArcs();
+  if (arcs.length === 0) {
+    setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const text = arcs.map(a => `- ${a.content}`).join('\n');
-    const content = `[Active story threads:\n${text}]`;
+  const text = arcs.map((a) => `- ${a.content}`).join('\n');
+  const content = `[Active story threads:\n${text}]`;
 
-    setExtensionPrompt(
-        PROMPT_KEY_ARCS,
-        content,
-        settings.arcs_position ?? extension_prompt_types.IN_PROMPT,
-        settings.arcs_depth ?? 1,
-        false,
-        settings.arcs_role ?? extension_prompt_roles.SYSTEM,
-    );
+  setExtensionPrompt(
+    PROMPT_KEY_ARCS,
+    content,
+    settings.arcs_position ?? extension_prompt_types.IN_PROMPT,
+    settings.arcs_depth ?? 1,
+    false,
+    settings.arcs_role ?? extension_prompt_roles.SYSTEM,
+  );
 }

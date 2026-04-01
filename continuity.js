@@ -1,7 +1,7 @@
 /**
  * Smart Memory - SillyTavern Extension
  * Copyright (C) 2026 Senjin the Dragon
- * https://github.com/senjinthedragon/smart-memory
+ * https://github.com/senjinthedragon/Smart-Memory
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -45,29 +45,29 @@ import { loadSessionMemories } from './session.js';
  * @returns {string} Multi-section fact block, or empty string if nothing is stored.
  */
 function gatherEstablishedFacts(characterName) {
-    const context = getContext();
-    const meta = context.chatMetadata?.[META_KEY];
-    const parts = [];
+  const context = getContext();
+  const meta = context.chatMetadata?.[META_KEY];
+  const parts = [];
 
-    if (meta?.summary) {
-        parts.push('-- STORY SUMMARY --\n' + meta.summary);
+  if (meta?.summary) {
+    parts.push('-- STORY SUMMARY --\n' + meta.summary);
+  }
+
+  if (characterName) {
+    const longterm = loadCharacterMemories(characterName);
+    if (longterm.length > 0) {
+      const text = longterm.map((m) => `[${m.type}] ${m.content}`).join('\n');
+      parts.push('-- LONG-TERM MEMORIES --\n' + text);
     }
+  }
 
-    if (characterName) {
-        const longterm = loadCharacterMemories(characterName);
-        if (longterm.length > 0) {
-            const text = longterm.map(m => `[${m.type}] ${m.content}`).join('\n');
-            parts.push('-- LONG-TERM MEMORIES --\n' + text);
-        }
-    }
+  const session = loadSessionMemories();
+  if (session.length > 0) {
+    const text = session.map((m) => `[${m.type}] ${m.content}`).join('\n');
+    parts.push('-- SESSION DETAILS --\n' + text);
+  }
 
-    const session = loadSessionMemories();
-    if (session.length > 0) {
-        const text = session.map(m => `[${m.type}] ${m.content}`).join('\n');
-        parts.push('-- SESSION DETAILS --\n' + text);
-    }
-
-    return parts.join('\n\n');
+  return parts.join('\n\n');
 }
 
 /**
@@ -78,12 +78,12 @@ function gatherEstablishedFacts(characterName) {
  * @returns {string[]}
  */
 function parseContradictions(text) {
-    if (!text || text.trim().toUpperCase() === 'NONE') return [];
+  if (!text || text.trim().toUpperCase() === 'NONE') return [];
 
-    return text
-        .split('\n')
-        .map(line => line.replace(/^[-•*\d.]+\s*/, '').trim())
-        .filter(line => line.length > 5);
+  return text
+    .split('\n')
+    .map((line) => line.replace(/^[-•*\d.]+\s*/, '').trim())
+    .filter((line) => line.length > 5);
 }
 
 /**
@@ -94,30 +94,33 @@ function parseContradictions(text) {
  * @returns {Promise<string[]>} Array of contradiction descriptions, or [] if clean or on error.
  */
 export async function checkContinuity(characterName) {
-    const settings = extension_settings[MODULE_NAME];
+  const settings = extension_settings[MODULE_NAME];
 
-    try {
-        const context = getContext();
-        const lastAiMessage = context.chat?.slice().reverse().find(m => !m.is_user && !m.is_system && m.mes);
+  try {
+    const context = getContext();
+    const lastAiMessage = context.chat
+      ?.slice()
+      .reverse()
+      .find((m) => !m.is_user && !m.is_system && m.mes);
 
-        if (!lastAiMessage) return [];
+    if (!lastAiMessage) return [];
 
-        const facts = gatherEstablishedFacts(characterName);
-        if (!facts.trim()) return [];
+    const facts = gatherEstablishedFacts(characterName);
+    if (!facts.trim()) return [];
 
-        const prompt = buildContinuityPrompt(facts, lastAiMessage.mes);
+    const prompt = buildContinuityPrompt(facts, lastAiMessage.mes);
 
-        const response = await generateRaw({
-            prompt,
-            quietToLoud: false,
-            responseLength: settings.continuity_response_length ?? 300,
-        });
+    const response = await generateRaw({
+      prompt,
+      quietToLoud: false,
+      responseLength: settings.continuity_response_length ?? 300,
+    });
 
-        console.log('[SmartMemory] Continuity check response:', response);
+    console.log('[SmartMemory] Continuity check response:', response);
 
-        return parseContradictions(response);
-    } catch (err) {
-        console.error('[SmartMemory] Continuity check failed:', err);
-        return [];
-    }
+    return parseContradictions(response);
+  } catch (err) {
+    console.error('[SmartMemory] Continuity check failed:', err);
+    return [];
+  }
 }

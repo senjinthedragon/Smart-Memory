@@ -1,7 +1,7 @@
 /**
  * Smart Memory - SillyTavern Extension
  * Copyright (C) 2026 Senjin the Dragon
- * https://github.com/senjinthedragon/smart-memory
+ * https://github.com/senjinthedragon/Smart-Memory
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -31,7 +31,12 @@
  * clearRecap      - removes the recap injection (called after first AI response)
  */
 
-import { generateQuietPrompt, setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
+import {
+  generateQuietPrompt,
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_RECAP } from './constants.js';
 import { RECAP_PROMPT } from './prompts.js';
@@ -42,10 +47,10 @@ import { RECAP_PROMPT } from './prompts.js';
  * Uses the debounced save to avoid hammering storage on every message.
  */
 export function updateLastActive() {
-    const context = getContext();
-    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-    context.chatMetadata[META_KEY].lastActive = Date.now();
-    context.saveMetadataDebounced?.();
+  const context = getContext();
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].lastActive = Date.now();
+  context.saveMetadataDebounced?.();
 }
 
 /**
@@ -54,13 +59,13 @@ export function updateLastActive() {
  * @returns {number} Hours since last active, or 0 if below threshold.
  */
 export function getAwayHours() {
-    const context = getContext();
-    const meta = context.chatMetadata?.[META_KEY];
-    if (!meta?.lastActive) return 0;
+  const context = getContext();
+  const meta = context.chatMetadata?.[META_KEY];
+  if (!meta?.lastActive) return 0;
 
-    const gapHours = (Date.now() - meta.lastActive) / (1000 * 60 * 60);
-    const threshold = extension_settings[MODULE_NAME].recap_threshold_hours ?? 4;
-    return gapHours >= threshold ? gapHours : 0;
+  const gapHours = (Date.now() - meta.lastActive) / (1000 * 60 * 60);
+  const threshold = extension_settings[MODULE_NAME].recap_threshold_hours ?? 4;
+  return gapHours >= threshold ? gapHours : 0;
 }
 
 /**
@@ -68,19 +73,19 @@ export function getAwayHours() {
  * @returns {Promise<string|null>} The recap text, or null on failure.
  */
 export async function generateRecap() {
-    const settings = extension_settings[MODULE_NAME];
-    try {
-        const response = await generateQuietPrompt({
-            quietPrompt: RECAP_PROMPT,
-            skipWIAN: true,
-            responseLength: settings.recap_response_length ?? 300,
-            removeReasoning: true,
-        });
-        return response?.trim() || null;
-    } catch (err) {
-        console.error('[SmartMemory] Recap generation failed:', err);
-        return null;
-    }
+  const settings = extension_settings[MODULE_NAME];
+  try {
+    const response = await generateQuietPrompt({
+      quietPrompt: RECAP_PROMPT,
+      skipWIAN: true,
+      responseLength: settings.recap_response_length ?? 300,
+      removeReasoning: true,
+    });
+    return response?.trim() || null;
+  } catch (err) {
+    console.error('[SmartMemory] Recap generation failed:', err);
+    return null;
+  }
 }
 
 /**
@@ -90,23 +95,24 @@ export async function generateRecap() {
  * @param {string|null} recap - The recap text to inject, or null to clear.
  */
 export function injectRecap(recap) {
-    if (!recap) {
-        setExtensionPrompt(PROMPT_KEY_RECAP, '', extension_prompt_types.NONE, 0);
-        return;
-    }
-    const hoursAway = Math.round(getAwayHours() * 10) / 10;
-    const header = hoursAway > 24
-        ? `[You've been away for ${Math.round(hoursAway / 24)} day(s). Previously in this story:]`
-        : `[Picking up where you left off:]`;
+  if (!recap) {
+    setExtensionPrompt(PROMPT_KEY_RECAP, '', extension_prompt_types.NONE, 0);
+    return;
+  }
+  const hoursAway = Math.round(getAwayHours() * 10) / 10;
+  const header =
+    hoursAway > 24
+      ? `[You've been away for ${Math.round(hoursAway / 24)} day(s). Previously in this story:]`
+      : `[Picking up where you left off:]`;
 
-    setExtensionPrompt(
-        PROMPT_KEY_RECAP,
-        `${header}\n${recap}`,
-        extension_prompt_types.IN_PROMPT,
-        0,
-        false,
-        extension_prompt_roles.SYSTEM,
-    );
+  setExtensionPrompt(
+    PROMPT_KEY_RECAP,
+    `${header}\n${recap}`,
+    extension_prompt_types.IN_PROMPT,
+    0,
+    false,
+    extension_prompt_roles.SYSTEM,
+  );
 }
 
 /**
@@ -114,5 +120,5 @@ export function injectRecap(recap) {
  * so the recap doesn't persist into subsequent turns.
  */
 export function clearRecap() {
-    setExtensionPrompt(PROMPT_KEY_RECAP, '', extension_prompt_types.NONE, 0);
+  setExtensionPrompt(PROMPT_KEY_RECAP, '', extension_prompt_types.NONE, 0);
 }

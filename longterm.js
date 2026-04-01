@@ -1,7 +1,7 @@
 /**
  * Smart Memory - SillyTavern Extension
  * Copyright (C) 2026 Senjin the Dragon
- * https://github.com/senjinthedragon/smart-memory
+ * https://github.com/senjinthedragon/Smart-Memory
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -34,9 +34,19 @@
  * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
  */
 
-import { generateRaw, setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
+import {
+  generateRaw,
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, PROMPT_KEY_LONG, MEMORY_TYPES, META_KEY } from './constants.js';
+import {
+  MODULE_NAME,
+  PROMPT_KEY_LONG,
+  MEMORY_TYPES,
+  META_KEY,
+} from './constants.js';
 import { EXTRACTION_SYSTEM_PROMPT, buildExtractionPrompt } from './prompts.js';
 
 // ---- Storage helpers ----------------------------------------------------
@@ -47,9 +57,9 @@ import { EXTRACTION_SYSTEM_PROMPT, buildExtractionPrompt } from './prompts.js';
  * @returns {Array<{type: string, content: string, ts: number}>}
  */
 export function loadCharacterMemories(characterName) {
-    if (!characterName) return [];
-    const chars = extension_settings[MODULE_NAME].characters;
-    return chars?.[characterName]?.memories ?? [];
+  if (!characterName) return [];
+  const chars = extension_settings[MODULE_NAME].characters;
+  return chars?.[characterName]?.memories ?? [];
 }
 
 /**
@@ -59,14 +69,14 @@ export function loadCharacterMemories(characterName) {
  * @param {Array<{type: string, content: string, ts: number}>} memories
  */
 export function saveCharacterMemories(characterName, memories) {
-    if (!characterName) return;
-    if (!extension_settings[MODULE_NAME].characters) {
-        extension_settings[MODULE_NAME].characters = {};
-    }
-    extension_settings[MODULE_NAME].characters[characterName] = {
-        memories,
-        lastUpdated: Date.now(),
-    };
+  if (!characterName) return;
+  if (!extension_settings[MODULE_NAME].characters) {
+    extension_settings[MODULE_NAME].characters = {};
+  }
+  extension_settings[MODULE_NAME].characters[characterName] = {
+    memories,
+    lastUpdated: Date.now(),
+  };
 }
 
 /**
@@ -75,10 +85,10 @@ export function saveCharacterMemories(characterName, memories) {
  * @param {string} characterName
  */
 export function clearCharacterMemories(characterName) {
-    if (!characterName) return;
-    if (extension_settings[MODULE_NAME].characters?.[characterName]) {
-        delete extension_settings[MODULE_NAME].characters[characterName];
-    }
+  if (!characterName) return;
+  if (extension_settings[MODULE_NAME].characters?.[characterName]) {
+    delete extension_settings[MODULE_NAME].characters[characterName];
+  }
 }
 
 // ---- Formatting ---------------------------------------------------------
@@ -90,8 +100,8 @@ export function clearCharacterMemories(characterName) {
  * @returns {string}
  */
 export function formatMemoriesForPrompt(memories) {
-    if (!memories || memories.length === 0) return '';
-    return memories.map(m => `[${m.type}] ${m.content}`).join('\n');
+  if (!memories || memories.length === 0) return '';
+  return memories.map((m) => `[${m.type}] ${m.content}`).join('\n');
 }
 
 // ---- Extraction ---------------------------------------------------------
@@ -103,22 +113,22 @@ export function formatMemoriesForPrompt(memories) {
  * @returns {Array<{type: string, content: string, ts: number}>}
  */
 function parseExtractionOutput(text) {
-    if (!text || text.trim().toUpperCase() === 'NONE') return [];
+  if (!text || text.trim().toUpperCase() === 'NONE') return [];
 
-    const results = [];
-    // Matches lines like: [fact] The character is tall.
-    const linePattern = /^\[(fact|relationship|preference|event)\]\s+(.+)$/gim;
-    let match;
+  const results = [];
+  // Matches lines like: [fact] The character is tall.
+  const linePattern = /^\[(fact|relationship|preference|event)\]\s+(.+)$/gim;
+  let match;
 
-    while ((match = linePattern.exec(text)) !== null) {
-        const type = match[1].toLowerCase();
-        const content = match[2].trim();
-        if (MEMORY_TYPES.includes(type) && content.length > 5) {
-            results.push({ type, content, ts: Date.now() });
-        }
+  while ((match = linePattern.exec(text)) !== null) {
+    const type = match[1].toLowerCase();
+    const content = match[2].trim();
+    if (MEMORY_TYPES.includes(type) && content.length > 5) {
+      results.push({ type, content, ts: Date.now() });
     }
+  }
 
-    return results;
+  return results;
 }
 
 /**
@@ -140,28 +150,28 @@ function parseExtractionOutput(text) {
  * @returns {Array} The merged memory array.
  */
 function mergeMemories(existing, incoming, maxTotal) {
-    const merged = [...existing];
+  const merged = [...existing];
 
-    for (const mem of incoming) {
-        const newWords = new Set(mem.content.toLowerCase().split(/\s+/));
-        const isDuplicate = merged.some(ex => {
-            const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
-            const intersection = [...newWords].filter(w => exWords.has(w)).length;
-            const union = new Set([...newWords, ...exWords]).size;
-            return intersection / union > 0.7;
-        });
+  for (const mem of incoming) {
+    const newWords = new Set(mem.content.toLowerCase().split(/\s+/));
+    const isDuplicate = merged.some((ex) => {
+      const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
+      const intersection = [...newWords].filter((w) => exWords.has(w)).length;
+      const union = new Set([...newWords, ...exWords]).size;
+      return intersection / union > 0.7;
+    });
 
-        if (!isDuplicate) {
-            merged.push(mem);
-        }
+    if (!isDuplicate) {
+      merged.push(mem);
     }
+  }
 
-    // Drop oldest entries first when over the limit.
-    if (merged.length > maxTotal) {
-        merged.splice(0, merged.length - maxTotal);
-    }
+  // Drop oldest entries first when over the limit.
+  if (merged.length > maxTotal) {
+    merged.splice(0, merged.length - maxTotal);
+  }
 
-    return merged;
+  return merged;
 }
 
 /**
@@ -172,47 +182,54 @@ function mergeMemories(existing, incoming, maxTotal) {
  * @returns {Promise<number>} Count of new memories added (0 on failure or nothing found).
  */
 export async function extractAndStoreMemories(characterName, recentMessages) {
-    const settings = extension_settings[MODULE_NAME];
-    if (!settings.longterm_enabled || !characterName) return 0;
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.longterm_enabled || !characterName) return 0;
 
-    try {
-        const chatHistory = recentMessages
-            .filter(m => m.mes && !m.is_system)
-            .map(m => `${m.name}: ${m.mes}`)
-            .join('\n\n');
+  try {
+    const chatHistory = recentMessages
+      .filter((m) => m.mes && !m.is_system)
+      .map((m) => `${m.name}: ${m.mes}`)
+      .join('\n\n');
 
-        if (!chatHistory.trim()) return 0;
+    if (!chatHistory.trim()) return 0;
 
-        const existingMemories = loadCharacterMemories(characterName);
-        const existingText = formatMemoriesForPrompt(existingMemories);
+    const existingMemories = loadCharacterMemories(characterName);
+    const existingText = formatMemoriesForPrompt(existingMemories);
 
-        const response = await generateRaw({
-            prompt: buildExtractionPrompt(chatHistory, existingText),
-            systemPrompt: EXTRACTION_SYSTEM_PROMPT,
-            quietToLoud: false,
-            responseLength: settings.longterm_response_length || 600,
-        });
+    const response = await generateRaw({
+      prompt: buildExtractionPrompt(chatHistory, existingText),
+      systemPrompt: EXTRACTION_SYSTEM_PROMPT,
+      quietToLoud: false,
+      responseLength: settings.longterm_response_length || 600,
+    });
 
-        console.log(`[SmartMemory] Raw extraction response for "${characterName}":`, response);
+    console.log(
+      `[SmartMemory] Raw extraction response for "${characterName}":`,
+      response,
+    );
 
-        if (!response || response.trim().toUpperCase() === 'NONE') return 0;
+    if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-        const newMemories = parseExtractionOutput(response);
-        if (newMemories.length === 0) {
-            console.log('[SmartMemory] No parseable memories in response. Check format above.');
-            return 0;
-        }
-
-        const maxMemories = settings.longterm_max_memories || 25;
-        const merged = mergeMemories(existingMemories, newMemories, maxMemories);
-        saveCharacterMemories(characterName, merged);
-
-        console.log(`[SmartMemory] Saved ${newMemories.length} new memories for "${characterName}". Total: ${merged.length}`);
-        return newMemories.length;
-    } catch (err) {
-        console.error('[SmartMemory] Memory extraction failed:', err);
-        return 0;
+    const newMemories = parseExtractionOutput(response);
+    if (newMemories.length === 0) {
+      console.log(
+        '[SmartMemory] No parseable memories in response. Check format above.',
+      );
+      return 0;
     }
+
+    const maxMemories = settings.longterm_max_memories || 25;
+    const merged = mergeMemories(existingMemories, newMemories, maxMemories);
+    saveCharacterMemories(characterName, merged);
+
+    console.log(
+      `[SmartMemory] Saved ${newMemories.length} new memories for "${characterName}". Total: ${merged.length}`,
+    );
+    return newMemories.length;
+  } catch (err) {
+    console.error('[SmartMemory] Memory extraction failed:', err);
+    return 0;
+  }
 }
 
 // ---- Injection ----------------------------------------------------------
@@ -225,31 +242,33 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
  * @param {boolean} [freshStart=false] - If true, suppress injection for this chat.
  */
 export function injectMemories(characterName, freshStart = false) {
-    const settings = extension_settings[MODULE_NAME];
+  const settings = extension_settings[MODULE_NAME];
 
-    if (!settings.longterm_enabled || freshStart || !characterName) {
-        setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  if (!settings.longterm_enabled || freshStart || !characterName) {
+    setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const memories = loadCharacterMemories(characterName);
-    if (memories.length === 0) {
-        setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  const memories = loadCharacterMemories(characterName);
+  if (memories.length === 0) {
+    setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const memoryText = formatMemoriesForPrompt(memories);
-    const template = settings.longterm_template || '[Memories from previous conversations:\n{{memories}}]';
-    const content = template.replace('{{memories}}', memoryText);
+  const memoryText = formatMemoriesForPrompt(memories);
+  const template =
+    settings.longterm_template ||
+    '[Memories from previous conversations:\n{{memories}}]';
+  const content = template.replace('{{memories}}', memoryText);
 
-    setExtensionPrompt(
-        PROMPT_KEY_LONG,
-        content,
-        settings.longterm_position ?? extension_prompt_types.IN_PROMPT,
-        settings.longterm_depth ?? 2,
-        false,
-        settings.longterm_role ?? extension_prompt_roles.SYSTEM,
-    );
+  setExtensionPrompt(
+    PROMPT_KEY_LONG,
+    content,
+    settings.longterm_position ?? extension_prompt_types.IN_PROMPT,
+    settings.longterm_depth ?? 2,
+    false,
+    settings.longterm_role ?? extension_prompt_roles.SYSTEM,
+  );
 }
 
 // ---- Fresh-start helpers ------------------------------------------------
@@ -260,8 +279,8 @@ export function injectMemories(characterName, freshStart = false) {
  * @returns {boolean}
  */
 export function isFreshStart() {
-    const context = getContext();
-    return context.chatMetadata?.[META_KEY]?.freshStart === true;
+  const context = getContext();
+  return context.chatMetadata?.[META_KEY]?.freshStart === true;
 }
 
 /**
@@ -269,8 +288,8 @@ export function isFreshStart() {
  * @param {boolean} value
  */
 export async function setFreshStart(value) {
-    const context = getContext();
-    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-    context.chatMetadata[META_KEY].freshStart = value;
-    await context.saveMetadata();
+  const context = getContext();
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].freshStart = value;
+  await context.saveMetadata();
 }

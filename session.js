@@ -1,7 +1,7 @@
 /**
  * Smart Memory - SillyTavern Extension
  * Copyright (C) 2026 Senjin the Dragon
- * https://github.com/senjinthedragon/smart-memory
+ * https://github.com/senjinthedragon/Smart-Memory
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -33,10 +33,23 @@
  * injectSessionMemories  - pushes session memories into the prompt via setExtensionPrompt
  */
 
-import { generateRaw, setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
+import {
+  generateRaw,
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY, PROMPT_KEY_SESSION, SESSION_TYPES } from './constants.js';
-import { SESSION_EXTRACTION_SYSTEM, buildSessionExtractionPrompt } from './prompts.js';
+import {
+  MODULE_NAME,
+  META_KEY,
+  PROMPT_KEY_SESSION,
+  SESSION_TYPES,
+} from './constants.js';
+import {
+  SESSION_EXTRACTION_SYSTEM,
+  buildSessionExtractionPrompt,
+} from './prompts.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
@@ -45,8 +58,8 @@ import { SESSION_EXTRACTION_SYSTEM, buildSessionExtractionPrompt } from './promp
  * @returns {Array<{type: string, content: string, ts: number}>}
  */
 export function loadSessionMemories() {
-    const context = getContext();
-    return context.chatMetadata?.[META_KEY]?.sessionMemories ?? [];
+  const context = getContext();
+  return context.chatMetadata?.[META_KEY]?.sessionMemories ?? [];
 }
 
 /**
@@ -54,21 +67,21 @@ export function loadSessionMemories() {
  * @param {Array<{type: string, content: string, ts: number}>} memories
  */
 export async function saveSessionMemories(memories) {
-    const context = getContext();
-    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-    context.chatMetadata[META_KEY].sessionMemories = memories;
-    await context.saveMetadata();
+  const context = getContext();
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].sessionMemories = memories;
+  await context.saveMetadata();
 }
 
 /**
  * Empties session memories for the current chat.
  */
 export async function clearSessionMemories() {
-    const context = getContext();
-    if (context.chatMetadata?.[META_KEY]) {
-        context.chatMetadata[META_KEY].sessionMemories = [];
-        await context.saveMetadata();
-    }
+  const context = getContext();
+  if (context.chatMetadata?.[META_KEY]) {
+    context.chatMetadata[META_KEY].sessionMemories = [];
+    await context.saveMetadata();
+  }
 }
 
 // ---- Parsing ------------------------------------------------------------
@@ -80,19 +93,19 @@ export async function clearSessionMemories() {
  * @returns {Array<{type: string, content: string, ts: number}>}
  */
 function parseSessionOutput(text) {
-    if (!text || text.trim().toUpperCase() === 'NONE') return [];
-    const results = [];
-    // Matches lines like: [scene] Candlelit tavern, late evening.
-    const pattern = /^\[(scene|revelation|development|detail)\]\s+(.+)$/gim;
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-        const type = match[1].toLowerCase();
-        const content = match[2].trim();
-        if (SESSION_TYPES.includes(type) && content.length > 3) {
-            results.push({ type, content, ts: Date.now() });
-        }
+  if (!text || text.trim().toUpperCase() === 'NONE') return [];
+  const results = [];
+  // Matches lines like: [scene] Candlelit tavern, late evening.
+  const pattern = /^\[(scene|revelation|development|detail)\]\s+(.+)$/gim;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const type = match[1].toLowerCase();
+    const content = match[2].trim();
+    if (SESSION_TYPES.includes(type) && content.length > 3) {
+      results.push({ type, content, ts: Date.now() });
     }
-    return results;
+  }
+  return results;
 }
 
 /**
@@ -112,20 +125,20 @@ function parseSessionOutput(text) {
  * @returns {Array} The merged array.
  */
 function deduplicateSession(existing, incoming, max) {
-    const merged = [...existing];
-    for (const mem of incoming) {
-        const words = new Set(mem.content.toLowerCase().split(/\s+/));
-        const isDuplicate = merged.some(ex => {
-            const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
-            const intersection = [...words].filter(w => exWords.has(w)).length;
-            // Normalise against the larger set to avoid short strings
-            // matching too aggressively against long ones.
-            return intersection / Math.max(words.size, exWords.size) > 0.65;
-        });
-        if (!isDuplicate) merged.push(mem);
-    }
-    if (merged.length > max) merged.splice(0, merged.length - max);
-    return merged;
+  const merged = [...existing];
+  for (const mem of incoming) {
+    const words = new Set(mem.content.toLowerCase().split(/\s+/));
+    const isDuplicate = merged.some((ex) => {
+      const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
+      const intersection = [...words].filter((w) => exWords.has(w)).length;
+      // Normalise against the larger set to avoid short strings
+      // matching too aggressively against long ones.
+      return intersection / Math.max(words.size, exWords.size) > 0.65;
+    });
+    if (!isDuplicate) merged.push(mem);
+  }
+  if (merged.length > max) merged.splice(0, merged.length - max);
+  return merged;
 }
 
 // ---- Extraction ---------------------------------------------------------
@@ -137,43 +150,45 @@ function deduplicateSession(existing, incoming, max) {
  * @returns {Promise<number>} Count of new items added (0 on failure or nothing found).
  */
 export async function extractSessionMemories(recentMessages) {
-    const settings = extension_settings[MODULE_NAME];
-    if (!settings.session_enabled) return 0;
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.session_enabled) return 0;
 
-    try {
-        const chatHistory = recentMessages
-            .filter(m => m.mes && !m.is_system)
-            .map(m => `${m.name}: ${m.mes}`)
-            .join('\n\n');
+  try {
+    const chatHistory = recentMessages
+      .filter((m) => m.mes && !m.is_system)
+      .map((m) => `${m.name}: ${m.mes}`)
+      .join('\n\n');
 
-        if (!chatHistory.trim()) return 0;
+    if (!chatHistory.trim()) return 0;
 
-        const existing = loadSessionMemories();
-        const existingText = existing.map(m => `[${m.type}] ${m.content}`).join('\n');
+    const existing = loadSessionMemories();
+    const existingText = existing
+      .map((m) => `[${m.type}] ${m.content}`)
+      .join('\n');
 
-        const response = await generateRaw({
-            prompt: buildSessionExtractionPrompt(chatHistory, existingText),
-            systemPrompt: SESSION_EXTRACTION_SYSTEM,
-            quietToLoud: false,
-            responseLength: settings.session_response_length ?? 500,
-        });
+    const response = await generateRaw({
+      prompt: buildSessionExtractionPrompt(chatHistory, existingText),
+      systemPrompt: SESSION_EXTRACTION_SYSTEM,
+      quietToLoud: false,
+      responseLength: settings.session_response_length ?? 500,
+    });
 
-        console.log('[SmartMemory] Session extraction response:', response);
+    console.log('[SmartMemory] Session extraction response:', response);
 
-        if (!response || response.trim().toUpperCase() === 'NONE') return 0;
+    if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-        const incoming = parseSessionOutput(response);
-        if (incoming.length === 0) return 0;
+    const incoming = parseSessionOutput(response);
+    if (incoming.length === 0) return 0;
 
-        const max = settings.session_max_memories ?? 30;
-        const merged = deduplicateSession(existing, incoming, max);
-        await saveSessionMemories(merged);
+    const max = settings.session_max_memories ?? 30;
+    const merged = deduplicateSession(existing, incoming, max);
+    await saveSessionMemories(merged);
 
-        return incoming.length;
-    } catch (err) {
-        console.error('[SmartMemory] Session extraction failed:', err);
-        return 0;
-    }
+    return incoming.length;
+  } catch (err) {
+    console.error('[SmartMemory] Session extraction failed:', err);
+    return 0;
+  }
 }
 
 // ---- Injection ----------------------------------------------------------
@@ -184,8 +199,8 @@ export async function extractSessionMemories(recentMessages) {
  * @returns {string}
  */
 export function formatSessionMemories(memories) {
-    if (!memories || memories.length === 0) return '';
-    return memories.map(m => `[${m.type}] ${m.content}`).join('\n');
+  if (!memories || memories.length === 0) return '';
+  return memories.map((m) => `[${m.type}] ${m.content}`).join('\n');
 }
 
 /**
@@ -193,27 +208,31 @@ export function formatSessionMemories(memories) {
  * Clears the slot if session memory is disabled or no memories exist.
  */
 export function injectSessionMemories() {
-    const settings = extension_settings[MODULE_NAME];
-    if (!settings.session_enabled) {
-        setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.session_enabled) {
+    setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const memories = loadSessionMemories();
-    if (memories.length === 0) {
-        setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  const memories = loadSessionMemories();
+  if (memories.length === 0) {
+    setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
-    const content = template.replace('{{session}}', formatSessionMemories(memories));
+  const template =
+    settings.session_template ?? '[Details from this session:\n{{session}}]';
+  const content = template.replace(
+    '{{session}}',
+    formatSessionMemories(memories),
+  );
 
-    setExtensionPrompt(
-        PROMPT_KEY_SESSION,
-        content,
-        settings.session_position ?? extension_prompt_types.IN_PROMPT,
-        settings.session_depth ?? 1,
-        false,
-        settings.session_role ?? extension_prompt_roles.SYSTEM,
-    );
+  setExtensionPrompt(
+    PROMPT_KEY_SESSION,
+    content,
+    settings.session_position ?? extension_prompt_types.IN_PROMPT,
+    settings.session_depth ?? 1,
+    false,
+    settings.session_role ?? extension_prompt_roles.SYSTEM,
+  );
 }

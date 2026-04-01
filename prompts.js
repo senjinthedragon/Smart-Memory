@@ -1,7 +1,7 @@
 /**
  * Smart Memory - SillyTavern Extension
  * Copyright (C) 2026 Senjin the Dragon
- * https://github.com/senjinthedragon/smart-memory
+ * https://github.com/senjinthedragon/Smart-Memory
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -47,7 +47,9 @@ const NO_ACTION_PREAMBLE = `CRITICAL: Respond with plain TEXT ONLY. Do NOT conti
 
 // ---- Short-term: full compaction ----------------------------------------
 
-export const SUMMARY_PROMPT = NO_ACTION_PREAMBLE + `Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
+export const SUMMARY_PROMPT =
+  NO_ACTION_PREAMBLE +
+  `Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
 
 Before writing your summary, organize your thoughts in <analysis> tags, then write the summary in <summary> tags.
 
@@ -98,7 +100,9 @@ Your summary must cover ALL of the following sections:
 
 // ---- Short-term: progressive update -------------------------------------
 
-export const UPDATE_SUMMARY_PROMPT = NO_ACTION_PREAMBLE + `An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
+export const UPDATE_SUMMARY_PROMPT =
+  NO_ACTION_PREAMBLE +
+  `An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
 
 Do NOT rewrite existing content unless facts have changed. Only add or update what the new events require. Preserve the 9-section format.
 
@@ -116,7 +120,9 @@ Write the updated summary inside <summary> tags using the same 9-section format.
 
 // ---- Away recap ---------------------------------------------------------
 
-export const RECAP_PROMPT = NO_ACTION_PREAMBLE + `You are writing a brief "Previously on..." recap for someone returning to this story after being away. Based on the conversation so far, write a short engaging recap (3-5 sentences) in a warm narrative voice, past tense, as if summarizing a story episode. Focus on the most recent developments and where things were left off. Do not list facts - tell it briefly as a story.`;
+export const RECAP_PROMPT =
+  NO_ACTION_PREAMBLE +
+  `You are writing a brief "Previously on..." recap for someone returning to this story after being away. Based on the conversation so far, write a short engaging recap (3-5 sentences) in a warm narrative voice, past tense, as if summarizing a story episode. Focus on the most recent developments and where things were left off. Do not list facts - tell it briefly as a story.`;
 
 // ---- Session memory -----------------------------------------------------
 
@@ -129,11 +135,11 @@ export const SESSION_EXTRACTION_SYSTEM = `You are a session archivist. You extra
  * @returns {string} The complete prompt string.
  */
 export function buildSessionExtractionPrompt(chatHistory, existingSession) {
-    const existingSection = existingSession
-        ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\n`
-        : '';
+  const existingSection = existingSession
+    ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\n`
+    : '';
 
-    return `[SESSION MEMORY EXTRACTION - Do NOT roleplay. Output structured data only.]
+  return `[SESSION MEMORY EXTRACTION - Do NOT roleplay. Output structured data only.]
 
 ${existingSection}RECENT EXCHANGES:\n${chatHistory}
 
@@ -161,7 +167,9 @@ export const SCENE_DETECT_PROMPT = `Did the following story text contain a scene
 TEXT:
 {{text}}`;
 
-export const SCENE_SUMMARY_PROMPT = NO_ACTION_PREAMBLE + `Write a 2-3 sentence summary of the following scene for use as scene history. Write in past tense, narrative style. Capture what happened, where, and the emotional tone. Be concise.
+export const SCENE_SUMMARY_PROMPT =
+  NO_ACTION_PREAMBLE +
+  `Write a 2-3 sentence summary of the following scene for use as scene history. Write in past tense, narrative style. Capture what happened, where, and the emotional tone. Be concise.
 
 SCENE:
 {{scene_text}}`;
@@ -177,11 +185,11 @@ export const ARC_EXTRACTION_SYSTEM = `You are a story analyst. You extract open 
  * @returns {string} The complete prompt string.
  */
 export function buildArcExtractionPrompt(chatHistory, existingArcs) {
-    const existingSection = existingArcs
-        ? `EXISTING ARCS (only add NEW ones, or mark old ones as resolved):\n${existingArcs}\n\n`
-        : '';
+  const existingSection = existingArcs
+    ? `EXISTING ARCS (only add NEW ones, or mark old ones as resolved):\n${existingArcs}\n\n`
+    : '';
 
-    return `[STORY ARC EXTRACTION - Do NOT roleplay. Output structured data only.]
+  return `[STORY ARC EXTRACTION - Do NOT roleplay. Output structured data only.]
 
 ${existingSection}CONVERSATION:\n${chatHistory}
 
@@ -204,7 +212,7 @@ If no significant arcs exist or nothing new, output: NONE`;
  * @returns {string} The complete prompt string.
  */
 export function buildContinuityPrompt(establishedFacts, latestResponse) {
-    return `[CONTINUITY CHECK - Do NOT roleplay. Identify contradictions only.]
+  return `[CONTINUITY CHECK - Do NOT roleplay. Identify contradictions only.]
 
 ESTABLISHED FACTS (from memories and summary):
 ${establishedFacts}
@@ -227,11 +235,11 @@ export const EXTRACTION_SYSTEM_PROMPT = `You are a memory archivist. Your only j
  * @returns {string} The complete prompt string.
  */
 export function buildExtractionPrompt(chatHistory, existingMemories) {
-    const existingSection = existingMemories
-        ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\n`
-        : '';
+  const existingSection = existingMemories
+    ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\n`
+    : '';
 
-    return `[MEMORY EXTRACTION TASK - Do NOT continue the roleplay. Do NOT speak as a character. Output structured data only.]
+  return `[MEMORY EXTRACTION TASK - Do NOT continue the roleplay. Do NOT speak as a character. Output structured data only.]
 
 ${existingSection}RECENT CONVERSATION TO ANALYZE:\n${chatHistory}
 

@@ -1,7 +1,7 @@
 /**
  * Smart Memory - SillyTavern Extension
  * Copyright (C) 2026 Senjin the Dragon
- * https://github.com/senjinthedragon/smart-memory
+ * https://github.com/senjinthedragon/Smart-Memory
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -34,7 +34,13 @@
  * injectSceneHistory        - pushes scene history into the prompt via setExtensionPrompt
  */
 
-import { generateRaw, generateQuietPrompt, setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
+import {
+  generateRaw,
+  generateQuietPrompt,
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
 import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
@@ -45,13 +51,13 @@ import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
 // Grouped by category for easier tuning: time skips, location transitions,
 // and explicit separator markers authors use between scenes.
 const SCENE_BREAK_PATTERNS = [
-    // Time skips
-    /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|the following (day|morning|week)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
-    // Location transitions
-    /\b(arrived at|walked into|stepped into|entered the|found (himself|herself|themselves) in|made (his|her|their) way to|headed (to|toward|towards))\b/i,
-    // Explicit separator markers (---, ***, * * *)
-    /^[-*~]{3,}$/m,
-    /\*\s*\*\s*\*/,
+  // Time skips
+  /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|the following (day|morning|week)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
+  // Location transitions
+  /\b(arrived at|walked into|stepped into|entered the|found (himself|herself|themselves) in|made (his|her|their) way to|headed (to|toward|towards))\b/i,
+  // Explicit separator markers (---, ***, * * *)
+  /^[-*~]{3,}$/m,
+  /\*\s*\*\s*\*/,
 ];
 
 /**
@@ -61,7 +67,7 @@ const SCENE_BREAK_PATTERNS = [
  * @returns {boolean} True if a scene break pattern is detected.
  */
 export function detectSceneBreakHeuristic(messageText) {
-    return SCENE_BREAK_PATTERNS.some(pattern => pattern.test(messageText));
+  return SCENE_BREAK_PATTERNS.some((pattern) => pattern.test(messageText));
 }
 
 /**
@@ -72,17 +78,20 @@ export function detectSceneBreakHeuristic(messageText) {
  * @returns {Promise<boolean>}
  */
 export async function detectSceneBreakAI(messageText) {
-    try {
-        const prompt = SCENE_DETECT_PROMPT.replace('{{text}}', messageText.slice(0, 800));
-        const response = await generateRaw({
-            prompt,
-            quietToLoud: false,
-            responseLength: 5,
-        });
-        return response?.trim().toUpperCase().startsWith('YES') ?? false;
-    } catch {
-        return false;
-    }
+  try {
+    const prompt = SCENE_DETECT_PROMPT.replace(
+      '{{text}}',
+      messageText.slice(0, 800),
+    );
+    const response = await generateRaw({
+      prompt,
+      quietToLoud: false,
+      responseLength: 5,
+    });
+    return response?.trim().toUpperCase().startsWith('YES') ?? false;
+  } catch {
+    return false;
+  }
 }
 
 // ---- Storage ------------------------------------------------------------
@@ -92,8 +101,8 @@ export async function detectSceneBreakAI(messageText) {
  * @returns {Array<{summary: string, ts: number}>}
  */
 export function loadSceneHistory() {
-    const context = getContext();
-    return context.chatMetadata?.[META_KEY]?.sceneHistory ?? [];
+  const context = getContext();
+  return context.chatMetadata?.[META_KEY]?.sceneHistory ?? [];
 }
 
 /**
@@ -101,21 +110,21 @@ export function loadSceneHistory() {
  * @param {Array<{summary: string, ts: number}>} scenes
  */
 export async function saveSceneHistory(scenes) {
-    const context = getContext();
-    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-    context.chatMetadata[META_KEY].sceneHistory = scenes;
-    await context.saveMetadata();
+  const context = getContext();
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].sceneHistory = scenes;
+  await context.saveMetadata();
 }
 
 /**
  * Empties scene history for the current chat.
  */
 export async function clearSceneHistory() {
-    const context = getContext();
-    if (context.chatMetadata?.[META_KEY]) {
-        context.chatMetadata[META_KEY].sceneHistory = [];
-        await context.saveMetadata();
-    }
+  const context = getContext();
+  if (context.chatMetadata?.[META_KEY]) {
+    context.chatMetadata[META_KEY].sceneHistory = [];
+    await context.saveMetadata();
+  }
 }
 
 // ---- Scene summary ------------------------------------------------------
@@ -127,29 +136,32 @@ export async function clearSceneHistory() {
  * @returns {Promise<string|null>} The summary text, or null if generation failed.
  */
 export async function summarizeScene(sceneMessages) {
-    const settings = extension_settings[MODULE_NAME];
-    try {
-        const sceneText = sceneMessages
-            .filter(m => m.mes && !m.is_system)
-            .map(m => `${m.name}: ${m.mes}`)
-            .join('\n\n');
+  const settings = extension_settings[MODULE_NAME];
+  try {
+    const sceneText = sceneMessages
+      .filter((m) => m.mes && !m.is_system)
+      .map((m) => `${m.name}: ${m.mes}`)
+      .join('\n\n');
 
-        if (!sceneText.trim()) return null;
+    if (!sceneText.trim()) return null;
 
-        // Truncate to 2000 chars to keep the prompt cost reasonable on local hardware.
-        const prompt = SCENE_SUMMARY_PROMPT.replace('{{scene_text}}', sceneText.slice(0, 2000));
+    // Truncate to 2000 chars to keep the prompt cost reasonable on local hardware.
+    const prompt = SCENE_SUMMARY_PROMPT.replace(
+      '{{scene_text}}',
+      sceneText.slice(0, 2000),
+    );
 
-        const response = await generateRaw({
-            prompt,
-            quietToLoud: false,
-            responseLength: settings.scene_summary_length ?? 200,
-        });
+    const response = await generateRaw({
+      prompt,
+      quietToLoud: false,
+      responseLength: settings.scene_summary_length ?? 200,
+    });
 
-        return response?.trim() || null;
-    } catch (err) {
-        console.error('[SmartMemory] Scene summary failed:', err);
-        return null;
-    }
+    return response?.trim() || null;
+  } catch (err) {
+    console.error('[SmartMemory] Scene summary failed:', err);
+    return null;
+  }
 }
 
 // ---- Orchestration ------------------------------------------------------
@@ -166,28 +178,28 @@ export async function summarizeScene(sceneMessages) {
  * @returns {Promise<boolean>} True if a scene break was detected and processed.
  */
 export async function processSceneBreak(lastMessageText, recentMessages) {
-    const settings = extension_settings[MODULE_NAME];
-    if (!settings.scene_enabled) return false;
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.scene_enabled) return false;
 
-    const isBreak = settings.scene_ai_detect
-        ? await detectSceneBreakAI(lastMessageText)
-        : detectSceneBreakHeuristic(lastMessageText);
+  const isBreak = settings.scene_ai_detect
+    ? await detectSceneBreakAI(lastMessageText)
+    : detectSceneBreakHeuristic(lastMessageText);
 
-    if (!isBreak) return false;
+  if (!isBreak) return false;
 
-    console.log('[SmartMemory] Scene break detected.');
+  console.log('[SmartMemory] Scene break detected.');
 
-    const summary = await summarizeScene(recentMessages);
-    if (!summary) return false;
+  const summary = await summarizeScene(recentMessages);
+  if (!summary) return false;
 
-    const history = loadSceneHistory();
-    const max = settings.scene_max_history ?? 5;
+  const history = loadSceneHistory();
+  const max = settings.scene_max_history ?? 5;
 
-    history.push({ summary, ts: Date.now() });
-    if (history.length > max) history.splice(0, history.length - max);
+  history.push({ summary, ts: Date.now() });
+  if (history.length > max) history.splice(0, history.length - max);
 
-    await saveSceneHistory(history);
-    return true;
+  await saveSceneHistory(history);
+  return true;
 }
 
 // ---- Injection ----------------------------------------------------------
@@ -197,27 +209,27 @@ export async function processSceneBreak(lastMessageText, recentMessages) {
  * Clears the slot if scene detection is disabled or no history exists.
  */
 export function injectSceneHistory() {
-    const settings = extension_settings[MODULE_NAME];
-    if (!settings.scene_enabled) {
-        setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.scene_enabled) {
+    setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const history = loadSceneHistory();
-    if (history.length === 0) {
-        setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
-        return;
-    }
+  const history = loadSceneHistory();
+  if (history.length === 0) {
+    setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-    const text = history.map((s, i) => `Scene ${i + 1}: ${s.summary}`).join('\n');
-    const content = `[Previous scenes:\n${text}]`;
+  const text = history.map((s, i) => `Scene ${i + 1}: ${s.summary}`).join('\n');
+  const content = `[Previous scenes:\n${text}]`;
 
-    setExtensionPrompt(
-        PROMPT_KEY_SCENES,
-        content,
-        settings.scene_position ?? extension_prompt_types.IN_PROMPT,
-        settings.scene_depth ?? 3,
-        false,
-        settings.scene_role ?? extension_prompt_roles.SYSTEM,
-    );
+  setExtensionPrompt(
+    PROMPT_KEY_SCENES,
+    content,
+    settings.scene_position ?? extension_prompt_types.IN_PROMPT,
+    settings.scene_depth ?? 3,
+    false,
+    settings.scene_role ?? extension_prompt_roles.SYSTEM,
+  );
 }
