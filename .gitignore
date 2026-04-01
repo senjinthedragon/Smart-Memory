@@ -1,0 +1,46 @@
+# Claude Code developer notes — not for the repo
+CLAUDE.md
+
+# Node / package managers
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build / bundler output
+dist/
+build/
+out/
+*.min.js
+*.bundle.js
+
+# Editor and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+secrets.*
+
+# Logs
+*.log
+logs/
+
+# Test output / coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.tmp
+*.bak

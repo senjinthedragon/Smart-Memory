@@ -1,0 +1,153 @@
+/* ── Long-term memories list ─────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_memories_list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+#smart_memory_settings .sm_memory_item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 6px;
+    background: var(--greyCAl, rgba(255,255,255,0.05));
+    border-radius: 4px;
+    font-size: 0.875em;
+}
+
+#smart_memory_settings .sm_memory_type {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #fff;
+}
+
+#smart_memory_settings .sm_type_fact         { background: #4a6fa5; }
+#smart_memory_settings .sm_type_relationship { background: #8e5a8e; }
+#smart_memory_settings .sm_type_preference   { background: #5a8e5a; }
+#smart_memory_settings .sm_type_event        { background: #8e6e3a; }
+
+#smart_memory_settings .sm_memory_text {
+    flex: 1;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+#smart_memory_settings .sm_delete_memory,
+#smart_memory_settings .sm_delete_arc {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+}
+
+#smart_memory_settings .sm_delete_memory:hover,
+#smart_memory_settings .sm_delete_arc:hover {
+    opacity: 1;
+}
+
+/* ── Story arcs list ─────────────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_arcs_list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+#smart_memory_settings .sm_arc_item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--greyCAl, rgba(255,255,255,0.05));
+    border-left: 3px solid #7a6ea5;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.875em;
+}
+
+#smart_memory_settings .sm_arc_text {
+    flex: 1;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+/* ── Scene history list ──────────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_scenes_list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+#smart_memory_settings .sm_scene_item {
+    padding: 4px 8px;
+    background: var(--greyCAl, rgba(255,255,255,0.05));
+    border-left: 3px solid #5a8e7a;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.875em;
+    line-height: 1.4;
+}
+
+/* ── Continuity result ───────────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_continuity_result {
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 0.875em;
+    line-height: 1.5;
+}
+
+#smart_memory_settings .sm_continuity_clean {
+    background: rgba(60, 120, 60, 0.2);
+    border: 1px solid rgba(60, 180, 60, 0.4);
+    color: #8fcc8f;
+}
+
+#smart_memory_settings .sm_continuity_warn {
+    background: rgba(140, 60, 60, 0.2);
+    border: 1px solid rgba(200, 80, 80, 0.4);
+    color: #cc8f8f;
+}
+
+#smart_memory_settings .sm_continuity_result ul {
+    margin: 6px 0 0 0;
+    padding-left: 18px;
+}
+
+#smart_memory_settings .sm_continuity_result li {
+    margin-bottom: 3px;
+}
+
+/* ── Shared helpers ──────────────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_no_char {
+    color: var(--SmartReplyColor, #aaa);
+    font-style: italic;
+    font-size: 0.9em;
+    padding: 4px 0;
+}
+
+#smart_memory_settings .sm_section_desc {
+    color: var(--SmartReplyColor, #aaa);
+    font-size: 0.85em;
+    margin: 0 0 8px 0;
+    line-height: 1.4;
+}
+
+#smart_memory_settings hr {
+    margin: 8px 0;
+    border-color: var(--greyCAl, rgba(255,255,255,0.1));
+}
