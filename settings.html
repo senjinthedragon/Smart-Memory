@@ -1,337 +1,516 @@
 <div id="smart_memory_settings">
-    <div class="inline-drawer">
+  <div class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+      <div class="flex-container alignitemscenter margin0">
+        <b>Smart Memory</b>
+        <small
+          id="sm_status"
+          style="
+            margin-left: 8px;
+            color: var(--SmartReplyColor, #aaa);
+            font-weight: normal;
+          "
+        ></small>
+      </div>
+      <div
+        class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+      ></div>
+    </div>
+    <div class="inline-drawer-content">
+      <!-- Master toggle -->
+      <label class="checkbox_label">
+        <input id="sm_enabled" type="checkbox" />
+        <span>Enable Smart Memory</span>
+      </label>
+
+      <hr />
+
+      <!-- ══ SHORT-TERM ══ -->
+      <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <div class="flex-container alignitemscenter margin0">
-                <b>Smart Memory</b>
-                <small id="sm_status" style="margin-left:8px;color:var(--SmartReplyColor,#aaa);font-weight:normal;"></small>
-            </div>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+          <b>Short-term Memory (Context Summary)</b>
+          <div
+            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+          ></div>
         </div>
         <div class="inline-drawer-content">
+          <label class="checkbox_label">
+            <input id="sm_compaction_enabled" type="checkbox" />
+            <span>Enable auto-summarization</span>
+          </label>
 
-            <!-- Master toggle -->
-            <label class="checkbox_label">
-                <input id="sm_enabled" type="checkbox" />
-                <span>Enable Smart Memory</span>
+          <label
+            >Context threshold:
+            <b><span id="sm_compaction_threshold_value"></span></b>
+            <small style="color: var(--SmartReplyColor, #aaa)">
+              - summarize when context exceeds this %</small
+            >
+          </label>
+          <input
+            id="sm_compaction_threshold"
+            type="range"
+            min="50"
+            max="95"
+            step="5"
+            value="{{defaultSettings.compaction_threshold}}"
+          />
+
+          <label
+            >Summary response length:
+            <b><span id="sm_compaction_response_length_value"></span></b>
+            tokens</label
+          >
+          <input
+            id="sm_compaction_response_length"
+            type="range"
+            min="500"
+            max="3000"
+            step="100"
+            value="{{defaultSettings.compaction_response_length}}"
+          />
+
+          <label
+            >Injection template
+            <small style="color: var(--SmartReplyColor, #aaa)">
+              - <code>{{summary}}</code> is replaced with the summary</small
+            >
+          </label>
+          <textarea
+            id="sm_compaction_template"
+            class="text_pole textarea_compact"
+            rows="2"
+            placeholder="[Story so far:\n{{summary}}]"
+          ></textarea>
+
+          <label>Injection position</label>
+          <div class="radio_group">
+            <label>
+              <input type="radio" name="sm_compaction_position" value="2" />
+              <span>Before Main Prompt</span>
             </label>
+            <label>
+              <input type="radio" name="sm_compaction_position" value="0" />
+              <span>After Main Prompt</span>
+            </label>
+            <label class="flex-container alignItemsCenter">
+              <input type="radio" name="sm_compaction_position" value="1" />
+              <span>In-chat @ Depth</span>
+              <input
+                id="sm_compaction_depth"
+                class="text_pole widthUnset"
+                type="number"
+                min="0"
+                max="999"
+                style="width: 4em; margin: 0 4px"
+              />
+              <span>as</span>
+              <select id="sm_compaction_role" class="text_pole widthNatural">
+                <option value="0">System</option>
+                <option value="1">User</option>
+                <option value="2">Assistant</option>
+              </select>
+            </label>
+          </div>
 
-            <hr>
-
-            <!-- ══ SHORT-TERM ══ -->
-            <div class="inline-drawer">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Short-term Memory (Context Summary)</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <label class="checkbox_label">
-                        <input id="sm_compaction_enabled" type="checkbox" />
-                        <span>Enable auto-summarization</span>
-                    </label>
-
-                    <label>Context threshold: <b><span id="sm_compaction_threshold_value"></span></b>
-                        <small style="color:var(--SmartReplyColor,#aaa)"> — summarize when context exceeds this %</small>
-                    </label>
-                    <input id="sm_compaction_threshold" type="range" min="50" max="95" step="5"
-                           value="{{defaultSettings.compaction_threshold}}" />
-
-                    <label>Summary response length: <b><span id="sm_compaction_response_length_value"></span></b> tokens</label>
-                    <input id="sm_compaction_response_length" type="range" min="500" max="3000" step="100"
-                           value="{{defaultSettings.compaction_response_length}}" />
-
-                    <label>Injection template
-                        <small style="color:var(--SmartReplyColor,#aaa)"> — <code>{{summary}}</code> is replaced with the summary</small>
-                    </label>
-                    <textarea id="sm_compaction_template" class="text_pole textarea_compact" rows="2"
-                              placeholder="[Story so far:\n{{summary}}]"></textarea>
-
-                    <label>Injection position</label>
-                    <div class="radio_group">
-                        <label>
-                            <input type="radio" name="sm_compaction_position" value="2" />
-                            <span>Before Main Prompt</span>
-                        </label>
-                        <label>
-                            <input type="radio" name="sm_compaction_position" value="0" />
-                            <span>After Main Prompt</span>
-                        </label>
-                        <label class="flex-container alignItemsCenter">
-                            <input type="radio" name="sm_compaction_position" value="1" />
-                            <span>In-chat @ Depth</span>
-                            <input id="sm_compaction_depth" class="text_pole widthUnset" type="number" min="0" max="999" style="width:4em;margin:0 4px;" />
-                            <span>as</span>
-                            <select id="sm_compaction_role" class="text_pole widthNatural">
-                                <option value="0">System</option>
-                                <option value="1">User</option>
-                                <option value="2">Assistant</option>
-                            </select>
-                        </label>
-                    </div>
-
-                    <div style="margin-top:8px;">
-                        <label>Current summary <small style="color:var(--SmartReplyColor,#aaa)">(editable — changes apply immediately)</small></label>
-                        <textarea id="sm_current_summary" class="text_pole textarea_compact" rows="5"
-                                  placeholder="No summary yet. One will be generated automatically when the context threshold is reached."></textarea>
-                        <div style="margin-top:4px;">
-                            <button id="sm_summarize_now" class="menu_button menu_button_icon">
-                                <i class="fa-solid fa-brain"></i>
-                                <span>Summarize Now</span>
-                            </button>
-                        </div>
-                    </div>
-
-                </div>
+          <div style="margin-top: 8px">
+            <label
+              >Current summary
+              <small style="color: var(--SmartReplyColor, #aaa)"
+                >(editable - changes apply immediately)</small
+              ></label
+            >
+            <textarea
+              id="sm_current_summary"
+              class="text_pole textarea_compact"
+              rows="5"
+              placeholder="No summary yet. One will be generated automatically when the context threshold is reached."
+            ></textarea>
+            <div style="margin-top: 4px">
+              <button
+                id="sm_summarize_now"
+                class="menu_button menu_button_icon"
+              >
+                <i class="fa-solid fa-brain"></i>
+                <span>Summarize Now</span>
+              </button>
             </div>
-
-            <!-- ══ LONG-TERM ══ -->
-            <div class="inline-drawer" style="margin-top:8px;">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Long-term Memory (Persistent Facts)</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <label class="checkbox_label">
-                        <input id="sm_longterm_enabled" type="checkbox" />
-                        <span>Enable long-term memory</span>
-                    </label>
-
-                    <label class="checkbox_label">
-                        <input id="sm_longterm_carry_over" type="checkbox" />
-                        <span>Carry memories into new chats with the same character</span>
-                    </label>
-
-                    <label class="checkbox_label" title="When checked, long-term memories are NOT injected for this specific chat.">
-                        <input id="sm_fresh_start" type="checkbox" />
-                        <span>Fresh start — suppress memories for this chat</span>
-                    </label>
-
-                    <hr>
-
-                    <label>Extract after every <b><span id="sm_longterm_extract_every_value"></span></b> AI messages</label>
-                    <input id="sm_longterm_extract_every" type="range" min="1" max="10" step="1"
-                           value="{{defaultSettings.longterm_extract_every}}" />
-
-                    <label>Max stored memories per character: <b><span id="sm_longterm_max_memories_value"></span></b></label>
-                    <input id="sm_longterm_max_memories" type="range" min="5" max="50" step="5"
-                           value="{{defaultSettings.longterm_max_memories}}" />
-
-                    <label>Injection template
-                        <small style="color:var(--SmartReplyColor,#aaa)"> — <code>{{memories}}</code> is replaced with the memory list</small>
-                    </label>
-                    <textarea id="sm_longterm_template" class="text_pole textarea_compact" rows="2"
-                              placeholder="[Memories from previous conversations:\n{{memories}}]"></textarea>
-
-                    <label>Injection position</label>
-                    <div class="radio_group">
-                        <label>
-                            <input type="radio" name="sm_longterm_position" value="2" />
-                            <span>Before Main Prompt</span>
-                        </label>
-                        <label>
-                            <input type="radio" name="sm_longterm_position" value="0" />
-                            <span>After Main Prompt</span>
-                        </label>
-                        <label class="flex-container alignItemsCenter">
-                            <input type="radio" name="sm_longterm_position" value="1" />
-                            <span>In-chat @ Depth</span>
-                            <input id="sm_longterm_depth" class="text_pole widthUnset" type="number" min="0" max="999" style="width:4em;margin:0 4px;" />
-                            <span>as</span>
-                            <select id="sm_longterm_role" class="text_pole widthNatural">
-                                <option value="0">System</option>
-                                <option value="1">User</option>
-                                <option value="2">Assistant</option>
-                            </select>
-                        </label>
-                    </div>
-
-                    <hr>
-
-                    <label>Memories for current character</label>
-                    <div id="sm_memories_list" class="sm_memories_list"></div>
-
-                    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">
-                        <button id="sm_extract_now" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-magnifying-glass"></i>
-                            <span>Extract Now</span>
-                        </button>
-                        <button id="sm_clear_memories" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-trash-can"></i>
-                            <span>Clear Memories</span>
-                        </button>
-                    </div>
-
-                </div>
-            </div>
-
-            <!-- ══ SESSION MEMORY ══ -->
-            <div class="inline-drawer" style="margin-top:8px;">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Session Memory (Within-Chat Details)</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <p class="sm_section_desc">Captures specific scene details, revelations, and developments from this chat — more granular than long-term memories, doesn't persist to other sessions.</p>
-
-                    <label class="checkbox_label">
-                        <input id="sm_session_enabled" type="checkbox" />
-                        <span>Enable session memory</span>
-                    </label>
-
-                    <label>Extract after every <b><span id="sm_session_extract_every_value"></span></b> AI messages</label>
-                    <input id="sm_session_extract_every" type="range" min="1" max="10" step="1"
-                           value="{{defaultSettings.session_extract_every}}" />
-
-                    <label>Max session memories: <b><span id="sm_session_max_memories_value"></span></b></label>
-                    <input id="sm_session_max_memories" type="range" min="5" max="60" step="5"
-                           value="{{defaultSettings.session_max_memories}}" />
-
-                    <label>Injection template
-                        <small style="color:var(--SmartReplyColor,#aaa)"> — <code>{{session}}</code> is replaced</small>
-                    </label>
-                    <textarea id="sm_session_template" class="text_pole textarea_compact" rows="2"
-                              placeholder="[Details from this session:\n{{session}}]"></textarea>
-
-                    <div style="margin-top:6px;">
-                        <button id="sm_clear_session" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-trash-can"></i>
-                            <span>Clear Session Memories</span>
-                        </button>
-                    </div>
-
-                </div>
-            </div>
-
-            <!-- ══ SCENE DETECTION ══ -->
-            <div class="inline-drawer" style="margin-top:8px;">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Scene Detection &amp; History</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <p class="sm_section_desc">Detects scene breaks (time skips, location changes) and generates mini-summaries of completed scenes for orientation.</p>
-
-                    <label class="checkbox_label">
-                        <input id="sm_scene_enabled" type="checkbox" />
-                        <span>Enable scene detection</span>
-                    </label>
-
-                    <label class="checkbox_label" title="More accurate than heuristics but costs an extra model call per message.">
-                        <input id="sm_scene_ai_detect" type="checkbox" />
-                        <span>Use AI for scene break detection (slower, more accurate)</span>
-                    </label>
-
-                    <label>Keep last <b><span id="sm_scene_max_history_value"></span></b> scenes</label>
-                    <input id="sm_scene_max_history" type="range" min="1" max="15" step="1"
-                           value="{{defaultSettings.scene_max_history}}" />
-
-                    <label>Scene history</label>
-                    <div id="sm_scenes_list" class="sm_scenes_list">
-                        <div class="sm_no_char">No scenes recorded yet.</div>
-                    </div>
-
-                    <div style="margin-top:6px;">
-                        <button id="sm_clear_scenes" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-trash-can"></i>
-                            <span>Clear Scene History</span>
-                        </button>
-                    </div>
-
-                </div>
-            </div>
-
-            <!-- ══ STORY ARCS ══ -->
-            <div class="inline-drawer" style="margin-top:8px;">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Story Arcs (Open Threads)</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <p class="sm_section_desc">Tracks unresolved narrative threads: promises made, character goals, mysteries, and tensions. Injected into context so the AI stays oriented toward where the story is going.</p>
-
-                    <label class="checkbox_label">
-                        <input id="sm_arcs_enabled" type="checkbox" />
-                        <span>Enable story arc tracking</span>
-                    </label>
-
-                    <label>Max tracked arcs: <b><span id="sm_arcs_max_value"></span></b></label>
-                    <input id="sm_arcs_max" type="range" min="3" max="20" step="1"
-                           value="{{defaultSettings.arcs_max}}" />
-
-                    <label>Active story threads</label>
-                    <div id="sm_arcs_list" class="sm_arcs_list">
-                        <div class="sm_no_char">No open story threads.</div>
-                    </div>
-
-                    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">
-                        <button id="sm_extract_arcs_now" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-magnifying-glass"></i>
-                            <span>Extract Arcs Now</span>
-                        </button>
-                        <button id="sm_clear_arcs" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-trash-can"></i>
-                            <span>Clear Arcs</span>
-                        </button>
-                    </div>
-
-                </div>
-            </div>
-
-            <!-- ══ AWAY RECAP ══ -->
-            <div class="inline-drawer" style="margin-top:8px;">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Away Recap</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <p class="sm_section_desc">Generates a "Previously on…" summary when you return to a chat after being away. Injected once and cleared after the first AI response.</p>
-
-                    <label class="checkbox_label">
-                        <input id="sm_recap_enabled" type="checkbox" />
-                        <span>Enable away recap</span>
-                    </label>
-
-                    <label>Generate recap after being away for: <b><span id="sm_recap_threshold_value"></span></b></label>
-                    <input id="sm_recap_threshold" type="range" min="1" max="48" step="1"
-                           value="{{defaultSettings.recap_threshold_hours}}" />
-
-                    <div style="margin-top:6px;">
-                        <button id="sm_recap_now" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-clock-rotate-left"></i>
-                            <span>Generate Recap Now</span>
-                        </button>
-                    </div>
-
-                </div>
-            </div>
-
-            <!-- ══ CONTINUITY CHECKER ══ -->
-            <div class="inline-drawer" style="margin-top:8px;">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Continuity Checker</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <p class="sm_section_desc">Checks whether the last AI response contradicts any established facts in your summary or memories. Manual-only — click after a response that feels off.</p>
-
-                    <div style="margin-top:4px;">
-                        <button id="sm_check_continuity" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-scale-balanced"></i>
-                            <span>Check Last Response</span>
-                        </button>
-                    </div>
-
-                    <div id="sm_continuity_result" class="sm_continuity_result" style="display:none;margin-top:8px;"></div>
-
-                </div>
-            </div>
-
+          </div>
         </div>
+      </div>
+
+      <!-- ══ LONG-TERM ══ -->
+      <div class="inline-drawer" style="margin-top: 8px">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>Long-term Memory (Persistent Facts)</b>
+          <div
+            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+          ></div>
+        </div>
+        <div class="inline-drawer-content">
+          <label class="checkbox_label">
+            <input id="sm_longterm_enabled" type="checkbox" />
+            <span>Enable long-term memory</span>
+          </label>
+
+          <label class="checkbox_label">
+            <input id="sm_longterm_carry_over" type="checkbox" />
+            <span>Carry memories into new chats with the same character</span>
+          </label>
+
+          <label
+            class="checkbox_label"
+            title="When checked, long-term memories are NOT injected for this specific chat."
+          >
+            <input id="sm_fresh_start" type="checkbox" />
+            <span>Fresh start - suppress memories for this chat</span>
+          </label>
+
+          <hr />
+
+          <label
+            >Extract after every
+            <b><span id="sm_longterm_extract_every_value"></span></b> AI
+            messages</label
+          >
+          <input
+            id="sm_longterm_extract_every"
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            value="{{defaultSettings.longterm_extract_every}}"
+          />
+
+          <label
+            >Max stored memories per character:
+            <b><span id="sm_longterm_max_memories_value"></span></b
+          ></label>
+          <input
+            id="sm_longterm_max_memories"
+            type="range"
+            min="5"
+            max="50"
+            step="5"
+            value="{{defaultSettings.longterm_max_memories}}"
+          />
+
+          <label
+            >Injection template
+            <small style="color: var(--SmartReplyColor, #aaa)">
+              - <code>{{memories}}</code> is replaced with the memory
+              list</small
+            >
+          </label>
+          <textarea
+            id="sm_longterm_template"
+            class="text_pole textarea_compact"
+            rows="2"
+            placeholder="[Memories from previous conversations:\n{{memories}}]"
+          ></textarea>
+
+          <label>Injection position</label>
+          <div class="radio_group">
+            <label>
+              <input type="radio" name="sm_longterm_position" value="2" />
+              <span>Before Main Prompt</span>
+            </label>
+            <label>
+              <input type="radio" name="sm_longterm_position" value="0" />
+              <span>After Main Prompt</span>
+            </label>
+            <label class="flex-container alignItemsCenter">
+              <input type="radio" name="sm_longterm_position" value="1" />
+              <span>In-chat @ Depth</span>
+              <input
+                id="sm_longterm_depth"
+                class="text_pole widthUnset"
+                type="number"
+                min="0"
+                max="999"
+                style="width: 4em; margin: 0 4px"
+              />
+              <span>as</span>
+              <select id="sm_longterm_role" class="text_pole widthNatural">
+                <option value="0">System</option>
+                <option value="1">User</option>
+                <option value="2">Assistant</option>
+              </select>
+            </label>
+          </div>
+
+          <hr />
+
+          <label>Memories for current character</label>
+          <div id="sm_memories_list" class="sm_memories_list"></div>
+
+          <div
+            style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap"
+          >
+            <button id="sm_extract_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>Extract Now</span>
+            </button>
+            <button id="sm_clear_memories" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Memories</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ SESSION MEMORY ══ -->
+      <div class="inline-drawer" style="margin-top: 8px">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>Session Memory (Within-Chat Details)</b>
+          <div
+            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+          ></div>
+        </div>
+        <div class="inline-drawer-content">
+          <p class="sm_section_desc">
+            Captures specific scene details, revelations, and developments from
+            this chat - more granular than long-term memories, doesn't persist
+            to other sessions.
+          </p>
+
+          <label class="checkbox_label">
+            <input id="sm_session_enabled" type="checkbox" />
+            <span>Enable session memory</span>
+          </label>
+
+          <label
+            >Extract after every
+            <b><span id="sm_session_extract_every_value"></span></b> AI
+            messages</label
+          >
+          <input
+            id="sm_session_extract_every"
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            value="{{defaultSettings.session_extract_every}}"
+          />
+
+          <label
+            >Max session memories:
+            <b><span id="sm_session_max_memories_value"></span></b
+          ></label>
+          <input
+            id="sm_session_max_memories"
+            type="range"
+            min="5"
+            max="60"
+            step="5"
+            value="{{defaultSettings.session_max_memories}}"
+          />
+
+          <label
+            >Injection template
+            <small style="color: var(--SmartReplyColor, #aaa)">
+              - <code>{{session}}</code> is replaced</small
+            >
+          </label>
+          <textarea
+            id="sm_session_template"
+            class="text_pole textarea_compact"
+            rows="2"
+            placeholder="[Details from this session:\n{{session}}]"
+          ></textarea>
+
+          <div style="margin-top: 6px">
+            <button id="sm_clear_session" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Session Memories</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ SCENE DETECTION ══ -->
+      <div class="inline-drawer" style="margin-top: 8px">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>Scene Detection &amp; History</b>
+          <div
+            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+          ></div>
+        </div>
+        <div class="inline-drawer-content">
+          <p class="sm_section_desc">
+            Detects scene breaks (time skips, location changes) and generates
+            mini-summaries of completed scenes for orientation.
+          </p>
+
+          <label class="checkbox_label">
+            <input id="sm_scene_enabled" type="checkbox" />
+            <span>Enable scene detection</span>
+          </label>
+
+          <label
+            class="checkbox_label"
+            title="More accurate than heuristics but costs an extra model call per message."
+          >
+            <input id="sm_scene_ai_detect" type="checkbox" />
+            <span
+              >Use AI for scene break detection (slower, more accurate)</span
+            >
+          </label>
+
+          <label
+            >Keep last
+            <b><span id="sm_scene_max_history_value"></span></b> scenes</label
+          >
+          <input
+            id="sm_scene_max_history"
+            type="range"
+            min="1"
+            max="15"
+            step="1"
+            value="{{defaultSettings.scene_max_history}}"
+          />
+
+          <label>Scene history</label>
+          <div id="sm_scenes_list" class="sm_scenes_list">
+            <div class="sm_no_char">No scenes recorded yet.</div>
+          </div>
+
+          <div style="margin-top: 6px">
+            <button id="sm_clear_scenes" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Scene History</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ STORY ARCS ══ -->
+      <div class="inline-drawer" style="margin-top: 8px">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>Story Arcs (Open Threads)</b>
+          <div
+            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+          ></div>
+        </div>
+        <div class="inline-drawer-content">
+          <p class="sm_section_desc">
+            Tracks unresolved narrative threads: promises made, character goals,
+            mysteries, and tensions. Injected into context so the AI stays
+            oriented toward where the story is going.
+          </p>
+
+          <label class="checkbox_label">
+            <input id="sm_arcs_enabled" type="checkbox" />
+            <span>Enable story arc tracking</span>
+          </label>
+
+          <label
+            >Max tracked arcs: <b><span id="sm_arcs_max_value"></span></b
+          ></label>
+          <input
+            id="sm_arcs_max"
+            type="range"
+            min="3"
+            max="20"
+            step="1"
+            value="{{defaultSettings.arcs_max}}"
+          />
+
+          <label>Active story threads</label>
+          <div id="sm_arcs_list" class="sm_arcs_list">
+            <div class="sm_no_char">No open story threads.</div>
+          </div>
+
+          <div
+            style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap"
+          >
+            <button
+              id="sm_extract_arcs_now"
+              class="menu_button menu_button_icon"
+            >
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>Extract Arcs Now</span>
+            </button>
+            <button id="sm_clear_arcs" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Arcs</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ AWAY RECAP ══ -->
+      <div class="inline-drawer" style="margin-top: 8px">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>Away Recap</b>
+          <div
+            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+          ></div>
+        </div>
+        <div class="inline-drawer-content">
+          <p class="sm_section_desc">
+            Generates a "Previously on…" summary when you return to a chat after
+            being away. Injected once and cleared after the first AI response.
+          </p>
+
+          <label class="checkbox_label">
+            <input id="sm_recap_enabled" type="checkbox" />
+            <span>Enable away recap</span>
+          </label>
+
+          <label
+            >Generate recap after being away for:
+            <b><span id="sm_recap_threshold_value"></span></b
+          ></label>
+          <input
+            id="sm_recap_threshold"
+            type="range"
+            min="1"
+            max="48"
+            step="1"
+            value="{{defaultSettings.recap_threshold_hours}}"
+          />
+
+          <div style="margin-top: 6px">
+            <button id="sm_recap_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <span>Generate Recap Now</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ CONTINUITY CHECKER ══ -->
+      <div class="inline-drawer" style="margin-top: 8px">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>Continuity Checker</b>
+          <div
+            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
+          ></div>
+        </div>
+        <div class="inline-drawer-content">
+          <p class="sm_section_desc">
+            Checks whether the last AI response contradicts any established
+            facts in your summary or memories. Manual-only - click after a
+            response that feels off.
+          </p>
+
+          <div style="margin-top: 4px">
+            <button
+              id="sm_check_continuity"
+              class="menu_button menu_button_icon"
+            >
+              <i class="fa-solid fa-scale-balanced"></i>
+              <span>Check Last Response</span>
+            </button>
+          </div>
+
+          <div
+            id="sm_continuity_result"
+            class="sm_continuity_result"
+            style="display: none; margin-top: 8px"
+          ></div>
+        </div>
+      </div>
     </div>
+  </div>
 </div>
