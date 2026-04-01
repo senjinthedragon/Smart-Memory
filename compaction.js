@@ -1,9 +1,32 @@
 /**
+ * Smart Memory - SillyTavern Extension
+ * Copyright (C) 2026 Senjin the Dragon
+ * https://github.com/senjinthedragon/smart-memory
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
  * Short-term memory: token-threshold-triggered structured summarization.
  *
- * Progressive compaction: tracks the index of the last message included in
- * the existing summary. On subsequent compactions, only new messages are
- * fed to the model and the existing summary is extended rather than rewritten.
+ * Tracks summaryEnd in chatMetadata so subsequent compactions only process
+ * new messages rather than rewriting the whole history from scratch.
+ *
+ * shouldCompact        - returns true when the chat has crossed the compaction threshold
+ * runCompaction        - generates or extends the summary and persists it to chatMetadata
+ * injectSummary        - pushes the summary into the prompt via setExtensionPrompt
+ * loadAndInjectSummary - restores a stored summary on chat load
  */
 
 import { generateQuietPrompt, setExtensionPrompt, extension_prompt_types, extension_prompt_roles, getMaxContextSize } from '../../../../script.js';
@@ -13,9 +36,10 @@ import { MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
 import { SUMMARY_PROMPT, UPDATE_SUMMARY_PROMPT } from './prompts.js';
 
 /**
- * Counts tokens across the non-system chat messages.
- * @param {Array} chat
- * @returns {Promise<number>}
+ * Counts tokens across all non-system chat messages.
+ * Used to decide whether compaction is needed.
+ * @param {Array} chat - The full chat array from context.
+ * @returns {Promise<number>} Estimated token count.
  */
 async function getChatTokenCount(chat) {
     const text = chat
@@ -26,7 +50,8 @@ async function getChatTokenCount(chat) {
 }
 
 /**
- * Returns true if the current chat has crossed the compaction threshold.
+ * Returns true if the current chat has crossed the configured compaction threshold.
+ * Compares current token count against (maxContextSize - responseLength budget).
  * @returns {Promise<boolean>}
  */
 export async function shouldCompact() {
@@ -45,9 +70,11 @@ export async function shouldCompact() {
 }
 
 /**
- * Strips the <analysis> scratchpad and unwraps the <summary> block.
- * @param {string} raw
- * @returns {string}
+ * Strips the <analysis> scratchpad block and unwraps the <summary> block
+ * from the model's raw output. Falls back to the trimmed raw string if
+ * no <summary> tags are present.
+ * @param {string} raw - Raw model output.
+ * @returns {string} Cleaned summary text.
  */
 function formatSummary(raw) {
     let result = raw.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim();
@@ -61,11 +88,9 @@ function formatSummary(raw) {
 /**
  * Generates a structured summary of the current conversation and stores
  * it in chatMetadata. Uses progressive compaction when a prior summary exists:
- * only new messages since the last compaction are processed, and the existing
- * summary is extended rather than rewritten.
- *
- * Returns the formatted summary string, or null on failure.
- * @returns {Promise<string|null>}
+ * only messages after summaryEnd are processed, extending the existing summary
+ * rather than rewriting it from scratch.
+ * @returns {Promise<string|null>} The formatted summary, or null on failure.
  */
 export async function runCompaction() {
     const settings = extension_settings[MODULE_NAME];
@@ -74,12 +99,14 @@ export async function runCompaction() {
     try {
         const meta = context.chatMetadata?.[META_KEY];
         const existingSummary = meta?.summary;
-        const summaryEnd = meta?.summaryEnd ?? 0;  // index of last message included in existing summary
+        // summaryEnd is the chat array index of the last message already included
+        // in the existing summary. Messages after this index are "new" for the update.
+        const summaryEnd = meta?.summaryEnd ?? 0;
 
         let raw;
 
         if (existingSummary && summaryEnd > 0 && summaryEnd < context.chat.length) {
-            // Progressive: only new messages since last compaction
+            // Progressive path: feed only the new messages to the update prompt.
             const newMessages = context.chat.slice(summaryEnd);
             const newEvents = newMessages
                 .filter(m => m.mes && !m.is_system)
@@ -100,7 +127,7 @@ export async function runCompaction() {
                 removeReasoning: true,
             });
         } else {
-            // Full compaction (first time or fresh chat)
+            // Full compaction: first time or fresh chat with no existing summary.
             raw = await generateQuietPrompt({
                 quietPrompt: SUMMARY_PROMPT,
                 quietToLoud: false,
@@ -114,10 +141,11 @@ export async function runCompaction() {
 
         const summary = formatSummary(raw);
 
-        // Persist to chat metadata
         if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
         context.chatMetadata[META_KEY].summary = summary;
         context.chatMetadata[META_KEY].summaryUpdated = Date.now();
+        // Record how far into the chat this summary covers so the next compaction
+        // knows where "new" messages begin.
         context.chatMetadata[META_KEY].summaryEnd = context.chat.length;
         await context.saveMetadata();
 
@@ -129,8 +157,9 @@ export async function runCompaction() {
 }
 
 /**
- * Injects the stored summary into the prompt via setExtensionPrompt.
- * @param {string} summary
+ * Injects the summary string into the prompt via setExtensionPrompt.
+ * Clears the slot if summary is empty or null.
+ * @param {string} summary - The summary text to inject.
  */
 export function injectSummary(summary) {
     const settings = extension_settings[MODULE_NAME];
@@ -153,8 +182,9 @@ export function injectSummary(summary) {
 }
 
 /**
- * Loads and re-injects a previously stored summary from chatMetadata.
- * Called on CHAT_LOADED / CHAT_CHANGED.
+ * Loads a previously stored summary from chatMetadata and injects it.
+ * Called on CHAT_LOADED / CHAT_CHANGED to restore context after a switch.
+ * @returns {string|null} The restored summary, or null if none exists.
  */
 export function loadAndInjectSummary() {
     const context = getContext();

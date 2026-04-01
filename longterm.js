@@ -1,11 +1,37 @@
 /**
- * Long-term memory: per-character persistent facts across sessions.
+ * Smart Memory - SillyTavern Extension
+ * Copyright (C) 2026 Senjin the Dragon
+ * https://github.com/senjinthedragon/smart-memory
  *
- * After every N messages, a background call extracts memorable facts
- * from the recent exchange. Facts are stored per-character in
- * extension_settings and injected into context on chat load.
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
  *
- * Memory types: fact, relationship, preference, event
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * Long-term memory: per-character persistent facts stored in extension_settings.
+ *
+ * Memories survive across all sessions and are injected at the start of every
+ * new chat with the same character. A fresh-start flag in chatMetadata can
+ * suppress injection for a specific chat.
+ *
+ * loadCharacterMemories    - returns the stored memory array for a character
+ * saveCharacterMemories    - persists the memory array for a character
+ * clearCharacterMemories   - deletes all memories for a character
+ * formatMemoriesForPrompt  - formats the memory array as [type] content lines
+ * extractAndStoreMemories  - runs extraction against recent messages and merges results
+ * injectMemories           - pushes memories into the prompt via setExtensionPrompt
+ * isFreshStart             - returns whether the current chat has fresh-start enabled
+ * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
  */
 
 import { generateRaw, setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
@@ -13,10 +39,10 @@ import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, PROMPT_KEY_LONG, MEMORY_TYPES, META_KEY } from './constants.js';
 import { EXTRACTION_SYSTEM_PROMPT, buildExtractionPrompt } from './prompts.js';
 
-// ─── Storage helpers ──────────────────────────────────────────────────────────
+// ---- Storage helpers ----------------------------------------------------
 
 /**
- * Returns the memory array for a character, or empty array.
+ * Returns the memory array for a character, or an empty array if none exist.
  * @param {string} characterName
  * @returns {Array<{type: string, content: string, ts: number}>}
  */
@@ -27,9 +53,10 @@ export function loadCharacterMemories(characterName) {
 }
 
 /**
- * Persists the memory array for a character.
+ * Persists the memory array for a character into extension_settings.
+ * Caller must call saveSettingsDebounced() afterwards.
  * @param {string} characterName
- * @param {Array} memories
+ * @param {Array<{type: string, content: string, ts: number}>} memories
  */
 export function saveCharacterMemories(characterName, memories) {
     if (!characterName) return;
@@ -43,7 +70,8 @@ export function saveCharacterMemories(characterName, memories) {
 }
 
 /**
- * Removes all memories for a character.
+ * Removes all stored memories for a character.
+ * Caller must call saveSettingsDebounced() afterwards.
  * @param {string} characterName
  */
 export function clearCharacterMemories(characterName) {
@@ -53,11 +81,12 @@ export function clearCharacterMemories(characterName) {
     }
 }
 
-// ─── Formatting ───────────────────────────────────────────────────────────────
+// ---- Formatting ---------------------------------------------------------
 
 /**
- * Formats the stored memory array into a readable string for injection.
- * @param {Array} memories
+ * Formats the memory array into [type] content lines for prompt injection
+ * or for passing to the extraction prompt as existing context.
+ * @param {Array<{type: string, content: string}>} memories
  * @returns {string}
  */
 export function formatMemoriesForPrompt(memories) {
@@ -65,17 +94,19 @@ export function formatMemoriesForPrompt(memories) {
     return memories.map(m => `[${m.type}] ${m.content}`).join('\n');
 }
 
-// ─── Extraction ───────────────────────────────────────────────────────────────
+// ---- Extraction ---------------------------------------------------------
 
 /**
- * Parses "[type] content" lines from the model's extraction output.
- * @param {string} text
+ * Parses "[type] content" tagged lines from the model's extraction output.
+ * Lines that don't match the expected format or have unrecognised types are skipped.
+ * @param {string} text - Raw model response.
  * @returns {Array<{type: string, content: string, ts: number}>}
  */
 function parseExtractionOutput(text) {
     if (!text || text.trim().toUpperCase() === 'NONE') return [];
 
     const results = [];
+    // Matches lines like: [fact] The character is tall.
     const linePattern = /^\[(fact|relationship|preference|event)\]\s+(.+)$/gim;
     let match;
 
@@ -91,12 +122,22 @@ function parseExtractionOutput(text) {
 }
 
 /**
- * Deduplicates and limits new memories against existing ones.
- * Simple string-similarity check: skip if content is >70% word-overlap with an existing memory.
- * @param {Array} existing
- * @param {Array} incoming
- * @param {number} maxTotal
- * @returns {Array}
+ * Merges new memories into the existing set, skipping near-duplicates and
+ * trimming to the configured maximum.
+ *
+ * Duplicate detection uses word-overlap (Jaccard-like): if more than 70% of
+ * the words in the new memory also appear in an existing memory, it is
+ * considered a duplicate and dropped. This is intentionally conservative -
+ * false negatives (keeping a near-duplicate) are less harmful than false
+ * positives (discarding genuinely new information).
+ *
+ * When the merged total exceeds maxTotal, the oldest entries are dropped
+ * (splice from the front) to keep the most recent memories.
+ *
+ * @param {Array} existing - Currently stored memories.
+ * @param {Array} incoming - Newly extracted memories to merge in.
+ * @param {number} maxTotal - Hard cap on the total number of memories to keep.
+ * @returns {Array} The merged memory array.
  */
 function mergeMemories(existing, incoming, maxTotal) {
     const merged = [...existing];
@@ -115,7 +156,7 @@ function mergeMemories(existing, incoming, maxTotal) {
         }
     }
 
-    // Trim to max, keeping most recent
+    // Drop oldest entries first when over the limit.
     if (merged.length > maxTotal) {
         merged.splice(0, merged.length - maxTotal);
     }
@@ -124,11 +165,11 @@ function mergeMemories(existing, incoming, maxTotal) {
 }
 
 /**
- * Extracts memorable facts from recent chat messages and merges them
- * into the character's stored memories. Fire-and-forget safe.
+ * Extracts memorable facts from recent chat messages via the model and merges
+ * them into the character's stored memories. Safe to fire-and-forget.
  * @param {string} characterName
- * @param {Array} recentMessages  - last N message objects
- * @returns {Promise<void>}
+ * @param {Array} recentMessages - Last N message objects from context.chat.
+ * @returns {Promise<number>} Count of new memories added (0 on failure or nothing found).
  */
 export async function extractAndStoreMemories(characterName, recentMessages) {
     const settings = extension_settings[MODULE_NAME];
@@ -174,13 +215,14 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     }
 }
 
-// ─── Injection ────────────────────────────────────────────────────────────────
+// ---- Injection ----------------------------------------------------------
 
 /**
  * Injects the character's stored memories into the prompt.
- * If freshStart is true or no memories exist, clears the injection.
+ * Clears the injection slot if fresh-start is active, no character is set,
+ * or the character has no memories yet.
  * @param {string} characterName
- * @param {boolean} freshStart
+ * @param {boolean} [freshStart=false] - If true, suppress injection for this chat.
  */
 export function injectMemories(characterName, freshStart = false) {
     const settings = extension_settings[MODULE_NAME];
@@ -210,10 +252,11 @@ export function injectMemories(characterName, freshStart = false) {
     );
 }
 
-// ─── Fresh-start helpers ──────────────────────────────────────────────────────
+// ---- Fresh-start helpers ------------------------------------------------
 
 /**
  * Returns whether the current chat has fresh-start enabled.
+ * When true, long-term memories are not injected for this chat.
  * @returns {boolean}
  */
 export function isFreshStart() {
@@ -222,7 +265,7 @@ export function isFreshStart() {
 }
 
 /**
- * Toggles the fresh-start flag for the current chat and saves metadata.
+ * Toggles the fresh-start flag for the current chat and saves chatMetadata.
  * @param {boolean} value
  */
 export async function setFreshStart(value) {

@@ -1,183 +1,223 @@
 /**
- * Scene break detection and scene history.
+ * Smart Memory - SillyTavern Extension
+ * Copyright (C) 2026 Senjin the Dragon
+ * https://github.com/senjinthedragon/smart-memory
  *
- * Detects when a scene ends (via heuristics or AI check) and generates
- * a mini-summary of the completed scene. Scene history is stored in
- * chatMetadata and injected as compact past-scene context.
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {
-  generateRaw,
-  generateQuietPrompt,
-  setExtensionPrompt,
-  extension_prompt_types,
-  extension_prompt_roles,
-} from '../../../../script.js';
+/**
+ * Scene break detection and scene history management.
+ *
+ * Detects when a scene ends - via regex heuristics (default) or an AI yes/no
+ * call (optional, off by default) - then generates a mini-summary of the
+ * completed scene and appends it to the per-chat scene history in chatMetadata.
+ *
+ * detectSceneBreakHeuristic - pattern-based scene break check (cheap, no model call)
+ * detectSceneBreakAI        - model-based scene break check (accurate, costs a call)
+ * loadSceneHistory          - returns the stored scene history array
+ * saveSceneHistory          - persists the scene history array to chatMetadata
+ * clearSceneHistory         - empties scene history for the current chat
+ * summarizeScene            - generates a 2-3 sentence mini-summary of a scene
+ * processSceneBreak         - orchestrates detection + summarization + storage
+ * injectSceneHistory        - pushes scene history into the prompt via setExtensionPrompt
+ */
+
+import { generateRaw, generateQuietPrompt, setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
 import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
 
-// ─── Heuristics ───────────────────────────────────────────────────────────────
+// ---- Heuristics ---------------------------------------------------------
 
+// Patterns that reliably signal a scene transition in roleplay prose.
+// Grouped by category for easier tuning: time skips, location transitions,
+// and explicit separator markers authors use between scenes.
 const SCENE_BREAK_PATTERNS = [
-  // Time skips
-  /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|the following (day|morning|week)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
-  // Location transitions
-  /\b(arrived at|walked into|stepped into|entered the|found (himself|herself|themselves) in|made (his|her|their) way to|headed (to|toward|towards))\b/i,
-  // Explicit scene markers
-  /^[-*~]{3,}$/m,
-  /\*\s*\*\s*\*/,
+    // Time skips
+    /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|the following (day|morning|week)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
+    // Location transitions
+    /\b(arrived at|walked into|stepped into|entered the|found (himself|herself|themselves) in|made (his|her|their) way to|headed (to|toward|towards))\b/i,
+    // Explicit separator markers (---, ***, * * *)
+    /^[-*~]{3,}$/m,
+    /\*\s*\*\s*\*/,
 ];
 
 /**
- * Cheap heuristic: check if the last AI message contains scene-break signals.
- * @param {string} messageText
- * @returns {boolean}
+ * Checks the message text against known scene-break patterns.
+ * Fast and free - no model call required.
+ * @param {string} messageText - The last AI message to inspect.
+ * @returns {boolean} True if a scene break pattern is detected.
  */
 export function detectSceneBreakHeuristic(messageText) {
-  return SCENE_BREAK_PATTERNS.some((pattern) => pattern.test(messageText));
+    return SCENE_BREAK_PATTERNS.some(pattern => pattern.test(messageText));
 }
 
 /**
- * AI-based scene break detection. More accurate but costs a model call.
- * @param {string} messageText
+ * Asks the model whether the message contains a scene break.
+ * More accurate than the heuristic but costs one model call per message.
+ * Only used when scene_ai_detect is enabled in settings.
+ * @param {string} messageText - The last AI message to inspect.
  * @returns {Promise<boolean>}
  */
 export async function detectSceneBreakAI(messageText) {
-  try {
-    const prompt = SCENE_DETECT_PROMPT.replace(
-      '{{text}}',
-      messageText.slice(0, 800),
-    );
-    const response = await generateRaw({
-      prompt,
-      quietToLoud: false,
-      responseLength: 5,
-    });
-    return response?.trim().toUpperCase().startsWith('YES') ?? false;
-  } catch {
-    return false;
-  }
+    try {
+        const prompt = SCENE_DETECT_PROMPT.replace('{{text}}', messageText.slice(0, 800));
+        const response = await generateRaw({
+            prompt,
+            quietToLoud: false,
+            responseLength: 5,
+        });
+        return response?.trim().toUpperCase().startsWith('YES') ?? false;
+    } catch {
+        return false;
+    }
 }
 
-// ─── Scene storage ────────────────────────────────────────────────────────────
-
-export function loadSceneHistory() {
-  const context = getContext();
-  return context.chatMetadata?.[META_KEY]?.sceneHistory ?? [];
-}
-
-export async function saveSceneHistory(scenes) {
-  const context = getContext();
-  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-  context.chatMetadata[META_KEY].sceneHistory = scenes;
-  await context.saveMetadata();
-}
-
-export async function clearSceneHistory() {
-  const context = getContext();
-  if (context.chatMetadata?.[META_KEY]) {
-    context.chatMetadata[META_KEY].sceneHistory = [];
-    await context.saveMetadata();
-  }
-}
-
-// ─── Scene summary ────────────────────────────────────────────────────────────
+// ---- Storage ------------------------------------------------------------
 
 /**
- * Generates a mini-summary of recently completed scene messages.
- * @param {Array} sceneMessages - messages from the completed scene
- * @returns {Promise<string|null>}
+ * Returns the scene history array for the current chat.
+ * @returns {Array<{summary: string, ts: number}>}
+ */
+export function loadSceneHistory() {
+    const context = getContext();
+    return context.chatMetadata?.[META_KEY]?.sceneHistory ?? [];
+}
+
+/**
+ * Persists the scene history array to chatMetadata.
+ * @param {Array<{summary: string, ts: number}>} scenes
+ */
+export async function saveSceneHistory(scenes) {
+    const context = getContext();
+    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+    context.chatMetadata[META_KEY].sceneHistory = scenes;
+    await context.saveMetadata();
+}
+
+/**
+ * Empties scene history for the current chat.
+ */
+export async function clearSceneHistory() {
+    const context = getContext();
+    if (context.chatMetadata?.[META_KEY]) {
+        context.chatMetadata[META_KEY].sceneHistory = [];
+        await context.saveMetadata();
+    }
+}
+
+// ---- Scene summary ------------------------------------------------------
+
+/**
+ * Generates a 2-3 sentence narrative mini-summary of the messages in a completed scene.
+ * The summary is stored in scene history and later injected as past-scene context.
+ * @param {Array} sceneMessages - Message objects from the completed scene.
+ * @returns {Promise<string|null>} The summary text, or null if generation failed.
  */
 export async function summarizeScene(sceneMessages) {
-  const settings = extension_settings[MODULE_NAME];
-  try {
-    const sceneText = sceneMessages
-      .filter((m) => m.mes && !m.is_system)
-      .map((m) => `${m.name}: ${m.mes}`)
-      .join('\n\n');
+    const settings = extension_settings[MODULE_NAME];
+    try {
+        const sceneText = sceneMessages
+            .filter(m => m.mes && !m.is_system)
+            .map(m => `${m.name}: ${m.mes}`)
+            .join('\n\n');
 
-    if (!sceneText.trim()) return null;
+        if (!sceneText.trim()) return null;
 
-    const prompt = SCENE_SUMMARY_PROMPT.replace(
-      '{{scene_text}}',
-      sceneText.slice(0, 2000),
-    );
+        // Truncate to 2000 chars to keep the prompt cost reasonable on local hardware.
+        const prompt = SCENE_SUMMARY_PROMPT.replace('{{scene_text}}', sceneText.slice(0, 2000));
 
-    const response = await generateRaw({
-      prompt,
-      quietToLoud: false,
-      responseLength: settings.scene_summary_length ?? 200,
-    });
+        const response = await generateRaw({
+            prompt,
+            quietToLoud: false,
+            responseLength: settings.scene_summary_length ?? 200,
+        });
 
-    return response?.trim() || null;
-  } catch (err) {
-    console.error('[SmartMemory] Scene summary failed:', err);
-    return null;
-  }
+        return response?.trim() || null;
+    } catch (err) {
+        console.error('[SmartMemory] Scene summary failed:', err);
+        return null;
+    }
 }
+
+// ---- Orchestration ------------------------------------------------------
 
 /**
- * Detects a scene break in the latest message and, if found, summarizes
+ * Checks the latest message for a scene break and, if found, summarizes
  * the completed scene and appends it to scene history.
  *
- * @param {string} lastMessageText
- * @param {Array} recentMessages - messages since the last scene break
- * @returns {Promise<boolean>} true if a scene break was detected and processed
+ * Uses AI detection if scene_ai_detect is enabled, otherwise heuristics.
+ * Respects scene_max_history - oldest scenes are dropped when the limit is exceeded.
+ *
+ * @param {string} lastMessageText - Text of the last AI message.
+ * @param {Array} recentMessages - Messages accumulated since the last scene break.
+ * @returns {Promise<boolean>} True if a scene break was detected and processed.
  */
 export async function processSceneBreak(lastMessageText, recentMessages) {
-  const settings = extension_settings[MODULE_NAME];
-  if (!settings.scene_enabled) return false;
+    const settings = extension_settings[MODULE_NAME];
+    if (!settings.scene_enabled) return false;
 
-  // Detection: use AI if configured, otherwise heuristic
-  let isBreak;
-  if (settings.scene_ai_detect) {
-    isBreak = await detectSceneBreakAI(lastMessageText);
-  } else {
-    isBreak = detectSceneBreakHeuristic(lastMessageText);
-  }
+    const isBreak = settings.scene_ai_detect
+        ? await detectSceneBreakAI(lastMessageText)
+        : detectSceneBreakHeuristic(lastMessageText);
 
-  if (!isBreak) return false;
+    if (!isBreak) return false;
 
-  console.log('[SmartMemory] Scene break detected.');
+    console.log('[SmartMemory] Scene break detected.');
 
-  const summary = await summarizeScene(recentMessages);
-  if (!summary) return false;
+    const summary = await summarizeScene(recentMessages);
+    if (!summary) return false;
 
-  const history = loadSceneHistory();
-  const max = settings.scene_max_history ?? 5;
+    const history = loadSceneHistory();
+    const max = settings.scene_max_history ?? 5;
 
-  history.push({ summary, ts: Date.now() });
-  if (history.length > max) history.splice(0, history.length - max);
+    history.push({ summary, ts: Date.now() });
+    if (history.length > max) history.splice(0, history.length - max);
 
-  await saveSceneHistory(history);
-  return true;
+    await saveSceneHistory(history);
+    return true;
 }
 
-// ─── Injection ────────────────────────────────────────────────────────────────
+// ---- Injection ----------------------------------------------------------
 
+/**
+ * Injects the scene history into the prompt via setExtensionPrompt.
+ * Clears the slot if scene detection is disabled or no history exists.
+ */
 export function injectSceneHistory() {
-  const settings = extension_settings[MODULE_NAME];
-  if (!settings.scene_enabled) {
-    setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
-    return;
-  }
+    const settings = extension_settings[MODULE_NAME];
+    if (!settings.scene_enabled) {
+        setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
+        return;
+    }
 
-  const history = loadSceneHistory();
-  if (history.length === 0) {
-    setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
-    return;
-  }
+    const history = loadSceneHistory();
+    if (history.length === 0) {
+        setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
+        return;
+    }
 
-  const text = history.map((s, i) => `Scene ${i + 1}: ${s.summary}`).join('\n');
-  const content = `[Previous scenes:\n${text}]`;
+    const text = history.map((s, i) => `Scene ${i + 1}: ${s.summary}`).join('\n');
+    const content = `[Previous scenes:\n${text}]`;
 
-  setExtensionPrompt(
-    PROMPT_KEY_SCENES,
-    content,
-    settings.scene_position ?? extension_prompt_types.IN_PROMPT,
-    settings.scene_depth ?? 3,
-    false,
-    settings.scene_role ?? extension_prompt_roles.SYSTEM,
-  );
+    setExtensionPrompt(
+        PROMPT_KEY_SCENES,
+        content,
+        settings.scene_position ?? extension_prompt_types.IN_PROMPT,
+        settings.scene_depth ?? 3,
+        false,
+        settings.scene_role ?? extension_prompt_roles.SYSTEM,
+    );
 }
