@@ -140,7 +140,9 @@ export function buildSessionExtractionPrompt(chatHistory, existingSession) {
     ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\n`
     : '';
 
-  return `[SESSION MEMORY EXTRACTION - Do NOT roleplay. Output structured data only.]
+  return (
+    NO_ACTION_PREAMBLE +
+    `[SESSION MEMORY EXTRACTION - Do NOT roleplay. Output structured data only.]
 
 ${existingSection}RECENT EXCHANGES:\n${chatHistory}
 
@@ -157,7 +159,8 @@ One item per line, exact format:
 [scene] We are in a candlelit tavern, late evening, rain outside.
 [detail] The character's horse is named Ember, a chestnut mare.
 
-If nothing new, output: NONE`;
+If nothing new, output: NONE`
+  );
 }
 
 // ---- Scene break detection ----------------------------------------------
@@ -190,7 +193,9 @@ export function buildArcExtractionPrompt(chatHistory, existingArcs) {
     ? `EXISTING ARCS (only add NEW ones, or mark old ones as resolved):\n${existingArcs}\n\n`
     : '';
 
-  return `[STORY ARC EXTRACTION - Do NOT roleplay. Output structured data only.]
+  return (
+    NO_ACTION_PREAMBLE +
+    `[STORY ARC EXTRACTION - Do NOT roleplay. Output structured data only.]
 
 ${existingSection}CONVERSATION:\n${chatHistory}
 
@@ -201,7 +206,8 @@ One arc per line:
 [arc] She promised to meet him at dawn but never explained why.
 [resolved] The missing letter was found - this arc is closed.
 
-If no significant arcs exist or nothing new, output: NONE`;
+If no significant arcs exist or nothing new, output: NONE`
+  );
 }
 
 // ---- Continuity check ---------------------------------------------------
@@ -238,7 +244,9 @@ Does the latest response contradict or conflict with any established fact? List 
  * @returns {string} The complete prompt string.
  */
 export function buildConsolidationPrompt(memoriesText) {
-  return `[MEMORY CONSOLIDATION TASK - Do NOT roleplay. Output structured data only.]
+  return (
+    NO_ACTION_PREAMBLE +
+    `[MEMORY CONSOLIDATION TASK - Do NOT roleplay. Output structured data only.]
 
 CURRENT MEMORY LIST:
 ${memoriesText}
@@ -257,7 +265,8 @@ Output the complete consolidated list, one entry per line, using the same format
 [fact] The consolidated memory here.
 [relationship] The consolidated relationship detail here.
 
-Output ONLY the memory lines. No explanations, no commentary.`;
+Output ONLY the memory lines. No explanations, no commentary.`
+  );
 }
 
 // ---- Long-term memory extraction ----------------------------------------
@@ -275,7 +284,9 @@ export function buildExtractionPrompt(chatHistory, existingMemories) {
     ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\n`
     : '';
 
-  return `[MEMORY EXTRACTION TASK - Do NOT continue the roleplay. Do NOT speak as a character. Output structured data only.]
+  return (
+    NO_ACTION_PREAMBLE +
+    `[MEMORY EXTRACTION TASK - Do NOT continue the roleplay. Do NOT speak as a character. Output structured data only.]
 
 ${existingSection}RECENT CONVERSATION TO ANALYZE:\n${chatHistory}
 
@@ -293,5 +304,6 @@ Output ONLY one memory per line using this exact format (nothing else):
 [relationship] We have developed a close friendship after helping each other escape the dungeon.
 [preference] The user enjoys slow-burn romance and witty banter.
 
-If there is nothing new worth preserving, output exactly: NONE`;
+If there is nothing new worth preserving, output exactly: NONE`
+  );
 }
