@@ -46,6 +46,9 @@ import {
 } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY } from './constants.js';
 import { memory_sources } from './generate.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 
 import {
   shouldCompact,
@@ -1046,6 +1049,86 @@ jQuery(async function () {
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
 
   onChatChanged();
+
+  // ---- Slash commands -----------------------------------------------------
+
+  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    name: 'sm-check',
+    callback: async () => {
+      const characterName = getCurrentCharacterName();
+      if (!characterName) return 'No character active.';
+      const contradictions = await checkContinuity(characterName);
+      if (contradictions.length === 0) return 'No contradictions found.';
+      return contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+    },
+    helpString: 'Checks the last AI response for contradictions against established facts and memories.',
+    returns: ARGUMENT_TYPE.STRING,
+  }));
+
+  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    name: 'sm-summarize',
+    callback: async () => {
+      if (compactionRunning) return 'Compaction already running.';
+      compactionRunning = true;
+      setStatusMessage('Generating summary...');
+      try {
+        const summary = await runCompaction();
+        if (summary) {
+          injectSummary(summary);
+          updateShortTermUI(summary);
+          setStatusMessage('Summary updated.');
+          return summary;
+        }
+        return 'Nothing to summarize yet.';
+      } finally {
+        compactionRunning = false;
+      }
+    },
+    helpString: 'Forces Smart Memory to generate or update the short-term context summary now.',
+    returns: ARGUMENT_TYPE.STRING,
+  }));
+
+  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    name: 'sm-extract',
+    callback: async () => {
+      if (extractionRunning) return 'Extraction already running.';
+      const characterName = getCurrentCharacterName();
+      if (!characterName) return 'No character active.';
+      extractionRunning = true;
+      setStatusMessage('Extracting memories...');
+      try {
+        const context = getContext();
+        await extractAndStoreMemories(characterName, context.chat);
+        await extractSessionMemories(context.chat);
+        await extractArcs(context.chat);
+        injectMemories(characterName, isFreshStart());
+        injectSessionMemories();
+        injectArcs();
+        updateLongTermUI(characterName);
+        updateArcsUI();
+        setStatusMessage('Extraction complete.');
+        return 'Memory extraction complete.';
+      } finally {
+        extractionRunning = false;
+      }
+    },
+    helpString: 'Forces Smart Memory to extract long-term memories, session details, and story arcs from the current chat now.',
+    returns: ARGUMENT_TYPE.STRING,
+  }));
+
+  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    name: 'sm-recap',
+    callback: async () => {
+      const recap = await generateRecap();
+      if (!recap) return 'Recap generation failed.';
+      injectRecap(recap);
+      recapActive = true;
+      setStatusMessage('Recap injected.');
+      return recap;
+    },
+    helpString: 'Generates a "Previously on..." recap of the current chat and injects it into context.',
+    returns: ARGUMENT_TYPE.STRING,
+  }));
 
   console.log('[SmartMemory] Loaded.');
 });
