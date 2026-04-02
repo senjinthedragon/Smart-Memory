@@ -19,9 +19,10 @@ export default [
         clearInterval: 'readonly',
         confirm: 'readonly',
         alert: 'readonly',
-        // jQuery - provided by SillyTavern host page
+        // jQuery and toastr - provided by SillyTavern host page
         $: 'readonly',
         jQuery: 'readonly',
+        toastr: 'readonly',
       },
     },
     rules: {

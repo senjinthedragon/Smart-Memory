@@ -312,6 +312,11 @@ async function onCharacterMessageRendered() {
               if (removed > 0) {
                 injectMemories(characterName, isFreshStart());
                 setStatusMessage(`Consolidated ${removed} redundant memories.`);
+                toastr.info(
+                  `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
+                  'Smart Memory',
+                  { timeOut: 3000, positionClass: 'toast-bottom-right' },
+                );
               }
             }
             updateLongTermUI(characterName);
@@ -403,6 +408,10 @@ async function onChatChanged() {
             injectRecap(recap);
             recapActive = true;
             updateTokenDisplay();
+            toastr.info('A recap of your last session has been added to context.', 'Smart Memory', {
+              timeOut: 5000,
+              positionClass: 'toast-bottom-right',
+            });
           }
           setStatusMessage('');
         })
