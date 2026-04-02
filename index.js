@@ -1340,7 +1340,9 @@ function bindSettingsUI() {
         const chunk = allMessages.slice(i, i + CATCH_UP_CHUNK_SIZE);
         const processed = Math.min(i + CATCH_UP_CHUNK_SIZE, total);
         const pct = Math.round((processed / total) * 100);
-        setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
+        setStatusMessage(
+          `Catching up... (${i}/${total} messages, ${Math.round((i / total) * 100)}%)`,
+        );
 
         if (settings.longterm_enabled && characterName) {
           await extractAndStoreMemories(characterName, chunk).catch((err) => {
@@ -1357,6 +1359,10 @@ function bindSettingsUI() {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
         }
+
+        // Update progress after the chunk completes so the percentage reflects
+        // work actually done, not work about to start.
+        setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
       }
 
       if (!catchUpCancelled) {
