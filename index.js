@@ -34,6 +34,7 @@
 import {
   eventSource,
   event_types,
+  extension_prompts,
   saveSettingsDebounced,
   extension_prompt_types,
   extension_prompt_roles,
@@ -44,7 +45,17 @@ import {
   extension_settings,
   renderExtensionTemplateAsync,
 } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY } from './constants.js';
+import {
+  estimateTokens,
+  MODULE_NAME,
+  META_KEY,
+  PROMPT_KEY_SHORT,
+  PROMPT_KEY_LONG,
+  PROMPT_KEY_SESSION,
+  PROMPT_KEY_SCENES,
+  PROMPT_KEY_ARCS,
+  PROMPT_KEY_RECAP,
+} from './constants.js';
 import { memory_sources } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -226,6 +237,7 @@ async function onCharacterMessageRendered() {
           if (summary) {
             injectSummary(summary);
             updateShortTermUI(summary);
+            updateTokenDisplay();
             setStatusMessage('Summary updated.');
           } else {
             setStatusMessage('');
@@ -246,6 +258,7 @@ async function onCharacterMessageRendered() {
         if (wasBreak) {
           injectSceneHistory();
           updateScenesUI();
+          updateTokenDisplay();
           sceneMessageBuffer = [];
           setStatusMessage('Scene break detected.');
         }
@@ -308,6 +321,7 @@ async function onCharacterMessageRendered() {
       Promise.all(jobs)
         .then((counts) => {
           const total = counts.reduce((a, b) => a + b, 0);
+          updateTokenDisplay();
           setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
         })
         .catch((err) => {
@@ -360,6 +374,7 @@ async function onChatChanged() {
   updateFreshStartUI(freshStart);
   updateScenesUI();
   updateArcsUI();
+  updateTokenDisplay();
 
   // Generate a recap if the user has been away long enough.
   if (settings.recap_enabled) {
@@ -371,6 +386,7 @@ async function onChatChanged() {
           if (recap) {
             injectRecap(recap);
             recapActive = true;
+            updateTokenDisplay();
           }
           setStatusMessage('');
         })
@@ -384,6 +400,79 @@ async function onChatChanged() {
 }
 
 // ---- UI helpers ---------------------------------------------------------
+
+/**
+ * Metadata for each injection tier used by the token usage display.
+ * Order determines the visual stacking order in the bar chart.
+ */
+const TOKEN_TIERS = [
+  { key: PROMPT_KEY_LONG, label: 'Long-term', color: '#4a6fa5' },
+  { key: PROMPT_KEY_SESSION, label: 'Session', color: '#8e5a8e' },
+  { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
+  { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#5a8e7a' },
+  { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
+  { key: PROMPT_KEY_RECAP, label: 'Recap', color: '#8e6e3a' },
+];
+
+/**
+ * Reads the currently injected content for each tier from extension_prompts
+ * and updates the token usage bar chart and breakdown legend.
+ *
+ * Called after any injection or chat change so the display stays current.
+ * Uses the estimateTokens heuristic (~4 chars/token) - fast, synchronous,
+ * accurate enough for budget tuning.
+ */
+function updateTokenDisplay() {
+  const bar = document.getElementById('sm_token_bar');
+  const legend = document.getElementById('sm_token_legend');
+  const usedEl = document.getElementById('sm_token_used');
+  const maxEl = document.getElementById('sm_token_max');
+  const pctEl = document.getElementById('sm_token_pct');
+
+  // Panel may not be rendered yet on first call.
+  if (!bar || !legend) return;
+
+  // Measure each tier from what is actually injected right now.
+  const tiers = TOKEN_TIERS.map((t) => ({
+    ...t,
+    tokens: estimateTokens(extension_prompts[t.key]?.value ?? ''),
+  })).filter((t) => t.tokens > 0);
+
+  const total = tiers.reduce((sum, t) => sum + t.tokens, 0);
+  const maxContext = getContext().maxContext || 0;
+
+  // Rebuild bar segments - each segment's width is its share of total SM tokens.
+  bar.innerHTML = '';
+  for (const tier of tiers) {
+    const widthPct = total > 0 ? ((tier.tokens / total) * 100).toFixed(1) : 0;
+    const seg = document.createElement('div');
+    seg.className = 'sm-token-segment';
+    seg.style.width = `${widthPct}%`;
+    seg.style.background = tier.color;
+    seg.title = `${tier.label}: ~${tier.tokens.toLocaleString()} tokens`;
+    bar.appendChild(seg);
+  }
+
+  // Rebuild legend rows.
+  legend.innerHTML = '';
+  for (const tier of tiers) {
+    const sharePct = total > 0 ? ((tier.tokens / total) * 100).toFixed(0) : 0;
+    const row = document.createElement('div');
+    row.className = 'sm-token-legend-row';
+    row.innerHTML =
+      `<span class="sm-token-dot" style="background:${tier.color}"></span>` +
+      `<span class="sm-token-tier-name">${tier.label}</span>` +
+      `<span class="sm-token-count">~${tier.tokens.toLocaleString()}</span>` +
+      `<span class="sm-token-pct-col">${sharePct}%</span>`;
+    legend.appendChild(row);
+  }
+
+  // Update totals line.
+  const contextPct = maxContext && total ? ((total / maxContext) * 100).toFixed(1) : '0';
+  if (usedEl) usedEl.textContent = `~${total.toLocaleString()}`;
+  if (maxEl) maxEl.textContent = maxContext ? maxContext.toLocaleString() : '?';
+  if (pctEl) pctEl.textContent = contextPct;
+}
 
 /** Updates the status bar text shown at the top of the settings panel. */
 function setStatusMessage(msg) {
@@ -1089,6 +1178,7 @@ jQuery(async function () {
 
   bindSettingsUI();
   initTooltips();
+  updateTokenDisplay();
 
   // makeLast ensures Smart Memory processes the message after all other
   // extensions have had their turn with it.

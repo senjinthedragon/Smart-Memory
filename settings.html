@@ -35,6 +35,25 @@
 
       <hr class="sysHR" />
 
+      <!-- ══ TOKEN USAGE ══ -->
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Token Usage
+          <span class="sm-info" data-tooltip="Estimated tokens currently injected by each Smart Memory tier. Updates after each generation. Uses ~4 chars/token - accurate enough for tuning budgets, not for exact counts.">ⓘ</span>
+        </summary>
+        <div class="sm-section-content">
+          <div class="sm-token-bar-wrap">
+            <div id="sm_token_bar" class="sm-token-bar"></div>
+          </div>
+          <div id="sm_token_legend" class="sm-token-legend"></div>
+          <div class="sm-token-total">
+            <span id="sm_token_used">~0</span> / <span id="sm_token_max">?</span> tokens
+            &mdash; <span id="sm_token_pct">0</span>% of context
+          </div>
+        </div>
+      </details>
+
       <!-- ══ LONG-TERM ══ -->
       <details class="sm-section">
         <summary>
