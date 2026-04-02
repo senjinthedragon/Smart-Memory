@@ -1,6 +1,7 @@
 # Claude Code session data and developer notes
 .claude/
 CLAUDE.md
+RELEASE_CHECKLIST.md
 
 # Dependencies
 node_modules/
