@@ -35,94 +35,6 @@
 
       <hr class="sysHR" />
 
-      <!-- ══ SHORT-TERM ══ -->
-      <details class="sm-section">
-        <summary>
-          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
-          Short-term Memory
-          <span class="sm-info" data-tooltip="Watches the context usage percentage and generates a rolling summary once it crosses a threshold. Older messages that fall off the context window are still covered by the summary. Uses progressive compaction - subsequent runs extend the existing summary rather than rewriting it from scratch.">ⓘ</span>
-        </summary>
-        <div class="sm-section-content">
-
-          <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_compaction_enabled" type="checkbox" />
-              <span>Enable auto-summarization</span>
-            </label>
-          </div>
-
-          <p class="sm-section-title">Extraction</p>
-          <div class="sm-block">
-            <label>
-              Context threshold:
-              <b><span id="sm_compaction_threshold_value"></span></b>
-              <span class="sm-info" data-tooltip="Smart Memory waits until context usage crosses this percentage before generating a summary. Lower values produce more frequent summaries; higher values let the context fill up more before compacting.">ⓘ</span>
-            </label>
-            <input id="sm_compaction_threshold" type="range" min="50" max="95" step="5"
-              value="{{defaultSettings.compaction_threshold}}" />
-          </div>
-          <div class="sm-block">
-            <label>
-              Response length: <b><span id="sm_compaction_response_length_value"></span></b> tokens
-            </label>
-            <input id="sm_compaction_response_length" type="range" min="500" max="3000" step="100"
-              value="{{defaultSettings.compaction_response_length}}" />
-          </div>
-
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
-            <label>
-              Template
-              <span class="sm-info" data-tooltip="Wraps the summary text before injecting it into the prompt. Use {{summary}} as the placeholder for the summary content.">ⓘ</span>
-            </label>
-            <textarea id="sm_compaction_template" class="text_pole textarea_compact" rows="2"
-              placeholder="[Story so far:\n{{summary}}]"></textarea>
-          </div>
-          <div class="sm-block">
-            <label>Injection position</label>
-            <div class="radio_group">
-              <label>
-                <input type="radio" name="sm_compaction_position" value="2" />
-                <span>Before Main Prompt</span>
-              </label>
-              <label>
-                <input type="radio" name="sm_compaction_position" value="0" />
-                <span>After Main Prompt</span>
-              </label>
-              <label class="flex-container alignItemsCenter">
-                <input type="radio" name="sm_compaction_position" value="1" />
-                <span>In-chat @ Depth</span>
-                <input id="sm_compaction_depth" class="text_pole widthUnset" type="number"
-                  min="0" max="999" style="width: 4em; margin: 0 4px" />
-                <span>as</span>
-                <select id="sm_compaction_role" class="text_pole widthNatural">
-                  <option value="0">System</option>
-                  <option value="1">User</option>
-                  <option value="2">Assistant</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <p class="sm-section-title">Current Summary</p>
-          <div class="sm-block">
-            <label>
-              Summary
-              <small style="color: var(--SmartReplyColor, #aaa)">(editable - changes apply immediately)</small>
-            </label>
-            <textarea id="sm_current_summary" class="text_pole textarea_compact" rows="5"
-              placeholder="No summary yet. One will be generated automatically when the context threshold is reached."></textarea>
-          </div>
-          <div class="sm-block">
-            <button id="sm_summarize_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-brain"></i>
-              <span>Summarize Now</span>
-            </button>
-          </div>
-
-        </div>
-      </details>
-
       <!-- ══ LONG-TERM ══ -->
       <details class="sm-section">
         <summary>
@@ -286,6 +198,94 @@
             <button id="sm_clear_session" class="menu_button menu_button_icon">
               <i class="fa-solid fa-trash-can"></i>
               <span>Clear Session Memories</span>
+            </button>
+          </div>
+
+        </div>
+      </details>
+
+      <!-- ══ SHORT-TERM ══ -->
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Short-term Memory
+          <span class="sm-info" data-tooltip="Watches the context usage percentage and generates a rolling summary once it crosses a threshold. Older messages that fall off the context window are still covered by the summary. Uses progressive compaction - subsequent runs extend the existing summary rather than rewriting it from scratch.">ⓘ</span>
+        </summary>
+        <div class="sm-section-content">
+
+          <div class="sm-block">
+            <label class="checkbox_label">
+              <input id="sm_compaction_enabled" type="checkbox" />
+              <span>Enable auto-summarization</span>
+            </label>
+          </div>
+
+          <p class="sm-section-title">Extraction</p>
+          <div class="sm-block">
+            <label>
+              Context threshold:
+              <b><span id="sm_compaction_threshold_value"></span></b>
+              <span class="sm-info" data-tooltip="Smart Memory waits until context usage crosses this percentage before generating a summary. Lower values produce more frequent summaries; higher values let the context fill up more before compacting.">ⓘ</span>
+            </label>
+            <input id="sm_compaction_threshold" type="range" min="50" max="95" step="5"
+              value="{{defaultSettings.compaction_threshold}}" />
+          </div>
+          <div class="sm-block">
+            <label>
+              Response length: <b><span id="sm_compaction_response_length_value"></span></b> tokens
+            </label>
+            <input id="sm_compaction_response_length" type="range" min="500" max="3000" step="100"
+              value="{{defaultSettings.compaction_response_length}}" />
+          </div>
+
+          <p class="sm-section-title">Injection</p>
+          <div class="sm-block">
+            <label>
+              Template
+              <span class="sm-info" data-tooltip="Wraps the summary text before injecting it into the prompt. Use {{summary}} as the placeholder for the summary content.">ⓘ</span>
+            </label>
+            <textarea id="sm_compaction_template" class="text_pole textarea_compact" rows="2"
+              placeholder="[Story so far:\n{{summary}}]"></textarea>
+          </div>
+          <div class="sm-block">
+            <label>Injection position</label>
+            <div class="radio_group">
+              <label>
+                <input type="radio" name="sm_compaction_position" value="2" />
+                <span>Before Main Prompt</span>
+              </label>
+              <label>
+                <input type="radio" name="sm_compaction_position" value="0" />
+                <span>After Main Prompt</span>
+              </label>
+              <label class="flex-container alignItemsCenter">
+                <input type="radio" name="sm_compaction_position" value="1" />
+                <span>In-chat @ Depth</span>
+                <input id="sm_compaction_depth" class="text_pole widthUnset" type="number"
+                  min="0" max="999" style="width: 4em; margin: 0 4px" />
+                <span>as</span>
+                <select id="sm_compaction_role" class="text_pole widthNatural">
+                  <option value="0">System</option>
+                  <option value="1">User</option>
+                  <option value="2">Assistant</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <p class="sm-section-title">Current Summary</p>
+          <div class="sm-block">
+            <label>
+              Summary
+              <small style="color: var(--SmartReplyColor, #aaa)">(editable - changes apply immediately)</small>
+            </label>
+            <textarea id="sm_current_summary" class="text_pole textarea_compact" rows="5"
+              placeholder="No summary yet. One will be generated automatically when the context threshold is reached."></textarea>
+          </div>
+          <div class="sm-block">
+            <button id="sm_summarize_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-brain"></i>
+              <span>Summarize Now</span>
             </button>
           </div>
 
