@@ -81,7 +81,7 @@ export async function generateRecap() {
     return response?.trim() || null;
   } catch (err) {
     console.error('[SmartMemory] Recap generation failed:', err);
-    return null;
+    throw err;
   }
 }
 

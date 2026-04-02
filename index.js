@@ -300,34 +300,47 @@ async function onCharacterMessageRendered() {
 
       if (settings.session_enabled) {
         jobs.push(
-          extractSessionMemories(recentMessages).then((count) => {
-            injectSessionMemories();
-            updateSessionUI();
-            return count;
-          }),
+          extractSessionMemories(recentMessages)
+            .then((count) => {
+              injectSessionMemories();
+              updateSessionUI();
+              return count;
+            })
+            .catch((err) => {
+              console.error('[SmartMemory] Background session extraction error:', err);
+              return 0;
+            }),
         );
       }
 
       if (settings.longterm_enabled && characterName) {
         jobs.push(
-          extractAndStoreMemories(characterName, recentMessages).then(async (count) => {
-            // Run consolidation after extraction if new memories were added.
-            if (count > 0 && settings.longterm_consolidate) {
-              const removed = await consolidateMemories(characterName);
-              if (removed > 0) {
-                injectMemories(characterName, isFreshStart());
-                setStatusMessage(`Consolidated ${removed} redundant memories.`);
-                toastr.info(
-                  `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
-                  'Smart Memory',
-                  { timeOut: 3000, positionClass: 'toast-bottom-right' },
-                );
+          extractAndStoreMemories(characterName, recentMessages)
+            .then(async (count) => {
+              // Run consolidation after extraction if new memories were added.
+              if (count > 0 && settings.longterm_consolidate) {
+                const removed = await consolidateMemories(characterName).catch((err) => {
+                  console.error('[SmartMemory] Background consolidation error:', err);
+                  return 0;
+                });
+                if (removed > 0) {
+                  injectMemories(characterName, isFreshStart());
+                  setStatusMessage(`Consolidated ${removed} redundant memories.`);
+                  toastr.info(
+                    `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
+                    'Smart Memory',
+                    { timeOut: 3000, positionClass: 'toast-bottom-right' },
+                  );
+                }
               }
-            }
-            updateLongTermUI(characterName);
-            saveSettingsDebounced();
-            return count;
-          }),
+              updateLongTermUI(characterName);
+              saveSettingsDebounced();
+              return count;
+            })
+            .catch((err) => {
+              console.error('[SmartMemory] Background long-term extraction error:', err);
+              return 0;
+            }),
         );
       }
 
@@ -335,11 +348,16 @@ async function onCharacterMessageRendered() {
         // Arc extraction uses the full chat rather than just recent messages
         // so it can resolve arcs that were opened many turns ago.
         jobs.push(
-          extractArcs(context.chat).then((count) => {
-            injectArcs();
-            updateArcsUI();
-            return count;
-          }),
+          extractArcs(context.chat)
+            .then((count) => {
+              injectArcs();
+              updateArcsUI();
+              return count;
+            })
+            .catch((err) => {
+              console.error('[SmartMemory] Background arc extraction error:', err);
+              return 0;
+            }),
         );
       }
 
@@ -420,7 +438,8 @@ async function onChatChanged() {
           }
           setStatusMessage('');
         })
-        .catch(() => {
+        .catch((err) => {
+          console.error('[SmartMemory] Auto-recap failed:', err);
           setStatusMessage('');
         });
     }
@@ -706,6 +725,20 @@ function loadSettings() {
 }
 
 /**
+ * Shows a toastr error notification for a failed Smart Memory operation.
+ * Used by all manual button handlers so failures are visible to the user.
+ * @param {string} operation - Short label for what failed (e.g. "Summary generation").
+ * @param {Error} err - The caught error.
+ */
+function showError(operation, err) {
+  console.error(`[SmartMemory] ${operation} failed:`, err);
+  toastr.error(`${operation} failed. Check the browser console for details.`, 'Smart Memory', {
+    timeOut: 6000,
+    positionClass: 'toast-bottom-right',
+  });
+}
+
+/**
  * Binds all settings panel controls to their corresponding settings values.
  * Each control reads from getSettings() on mount and writes back on change,
  * calling saveSettingsDebounced() to persist.
@@ -796,6 +829,9 @@ function bindSettingsUI() {
         updateShortTermUI(summary);
         setStatusMessage('Summary updated.');
       }
+    } catch (err) {
+      showError('Summary generation', err);
+      setStatusMessage('');
     } finally {
       $(this).prop('disabled', false);
       compactionRunning = false;
@@ -916,6 +952,9 @@ function bindSettingsUI() {
           ? `${count} new memor${count === 1 ? 'y' : 'ies'} saved.`
           : 'No new memories found.',
       );
+    } catch (err) {
+      showError('Memory extraction', err);
+      setStatusMessage('');
     } finally {
       $(this).prop('disabled', false);
       extractionRunning = false;
@@ -1013,6 +1052,9 @@ function bindSettingsUI() {
           ? `${count} session item${count === 1 ? '' : 's'} saved.`
           : 'No new session items found.',
       );
+    } catch (err) {
+      showError('Session extraction', err);
+      setStatusMessage('');
     } finally {
       $(this).prop('disabled', false);
     }
@@ -1106,6 +1148,9 @@ function bindSettingsUI() {
       } else {
         setStatusMessage('Scene summary failed.');
       }
+    } catch (err) {
+      showError('Scene extraction', err);
+      setStatusMessage('');
     } finally {
       $(this).prop('disabled', false);
     }
@@ -1179,6 +1224,9 @@ function bindSettingsUI() {
       setStatusMessage(
         count > 0 ? `${count} arc${count === 1 ? '' : 's'} found.` : 'No new arcs found.',
       );
+    } catch (err) {
+      showError('Arc extraction', err);
+      setStatusMessage('');
     } finally {
       $(this).prop('disabled', false);
     }
@@ -1242,6 +1290,9 @@ function bindSettingsUI() {
       } else {
         setStatusMessage('Recap failed.');
       }
+    } catch (err) {
+      showError('Recap generation', err);
+      setStatusMessage('');
     } finally {
       $(this).prop('disabled', false);
     }
@@ -1363,7 +1414,7 @@ function bindSettingsUI() {
         });
       }
     } catch (err) {
-      console.error('[SmartMemory] Catch-up failed:', err);
+      showError('Catch-up', err);
       setStatusMessage('Catch-up failed.');
     } finally {
       $('#sm_cancel_catch_up').hide();
@@ -1499,6 +1550,9 @@ function bindSettingsUI() {
           `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found.`,
         );
       }
+    } catch (err) {
+      showError('Continuity check', err);
+      setStatusMessage('');
     } finally {
       $(this).prop('disabled', false);
     }

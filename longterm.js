@@ -222,7 +222,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     return newMemories.length;
   } catch (err) {
     console.error('[SmartMemory] Memory extraction failed:', err);
-    return 0;
+    throw err;
   }
 }
 
@@ -285,7 +285,7 @@ export async function consolidateMemories(characterName) {
     return removed;
   } catch (err) {
     console.error('[SmartMemory] Memory consolidation failed:', err);
-    return 0;
+    throw err;
   }
 }
 

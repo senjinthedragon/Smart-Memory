@@ -181,7 +181,7 @@ export async function extractSessionMemories(recentMessages) {
     return incoming.length;
   } catch (err) {
     console.error('[SmartMemory] Session extraction failed:', err);
-    return 0;
+    throw err;
   }
 }
 

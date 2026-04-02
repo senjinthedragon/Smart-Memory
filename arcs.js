@@ -178,7 +178,7 @@ export async function extractArcs(messages) {
     return add.length;
   } catch (err) {
     console.error('[SmartMemory] Arc extraction failed:', err);
-    return 0;
+    throw err;
   }
 }
 

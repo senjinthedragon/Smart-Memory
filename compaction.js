@@ -151,7 +151,7 @@ export async function runCompaction() {
     return summary;
   } catch (err) {
     console.error('[SmartMemory] Compaction failed:', err);
-    return null;
+    throw err;
   }
 }
 

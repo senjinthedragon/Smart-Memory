@@ -119,6 +119,6 @@ export async function checkContinuity(characterName) {
     return parseContradictions(response);
   } catch (err) {
     console.error('[SmartMemory] Continuity check failed:', err);
-    return [];
+    throw err;
   }
 }

@@ -147,7 +147,7 @@ export async function summarizeScene(sceneMessages) {
     return response?.trim() || null;
   } catch (err) {
     console.error('[SmartMemory] Scene summary failed:', err);
-    return null;
+    throw err;
   }
 }
 
