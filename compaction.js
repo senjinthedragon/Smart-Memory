@@ -167,8 +167,9 @@ export function injectSummary(summary) {
     return;
   }
 
-  // Truncate summary text if it exceeds the token budget.
-  const budget = settings.compaction_inject_budget ?? 800;
+  // Truncate to response length - the LLM shouldn't generate more than we inject,
+  // so response_length doubles as the injection cap for short-term memory.
+  const budget = settings.compaction_response_length ?? 1500;
   let summaryText = summary;
   if (estimateTokens(summaryText) > budget) {
     summaryText = summaryText.slice(0, budget * 4) + '... [truncated]';

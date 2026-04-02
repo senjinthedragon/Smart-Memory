@@ -95,7 +95,6 @@ const defaultSettings = {
   compaction_threshold: 80,
   compaction_keep_recent: 10,
   compaction_response_length: 1500,
-  compaction_inject_budget: 800,
   compaction_position: extension_prompt_types.IN_PROMPT,
   compaction_depth: 0,
   compaction_role: extension_prompt_roles.SYSTEM,
@@ -712,16 +711,6 @@ function bindSettingsUI() {
     .val(s.compaction_role)
     .on('change', function () {
       getSettings().compaction_role = parseInt($(this).val(), 10);
-      saveSettingsDebounced();
-    });
-
-  $('#sm_compaction_inject_budget_value').text(s.compaction_inject_budget ?? 800);
-  $('#sm_compaction_inject_budget')
-    .val(s.compaction_inject_budget ?? 800)
-    .on('input', function () {
-      const v = parseInt($(this).val(), 10);
-      getSettings().compaction_inject_budget = v;
-      $('#sm_compaction_inject_budget_value').text(v);
       saveSettingsDebounced();
     });
 
