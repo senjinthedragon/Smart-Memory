@@ -1,3 +1,48 @@
+/* ── Section accordions ──────────────────────────────────────────────────── */
+
+#smart_memory_settings details.sm-section {
+    margin-top: 6px;
+}
+
+#smart_memory_settings details.sm-section > summary {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 2px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    font-weight: 600;
+    font-size: 0.9em;
+    border-bottom: 1px solid var(--greyCAl, rgba(255,255,255,0.12));
+    color: var(--SmartThemeBodyColor, inherit);
+}
+
+/* Suppress the native browser disclosure triangle */
+#smart_memory_settings details.sm-section > summary::-webkit-details-marker {
+    display: none;
+}
+
+#smart_memory_settings details.sm-section > summary .sm-section-chevron {
+    font-size: 0.7em;
+    opacity: 0.6;
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+}
+
+#smart_memory_settings details.sm-section[open] > summary .sm-section-chevron {
+    transform: rotate(90deg);
+}
+
+#smart_memory_settings details.sm-section > summary:hover {
+    color: var(--SmartThemeBodyColor, inherit);
+    opacity: 0.85;
+}
+
+#smart_memory_settings details.sm-section > .sm-section-content {
+    padding: 8px 0 4px 0;
+}
+
 /* ── Long-term memories list ─────────────────────────────────────────────── */
 
 #smart_memory_settings .sm_memories_list {

@@ -39,14 +39,12 @@
       <hr />
 
       <!-- ══ SHORT-TERM ══ -->
-      <div class="inline-drawer">
-        <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Short-term Memory (Context Summary)</b>
-          <div
-            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
-          ></div>
-        </div>
-        <div class="inline-drawer-content">
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Short-term Memory (Context Summary)
+        </summary>
+        <div class="sm-section-content">
           <label class="checkbox_label">
             <input id="sm_compaction_enabled" type="checkbox" />
             <span>Enable auto-summarization</span>
@@ -149,17 +147,15 @@
             </div>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ══ LONG-TERM ══ -->
-      <div class="inline-drawer" style="margin-top: 8px">
-        <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Long-term Memory (Persistent Facts)</b>
-          <div
-            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
-          ></div>
-        </div>
-        <div class="inline-drawer-content">
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Long-term Memory (Persistent Facts)
+        </summary>
+        <div class="sm-section-content">
           <label class="checkbox_label">
             <input id="sm_longterm_enabled" type="checkbox" />
             <span>Enable long-term memory</span>
@@ -269,17 +265,15 @@
             </button>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ══ SESSION MEMORY ══ -->
-      <div class="inline-drawer" style="margin-top: 8px">
-        <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Session Memory (Within-Chat Details)</b>
-          <div
-            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
-          ></div>
-        </div>
-        <div class="inline-drawer-content">
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Session Memory (Within-Chat Details)
+        </summary>
+        <div class="sm-section-content">
           <p class="sm_section_desc">
             Captures specific scene details, revelations, and developments from
             this chat - more granular than long-term memories, doesn't persist
@@ -368,17 +362,15 @@
             </button>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ══ SCENE DETECTION ══ -->
-      <div class="inline-drawer" style="margin-top: 8px">
-        <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Scene Detection &amp; History</b>
-          <div
-            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
-          ></div>
-        </div>
-        <div class="inline-drawer-content">
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Scene Detection &amp; History
+        </summary>
+        <div class="sm-section-content">
           <p class="sm_section_desc">
             Detects scene breaks (time skips, location changes) and generates
             mini-summaries of completed scenes for orientation.
@@ -454,17 +446,15 @@
             </button>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ══ STORY ARCS ══ -->
-      <div class="inline-drawer" style="margin-top: 8px">
-        <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Story Arcs (Open Threads)</b>
-          <div
-            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
-          ></div>
-        </div>
-        <div class="inline-drawer-content">
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Story Arcs (Open Threads)
+        </summary>
+        <div class="sm-section-content">
           <p class="sm_section_desc">
             Tracks unresolved narrative threads: promises made, character goals,
             mysteries, and tensions. Injected into context so the AI stays
@@ -539,19 +529,17 @@
             </button>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ══ AWAY RECAP ══ -->
-      <div class="inline-drawer" style="margin-top: 8px">
-        <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Away Recap</b>
-          <div
-            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
-          ></div>
-        </div>
-        <div class="inline-drawer-content">
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Away Recap
+        </summary>
+        <div class="sm-section-content">
           <p class="sm_section_desc">
-            Generates a "Previously on…" summary when you return to a chat after
+            Generates a "Previously on..." summary when you return to a chat after
             being away. Injected once and cleared after the first AI response.
           </p>
 
@@ -610,17 +598,15 @@
             </button>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ══ CONTINUITY CHECKER ══ -->
-      <div class="inline-drawer" style="margin-top: 8px">
-        <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Continuity Checker</b>
-          <div
-            class="inline-drawer-icon fa-solid fa-circle-chevron-down down"
-          ></div>
-        </div>
-        <div class="inline-drawer-content">
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Continuity Checker
+        </summary>
+        <div class="sm-section-content">
           <p class="sm_section_desc">
             Checks whether the last AI response contradicts any established
             facts in your summary or memories. Manual-only - click after a
@@ -643,7 +629,7 @@
             style="display: none; margin-top: 8px"
           ></div>
         </div>
-      </div>
+      </details>
     </div>
   </div>
 </div>
