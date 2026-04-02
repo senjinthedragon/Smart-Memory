@@ -29,6 +29,7 @@
  * clearCharacterMemories   - deletes all memories for a character
  * formatMemoriesForPrompt  - formats the memory array as [type] content lines
  * extractAndStoreMemories  - runs extraction against recent messages and merges results
+ * consolidateMemories      - asks the LLM to merge redundant entries in the stored memory list
  * injectMemories           - pushes memories into the prompt via setExtensionPrompt
  * isFreshStart             - returns whether the current chat has fresh-start enabled
  * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
