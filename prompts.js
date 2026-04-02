@@ -105,7 +105,9 @@ export const UPDATE_SUMMARY_PROMPT =
   NO_ACTION_PREAMBLE +
   `An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
 
-Do NOT rewrite existing content unless facts have changed. Only add or update what the new events require. Preserve the 9-section format.
+CRITICAL: You must reproduce every section in full. Do NOT write "Same as before", "Unchanged", "As previously noted", or any similar shorthand. If a section has not changed, copy it word for word from the existing summary. The existing summary will not be available after this update - any section you omit or abbreviate is permanently lost.
+
+Only add or update content where the new events require it. Preserve the 9-section format.
 
 EXISTING SUMMARY:
 {{existing_summary}}
@@ -113,7 +115,7 @@ EXISTING SUMMARY:
 NEW EVENTS TO INCORPORATE:
 {{new_events}}
 
-Write the updated summary inside <summary> tags using the same 9-section format. Update especially sections 2, 3, 4, 5, 6, 8, and 9 as needed.
+Write the complete updated summary inside <summary> tags using the same 9-section format. Update especially sections 2, 3, 4, 5, 6, 8, and 9 as needed.
 
 <summary>
 [Updated summary here]
