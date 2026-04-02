@@ -1354,36 +1354,47 @@ function bindSettingsUI() {
       }
 
       if (!catchUpCancelled) {
-        // Scene: summarize the full chat as a single scene entry rather than
-        // one entry per chunk, since scene history is a coarse narrative view.
+        // Scene: summarize the last chunk of the chat as a single scene entry.
+        // Capped to the last 40 messages - same as the manual Extract Scene button.
         if (settings.scene_enabled) {
           setStatusMessage('Summarizing scene history...');
-          const sceneSummary = await summarizeScene(context.chat);
-          if (sceneSummary) {
-            const history = loadSceneHistory();
-            const max = settings.scene_max_history ?? 5;
-            history.push({ summary: sceneSummary, ts: Date.now() });
-            if (history.length > max) history.splice(0, history.length - max);
-            await saveSceneHistory(history);
-            sceneMessageBuffer = [];
-          }
+          await summarizeScene(context.chat.slice(-40))
+            .then(async (sceneSummary) => {
+              if (!sceneSummary) return;
+              const history = loadSceneHistory();
+              const max = settings.scene_max_history ?? 5;
+              history.push({ summary: sceneSummary, ts: Date.now() });
+              if (history.length > max) history.splice(0, history.length - max);
+              await saveSceneHistory(history);
+              sceneMessageBuffer = [];
+            })
+            .catch((err) => {
+              console.error('[SmartMemory] Catch-up scene summary failed:', err);
+            });
         }
 
         // Consolidate after all chunks so the model sees the full merged set.
         if (settings.longterm_enabled && settings.longterm_consolidate && characterName) {
           setStatusMessage('Consolidating memories...');
-          await consolidateMemories(characterName);
+          await consolidateMemories(characterName).catch((err) => {
+            console.error('[SmartMemory] Catch-up consolidation failed:', err);
+          });
         }
 
         // Short-term compaction runs once at the end - it uses the real token
         // count to decide what to include, so chunking doesn't apply.
         if (settings.compaction_enabled) {
           setStatusMessage('Generating summary...');
-          const summary = await runCompaction();
-          if (summary) {
-            injectSummary(summary);
-            updateShortTermUI(summary);
-          }
+          await runCompaction()
+            .then((summary) => {
+              if (summary) {
+                injectSummary(summary);
+                updateShortTermUI(summary);
+              }
+            })
+            .catch((err) => {
+              console.error('[SmartMemory] Catch-up compaction failed:', err);
+            });
         }
       }
 
