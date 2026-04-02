@@ -35,6 +35,7 @@
  * buildContinuityPrompt        - assembles the continuity check prompt
  * EXTRACTION_SYSTEM_PROMPT     - system role string for long-term extraction
  * buildExtractionPrompt        - assembles the long-term memory extraction prompt
+ * buildConsolidationPrompt     - assembles the long-term memory consolidation prompt
  */
 
 // Prepended to every extraction prompt to prevent the local model from
@@ -222,6 +223,41 @@ ${latestResponse}
 
 ---
 Does the latest response contradict or conflict with any established fact? List each contradiction precisely and briefly. If there are none, output: NONE`;
+}
+
+// ---- Long-term memory consolidation -------------------------------------
+
+/**
+ * Assembles the memory consolidation prompt.
+ * Takes the full memory list and asks the LLM to merge redundant or
+ * near-duplicate entries into single richer ones while preserving all
+ * unique information. Output uses the same [type] content format so the
+ * existing parser can handle it without any changes.
+ *
+ * @param {string} memoriesText - Full memory list as [type] content lines.
+ * @returns {string} The complete prompt string.
+ */
+export function buildConsolidationPrompt(memoriesText) {
+  return `[MEMORY CONSOLIDATION TASK - Do NOT roleplay. Output structured data only.]
+
+CURRENT MEMORY LIST:
+${memoriesText}
+
+---
+Your task: Consolidate the memory list above by merging entries that are redundant, near-duplicate, or say the same thing in different words. Combine them into a single richer entry that preserves ALL unique details from the originals.
+
+Rules:
+- Only merge entries that are genuinely redundant or overlapping. Do NOT merge entries that contain distinct information.
+- Do NOT invent new information or add anything not present in the originals.
+- Do NOT drop any unique detail - if merging would lose information, keep them separate.
+- Preserve the most specific and informative wording.
+- Keep the original type tag ([fact], [relationship], [preference], [event]) for each entry. If merging entries of different types, use the most appropriate type.
+
+Output the complete consolidated list, one entry per line, using the same format as the input:
+[fact] The consolidated memory here.
+[relationship] The consolidated relationship detail here.
+
+Output ONLY the memory lines. No explanations, no commentary.`;
 }
 
 // ---- Long-term memory extraction ----------------------------------------

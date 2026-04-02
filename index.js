@@ -64,6 +64,7 @@ import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 import { shouldCompact, runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
 import {
   extractAndStoreMemories,
+  consolidateMemories,
   injectMemories,
   loadCharacterMemories,
   saveCharacterMemories,
@@ -108,6 +109,7 @@ const defaultSettings = {
   // Long-term
   longterm_enabled: true,
   longterm_carry_over: true,
+  longterm_consolidate: true,
   longterm_extract_every: 3,
   longterm_max_memories: 25,
   longterm_response_length: 600,
@@ -303,7 +305,15 @@ async function onCharacterMessageRendered() {
 
       if (settings.longterm_enabled && characterName) {
         jobs.push(
-          extractAndStoreMemories(characterName, recentMessages).then((count) => {
+          extractAndStoreMemories(characterName, recentMessages).then(async (count) => {
+            // Run consolidation after extraction if new memories were added.
+            if (count > 0 && settings.longterm_consolidate) {
+              const removed = await consolidateMemories(characterName);
+              if (removed > 0) {
+                injectMemories(characterName, isFreshStart());
+                setStatusMessage(`Consolidated ${removed} redundant memories.`);
+              }
+            }
             updateLongTermUI(characterName);
             saveSettingsDebounced();
             return count;
@@ -801,6 +811,13 @@ function bindSettingsUI() {
     .prop('checked', s.longterm_carry_over)
     .on('change', function () {
       getSettings().longterm_carry_over = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
+  $('#sm_longterm_consolidate')
+    .prop('checked', s.longterm_consolidate ?? true)
+    .on('change', function () {
+      getSettings().longterm_consolidate = $(this).prop('checked');
       saveSettingsDebounced();
     });
 

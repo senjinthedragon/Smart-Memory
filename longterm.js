@@ -48,7 +48,7 @@ import {
   MEMORY_TYPES,
   META_KEY,
 } from './constants.js';
-import { buildExtractionPrompt } from './prompts.js';
+import { buildExtractionPrompt, buildConsolidationPrompt } from './prompts.js';
 
 // ---- Storage helpers ----------------------------------------------------
 
@@ -221,6 +221,69 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     return newMemories.length;
   } catch (err) {
     console.error('[SmartMemory] Memory extraction failed:', err);
+    return 0;
+  }
+}
+
+/**
+ * Runs a consolidation pass on the stored memories for a character.
+ * Sends the full memory list to the LLM and asks it to merge redundant
+ * or near-duplicate entries into single richer ones. Only runs when
+ * consolidation is enabled in settings and there are enough memories
+ * to be worth consolidating.
+ *
+ * Called after extraction adds new memories, so it sees the freshly
+ * merged list. Saves the consolidated result back to storage.
+ *
+ * @param {string} characterName
+ * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
+ */
+export async function consolidateMemories(characterName) {
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.longterm_consolidate || !characterName) return 0;
+
+  const memories = loadCharacterMemories(characterName);
+
+  // Not worth running a consolidation pass on a small list.
+  if (memories.length < 5) return 0;
+
+  try {
+    const memoriesText = formatMemoriesForPrompt(memories);
+    const response = await generateMemoryExtract(buildConsolidationPrompt(memoriesText), {
+      // Budget enough tokens for the full consolidated list.
+      responseLength: Math.max(600, memories.length * 60),
+    });
+
+    if (!response || response.trim().toUpperCase() === 'NONE') return 0;
+
+    const consolidated = parseExtractionOutput(response);
+    if (consolidated.length === 0) return 0;
+
+    // Only accept the result if it didn't grow - a larger list means the
+    // model misunderstood the task (extracted new things instead of merging).
+    if (consolidated.length >= memories.length) {
+      console.log('[SmartMemory] Consolidation result not smaller than input - discarding.');
+      return 0;
+    }
+
+    // Preserve timestamps from the originals where possible: for each
+    // consolidated entry find the oldest matching original and inherit its ts.
+    const timestamped = consolidated.map((entry) => {
+      const match = memories.find(
+        (m) => m.type === entry.type && m.content.slice(0, 30) === entry.content.slice(0, 30),
+      );
+      return { ...entry, ts: match?.ts ?? entry.ts };
+    });
+
+    saveCharacterMemories(characterName, timestamped);
+
+    const removed = memories.length - consolidated.length;
+    console.log(
+      `[SmartMemory] Consolidation reduced memories from ${memories.length} to ${consolidated.length} (-${removed}) for "${characterName}".`,
+    );
+    return removed;
+  } catch (err) {
+    console.error('[SmartMemory] Memory consolidation failed:', err);
     return 0;
   }
 }
