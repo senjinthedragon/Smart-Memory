@@ -110,10 +110,9 @@ export async function checkContinuity(characterName) {
 
     const prompt = buildContinuityPrompt(facts, lastAiMessage.mes);
 
-    const response = await generateMemoryExtract(
-      prompt,
-      { responseLength: settings.continuity_response_length ?? 300 },
-    );
+    const response = await generateMemoryExtract(prompt, {
+      responseLength: settings.continuity_response_length ?? 300,
+    });
 
     console.log('[SmartMemory] Continuity check response:', response);
 

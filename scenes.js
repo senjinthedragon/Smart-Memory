@@ -78,10 +78,7 @@ export function detectSceneBreakHeuristic(messageText) {
  */
 export async function detectSceneBreakAI(messageText) {
   try {
-    const prompt = SCENE_DETECT_PROMPT.replace(
-      '{{text}}',
-      messageText.slice(0, 800),
-    );
+    const prompt = SCENE_DETECT_PROMPT.replace('{{text}}', messageText.slice(0, 800));
     const response = await generateMemoryExtract(prompt, { responseLength: 5 });
     return response?.trim().toUpperCase().startsWith('YES') ?? false;
   } catch {
@@ -141,15 +138,11 @@ export async function summarizeScene(sceneMessages) {
     if (!sceneText.trim()) return null;
 
     // Truncate to 2000 chars to keep the prompt cost reasonable on local hardware.
-    const prompt = SCENE_SUMMARY_PROMPT.replace(
-      '{{scene_text}}',
-      sceneText.slice(0, 2000),
-    );
+    const prompt = SCENE_SUMMARY_PROMPT.replace('{{scene_text}}', sceneText.slice(0, 2000));
 
-    const response = await generateMemoryExtract(
-      prompt,
-      { responseLength: settings.scene_summary_length ?? 200 },
-    );
+    const response = await generateMemoryExtract(prompt, {
+      responseLength: settings.scene_summary_length ?? 200,
+    });
 
     return response?.trim() || null;
   } catch (err) {

@@ -40,12 +40,7 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import {
-  MODULE_NAME,
-  META_KEY,
-  PROMPT_KEY_SESSION,
-  SESSION_TYPES,
-} from './constants.js';
+import { MODULE_NAME, META_KEY, PROMPT_KEY_SESSION, SESSION_TYPES } from './constants.js';
 import { buildSessionExtractionPrompt } from './prompts.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
@@ -159,9 +154,7 @@ export async function extractSessionMemories(recentMessages) {
     if (!chatHistory.trim()) return 0;
 
     const existing = loadSessionMemories();
-    const existingText = existing
-      .map((m) => `[${m.type}] ${m.content}`)
-      .join('\n');
+    const existingText = existing.map((m) => `[${m.type}] ${m.content}`).join('\n');
 
     const response = await generateMemoryExtract(
       buildSessionExtractionPrompt(chatHistory, existingText),
@@ -215,12 +208,8 @@ export function injectSessionMemories() {
     return;
   }
 
-  const template =
-    settings.session_template ?? '[Details from this session:\n{{session}}]';
-  const content = template.replace(
-    '{{session}}',
-    formatSessionMemories(memories),
-  );
+  const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
+  const content = template.replace('{{session}}', formatSessionMemories(memories));
 
   setExtensionPrompt(
     PROMPT_KEY_SESSION,

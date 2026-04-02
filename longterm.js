@@ -41,12 +41,7 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import {
-  MODULE_NAME,
-  PROMPT_KEY_LONG,
-  MEMORY_TYPES,
-  META_KEY,
-} from './constants.js';
+import { MODULE_NAME, PROMPT_KEY_LONG, MEMORY_TYPES, META_KEY } from './constants.js';
 import { buildExtractionPrompt } from './prompts.js';
 
 // ---- Storage helpers ----------------------------------------------------
@@ -196,23 +191,17 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     const existingMemories = loadCharacterMemories(characterName);
     const existingText = formatMemoriesForPrompt(existingMemories);
 
-    const response = await generateMemoryExtract(
-      buildExtractionPrompt(chatHistory, existingText),
-      { responseLength: settings.longterm_response_length || 600 },
-    );
+    const response = await generateMemoryExtract(buildExtractionPrompt(chatHistory, existingText), {
+      responseLength: settings.longterm_response_length || 600,
+    });
 
-    console.log(
-      `[SmartMemory] Raw extraction response for "${characterName}":`,
-      response,
-    );
+    console.log(`[SmartMemory] Raw extraction response for "${characterName}":`, response);
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
     const newMemories = parseExtractionOutput(response);
     if (newMemories.length === 0) {
-      console.log(
-        '[SmartMemory] No parseable memories in response. Check format above.',
-      );
+      console.log('[SmartMemory] No parseable memories in response. Check format above.');
       return 0;
     }
 
@@ -255,8 +244,7 @@ export function injectMemories(characterName, freshStart = false) {
 
   const memoryText = formatMemoriesForPrompt(memories);
   const template =
-    settings.longterm_template ||
-    '[Memories from previous conversations:\n{{memories}}]';
+    settings.longterm_template || '[Memories from previous conversations:\n{{memories}}]';
   const content = template.replace('{{memories}}', memoryText);
 
   setExtensionPrompt(

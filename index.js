@@ -50,12 +50,7 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 
-import {
-  shouldCompact,
-  runCompaction,
-  injectSummary,
-  loadAndInjectSummary,
-} from './compaction.js';
+import { shouldCompact, runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
 import {
   extractAndStoreMemories,
   injectMemories,
@@ -65,31 +60,15 @@ import {
   isFreshStart,
   setFreshStart,
 } from './longterm.js';
-import {
-  updateLastActive,
-  getAwayHours,
-  generateRecap,
-  injectRecap,
-  clearRecap,
-} from './recap.js';
-import {
-  extractSessionMemories,
-  injectSessionMemories,
-  clearSessionMemories,
-} from './session.js';
+import { updateLastActive, getAwayHours, generateRecap, injectRecap, clearRecap } from './recap.js';
+import { extractSessionMemories, injectSessionMemories, clearSessionMemories } from './session.js';
 import {
   processSceneBreak,
   injectSceneHistory,
   loadSceneHistory,
   clearSceneHistory,
 } from './scenes.js';
-import {
-  extractArcs,
-  injectArcs,
-  loadArcs,
-  clearArcs,
-  deleteArc,
-} from './arcs.js';
+import { extractArcs, injectArcs, loadArcs, clearArcs, deleteArc } from './arcs.js';
 import { checkContinuity } from './continuity.js';
 
 // ---- Default settings ---------------------------------------------------
@@ -301,13 +280,11 @@ async function onCharacterMessageRendered() {
 
       if (settings.longterm_enabled && characterName) {
         jobs.push(
-          extractAndStoreMemories(characterName, recentMessages).then(
-            (count) => {
-              updateLongTermUI(characterName);
-              saveSettingsDebounced();
-              return count;
-            },
-          ),
+          extractAndStoreMemories(characterName, recentMessages).then((count) => {
+            updateLongTermUI(characterName);
+            saveSettingsDebounced();
+            return count;
+          }),
         );
       }
 
@@ -326,9 +303,7 @@ async function onCharacterMessageRendered() {
       Promise.all(jobs)
         .then((counts) => {
           const total = counts.reduce((a, b) => a + b, 0);
-          setStatusMessage(
-            total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '',
-          );
+          setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
         })
         .catch((err) => {
           console.error('[SmartMemory] Extraction error:', err);
@@ -433,9 +408,8 @@ function initTooltips() {
     // Prefer showing below the icon; flip above if too close to the bottom.
     const spaceBelow = window.innerHeight - rect.bottom;
     tooltip.style.left = `${Math.min(rect.left, window.innerWidth - 260)}px`;
-    tooltip.style.top = spaceBelow > 80
-      ? `${rect.bottom + 6}px`
-      : `${rect.top - tooltip.offsetHeight - 6}px`;
+    tooltip.style.top =
+      spaceBelow > 80 ? `${rect.bottom + 6}px` : `${rect.top - tooltip.offsetHeight - 6}px`;
     tooltip.classList.add('sm-tooltip-visible');
   });
 
@@ -524,9 +498,7 @@ function renderMemoriesList(memories, characterName) {
   }
 
   if (memories.length === 0) {
-    $list.append(
-      '<div class="sm_no_char">No memories stored yet for this character.</div>',
-    );
+    $list.append('<div class="sm_no_char">No memories stored yet for this character.</div>');
     return;
   }
 
@@ -629,9 +601,7 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
-  $(
-    `input[name="sm_compaction_position"][value="${s.compaction_position}"]`,
-  ).prop('checked', true);
+  $(`input[name="sm_compaction_position"][value="${s.compaction_position}"]`).prop('checked', true);
   $('input[name="sm_compaction_position"]').on('change', function () {
     getSettings().compaction_position = parseInt($(this).val(), 10);
     saveSettingsDebounced();
@@ -722,10 +692,7 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
-  $(`input[name="sm_longterm_position"][value="${s.longterm_position}"]`).prop(
-    'checked',
-    true,
-  );
+  $(`input[name="sm_longterm_position"][value="${s.longterm_position}"]`).prop('checked', true);
   $('input[name="sm_longterm_position"]').on('change', function () {
     getSettings().longterm_position = parseInt($(this).val(), 10);
     saveSettingsDebounced();
@@ -761,10 +728,7 @@ function bindSettingsUI() {
     try {
       const context = getContext();
       const recentMessages = context.chat.slice(-20);
-      const count = await extractAndStoreMemories(
-        characterName,
-        recentMessages,
-      );
+      const count = await extractAndStoreMemories(characterName, recentMessages);
       saveSettingsDebounced();
       updateLongTermUI(characterName);
       setStatusMessage(
@@ -954,9 +918,7 @@ function bindSettingsUI() {
       injectArcs();
       updateArcsUI();
       setStatusMessage(
-        count > 0
-          ? `${count} arc${count === 1 ? '' : 's'} found.`
-          : 'No new arcs found.',
+        count > 0 ? `${count} arc${count === 1 ? '' : 's'} found.` : 'No new arcs found.',
       );
     } finally {
       $(this).prop('disabled', false);
@@ -1065,11 +1027,9 @@ function bindSettingsUI() {
 jQuery(async function () {
   loadSettings();
 
-  const html = await renderExtensionTemplateAsync(
-    'third-party/Smart-Memory',
-    'settings',
-    { defaultSettings },
-  );
+  const html = await renderExtensionTemplateAsync('third-party/Smart-Memory', 'settings', {
+    defaultSettings,
+  });
   $('#extensions_settings').append(html);
 
   bindSettingsUI();
@@ -1077,10 +1037,7 @@ jQuery(async function () {
 
   // makeLast ensures Smart Memory processes the message after all other
   // extensions have had their turn with it.
-  eventSource.makeLast(
-    event_types.CHARACTER_MESSAGE_RENDERED,
-    onCharacterMessageRendered,
-  );
+  eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
   eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
 
@@ -1088,83 +1045,94 @@ jQuery(async function () {
 
   // ---- Slash commands -----------------------------------------------------
 
-  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-    name: 'sm-check',
-    callback: async () => {
-      const characterName = getCurrentCharacterName();
-      if (!characterName) return 'No character active.';
-      const contradictions = await checkContinuity(characterName);
-      if (contradictions.length === 0) return 'No contradictions found.';
-      return contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
-    },
-    helpString: 'Checks the last AI response for contradictions against established facts and memories.',
-    returns: ARGUMENT_TYPE.STRING,
-  }));
+  SlashCommandParser.addCommandObject(
+    SlashCommand.fromProps({
+      name: 'sm-check',
+      callback: async () => {
+        const characterName = getCurrentCharacterName();
+        if (!characterName) return 'No character active.';
+        const contradictions = await checkContinuity(characterName);
+        if (contradictions.length === 0) return 'No contradictions found.';
+        return contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+      },
+      helpString:
+        'Checks the last AI response for contradictions against established facts and memories.',
+      returns: ARGUMENT_TYPE.STRING,
+    }),
+  );
 
-  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-    name: 'sm-summarize',
-    callback: async () => {
-      if (compactionRunning) return 'Compaction already running.';
-      compactionRunning = true;
-      setStatusMessage('Generating summary...');
-      try {
-        const summary = await runCompaction();
-        if (summary) {
-          injectSummary(summary);
-          updateShortTermUI(summary);
-          setStatusMessage('Summary updated.');
-          return summary;
+  SlashCommandParser.addCommandObject(
+    SlashCommand.fromProps({
+      name: 'sm-summarize',
+      callback: async () => {
+        if (compactionRunning) return 'Compaction already running.';
+        compactionRunning = true;
+        setStatusMessage('Generating summary...');
+        try {
+          const summary = await runCompaction();
+          if (summary) {
+            injectSummary(summary);
+            updateShortTermUI(summary);
+            setStatusMessage('Summary updated.');
+            return summary;
+          }
+          return 'Nothing to summarize yet.';
+        } finally {
+          compactionRunning = false;
         }
-        return 'Nothing to summarize yet.';
-      } finally {
-        compactionRunning = false;
-      }
-    },
-    helpString: 'Forces Smart Memory to generate or update the short-term context summary now.',
-    returns: ARGUMENT_TYPE.STRING,
-  }));
+      },
+      helpString: 'Forces Smart Memory to generate or update the short-term context summary now.',
+      returns: ARGUMENT_TYPE.STRING,
+    }),
+  );
 
-  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-    name: 'sm-extract',
-    callback: async () => {
-      if (extractionRunning) return 'Extraction already running.';
-      const characterName = getCurrentCharacterName();
-      if (!characterName) return 'No character active.';
-      extractionRunning = true;
-      setStatusMessage('Extracting memories...');
-      try {
-        const context = getContext();
-        await extractAndStoreMemories(characterName, context.chat);
-        await extractSessionMemories(context.chat);
-        await extractArcs(context.chat);
-        injectMemories(characterName, isFreshStart());
-        injectSessionMemories();
-        injectArcs();
-        updateLongTermUI(characterName);
-        updateArcsUI();
-        setStatusMessage('Extraction complete.');
-        return 'Memory extraction complete.';
-      } finally {
-        extractionRunning = false;
-      }
-    },
-    helpString: 'Forces Smart Memory to extract long-term memories, session details, and story arcs from the current chat now.',
-    returns: ARGUMENT_TYPE.STRING,
-  }));
+  SlashCommandParser.addCommandObject(
+    SlashCommand.fromProps({
+      name: 'sm-extract',
+      callback: async () => {
+        if (extractionRunning) return 'Extraction already running.';
+        const characterName = getCurrentCharacterName();
+        if (!characterName) return 'No character active.';
+        extractionRunning = true;
+        setStatusMessage('Extracting memories...');
+        try {
+          const context = getContext();
+          await extractAndStoreMemories(characterName, context.chat);
+          await extractSessionMemories(context.chat);
+          await extractArcs(context.chat);
+          injectMemories(characterName, isFreshStart());
+          injectSessionMemories();
+          injectArcs();
+          updateLongTermUI(characterName);
+          updateArcsUI();
+          setStatusMessage('Extraction complete.');
+          return 'Memory extraction complete.';
+        } finally {
+          extractionRunning = false;
+        }
+      },
+      helpString:
+        'Forces Smart Memory to extract long-term memories, session details, and story arcs from the current chat now.',
+      returns: ARGUMENT_TYPE.STRING,
+    }),
+  );
 
-  SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-    name: 'sm-recap',
-    callback: async () => {
-      const recap = await generateRecap();
-      if (!recap) return 'Recap generation failed.';
-      injectRecap(recap);
-      recapActive = true;
-      setStatusMessage('Recap injected.');
-      return recap;
-    },
-    helpString: 'Generates a "Previously on..." recap of the current chat and injects it into context.',
-    returns: ARGUMENT_TYPE.STRING,
-  }));
+  SlashCommandParser.addCommandObject(
+    SlashCommand.fromProps({
+      name: 'sm-recap',
+      callback: async () => {
+        const recap = await generateRecap();
+        if (!recap) return 'Recap generation failed.';
+        injectRecap(recap);
+        recapActive = true;
+        setStatusMessage('Recap injected.');
+        return recap;
+      },
+      helpString:
+        'Generates a "Previously on..." recap of the current chat and injects it into context.',
+      returns: ARGUMENT_TYPE.STRING,
+    }),
+  );
 
   console.log('[SmartMemory] Loaded.');
 });

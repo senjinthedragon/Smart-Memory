@@ -67,7 +67,9 @@ export async function generateMemoryExtract(prompt, { responseLength = 600 } = {
 
   if (source === memory_sources.webllm) {
     if (!isWebLlmSupported()) {
-      console.warn(`[${MODULE_NAME}] WebLLM source selected but WebLLM is not available, falling back to main`);
+      console.warn(
+        `[${MODULE_NAME}] WebLLM source selected but WebLLM is not available, falling back to main`,
+      );
     } else {
       const messages = [{ role: 'user', content: prompt }];
       const params = responseLength > 0 ? { max_tokens: responseLength } : {};
@@ -93,19 +95,24 @@ export async function generateMemoryExtract(prompt, { responseLength = 600 } = {
  * @param {boolean} [options.skipWIAN=true] - Skip world info / author's note
  * @returns {Promise<string>} The raw model response
  */
-export async function generateMemorySummarize(quietPrompt, { responseLength = 1500, skipWIAN = true } = {}) {
+export async function generateMemorySummarize(
+  quietPrompt,
+  { responseLength = 1500, skipWIAN = true } = {},
+) {
   const source = getSource();
 
   if (source === memory_sources.webllm) {
     if (!isWebLlmSupported()) {
-      console.warn(`[${MODULE_NAME}] WebLLM source selected but WebLLM is not available, falling back to main`);
+      console.warn(
+        `[${MODULE_NAME}] WebLLM source selected but WebLLM is not available, falling back to main`,
+      );
     } else {
       // Build a messages array from the current chat so WebLLM has the same
       // context it would have through generateQuietPrompt on the main API.
       const context = getContext();
       const messages = (context.chat ?? [])
-        .filter(msg => !msg.is_system)
-        .map(msg => ({
+        .filter((msg) => !msg.is_system)
+        .map((msg) => ({
           role: msg.is_user ? 'user' : 'assistant',
           content: msg.mes ?? '',
         }));

@@ -126,16 +126,14 @@ export async function runCompaction() {
         existingSummary,
       ).replace('{{new_events}}', newEvents);
 
-      raw = await generateMemorySummarize(
-        updatePrompt,
-        { responseLength: settings.compaction_response_length || 1500 },
-      );
+      raw = await generateMemorySummarize(updatePrompt, {
+        responseLength: settings.compaction_response_length || 1500,
+      });
     } else {
       // Full compaction: first time or fresh chat with no existing summary.
-      raw = await generateMemorySummarize(
-        SUMMARY_PROMPT,
-        { responseLength: settings.compaction_response_length || 1500 },
-      );
+      raw = await generateMemorySummarize(SUMMARY_PROMPT, {
+        responseLength: settings.compaction_response_length || 1500,
+      });
     }
 
     if (!raw || raw.trim() === '') return null;
@@ -169,8 +167,7 @@ export function injectSummary(summary) {
     return;
   }
 
-  const template =
-    settings.compaction_template || '[Story so far:\n{{summary}}]';
+  const template = settings.compaction_template || '[Story so far:\n{{summary}}]';
   const content = template.replace('{{summary}}', summary);
 
   setExtensionPrompt(

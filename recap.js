@@ -75,10 +75,9 @@ export function getAwayHours() {
 export async function generateRecap() {
   const settings = extension_settings[MODULE_NAME];
   try {
-    const response = await generateMemorySummarize(
-      RECAP_PROMPT,
-      { responseLength: settings.recap_response_length ?? 300 },
-    );
+    const response = await generateMemorySummarize(RECAP_PROMPT, {
+      responseLength: settings.recap_response_length ?? 300,
+    });
     return response?.trim() || null;
   } catch (err) {
     console.error('[SmartMemory] Recap generation failed:', err);

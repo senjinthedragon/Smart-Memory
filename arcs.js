@@ -103,8 +103,7 @@ export async function clearArcs() {
  * @returns {{add: Array, resolve: number[]}} Arcs to add and indices to remove.
  */
 function parseArcOutput(text, existingArcs) {
-  if (!text || text.trim().toUpperCase() === 'NONE')
-    return { add: [], resolve: [] };
+  if (!text || text.trim().toUpperCase() === 'NONE') return { add: [], resolve: [] };
 
   const toAdd = [];
   const toResolve = [];
