@@ -410,6 +410,41 @@ function setStatusMessage(msg) {
   $('#sm_status').text(msg);
 }
 
+/**
+ * Injects a single #sm-tooltip div into <body> and wires up hover/focus
+ * events on all .sm-info elements inside the settings panel.
+ *
+ * Using position:fixed on the tooltip div means it escapes ST's
+ * overflow:hidden extensions panel and is never clipped at the edge.
+ */
+function initTooltips() {
+  const tooltip = document.createElement('div');
+  tooltip.id = 'sm-tooltip';
+  document.body.appendChild(tooltip);
+
+  const panel = document.getElementById('smart_memory_settings');
+  if (!panel) return;
+
+  panel.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('.sm-info');
+    if (!target?.dataset.tooltip) return;
+    tooltip.textContent = target.dataset.tooltip;
+    const rect = target.getBoundingClientRect();
+    // Prefer showing below the icon; flip above if too close to the bottom.
+    const spaceBelow = window.innerHeight - rect.bottom;
+    tooltip.style.left = `${Math.min(rect.left, window.innerWidth - 260)}px`;
+    tooltip.style.top = spaceBelow > 80
+      ? `${rect.bottom + 6}px`
+      : `${rect.top - tooltip.offsetHeight - 6}px`;
+    tooltip.classList.add('sm-tooltip-visible');
+  });
+
+  panel.addEventListener('mouseout', (e) => {
+    if (!e.target.closest('.sm-info')) return;
+    tooltip.classList.remove('sm-tooltip-visible');
+  });
+}
+
 /** Syncs the short-term summary textarea with the current summary text. */
 function updateShortTermUI(summary) {
   $('#sm_current_summary').val(summary || '');
@@ -1038,6 +1073,7 @@ jQuery(async function () {
   $('#extensions_settings').append(html);
 
   bindSettingsUI();
+  initTooltips();
 
   // makeLast ensures Smart Memory processes the message after all other
   // extensions have had their turn with it.

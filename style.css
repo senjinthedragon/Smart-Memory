@@ -1,31 +1,95 @@
+/**
+ * Smart Memory - SillyTavern Extension
+ * Copyright (C) 2026 Senjin the Dragon
+ * https://github.com/senjinthedragon/Smart-Memory
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * Colors are either currentColor, low-opacity neutrals, or semantic values
+ * so the panel adapts to any ST theme without hardcoding light/dark colors.
+ * The only exceptions are the tooltip (dark bg + light text is the universal
+ * convention) and the memory type badges (each type has a distinct hue).
+ */
+
+/* ── Block spacing ───────────────────────────────────────────────────────── */
+
+/* Consistent bottom margin between groups of controls within a section. */
+#smart_memory_settings .sm-block {
+    margin-bottom: 8px;
+}
+
+/* ── Sub-section titles ──────────────────────────────────────────────────── */
+
+/*
+ * Small all-caps labels that visually group related controls within an
+ * accordion section. Matches the dc-section-title pattern from the
+ * Discord Connector for a consistent look across extensions.
+ */
+#smart_memory_settings .sm-section-title {
+    margin: 12px 0 6px;
+    font-size: 0.68em;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    opacity: 0.5;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+    padding-bottom: 4px;
+}
+
+#smart_memory_settings .sm-section-content > .sm-section-title:first-child {
+    margin-top: 4px;
+}
+
 /* ── Section accordions ──────────────────────────────────────────────────── */
 
 #smart_memory_settings details.sm-section {
-    margin-top: 6px;
+    margin-top: 2px;
 }
 
+/*
+ * The summary is styled to look like a section title: same small all-caps
+ * treatment as .sm-section-title, but with a rotating chevron to indicate
+ * it is collapsible. This makes it visually subordinate to the main
+ * extension entry rather than looking like a nested extension.
+ */
 #smart_memory_settings details.sm-section > summary {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 5px 2px;
+    gap: 6px;
+    padding: 8px 2px 4px;
     cursor: pointer;
     user-select: none;
     list-style: none;
-    font-weight: 600;
-    font-size: 0.9em;
-    border-bottom: 1px solid var(--greyCAl, rgba(255,255,255,0.12));
-    color: var(--SmartThemeBodyColor, inherit);
+    font-size: 0.68em;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    opacity: 0.55;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
 }
 
-/* Suppress the native browser disclosure triangle */
+/* Suppress the native browser disclosure triangle. */
 #smart_memory_settings details.sm-section > summary::-webkit-details-marker {
     display: none;
 }
 
+#smart_memory_settings details.sm-section > summary:hover {
+    opacity: 0.8;
+}
+
 #smart_memory_settings details.sm-section > summary .sm-section-chevron {
-    font-size: 0.7em;
-    opacity: 0.6;
+    font-size: 0.75em;
     transition: transform 0.18s ease;
     flex-shrink: 0;
 }
@@ -34,13 +98,57 @@
     transform: rotate(90deg);
 }
 
-#smart_memory_settings details.sm-section > summary:hover {
-    color: var(--SmartThemeBodyColor, inherit);
-    opacity: 0.85;
+#smart_memory_settings details.sm-section > .sm-section-content {
+    padding: 4px 0 6px 0;
 }
 
-#smart_memory_settings details.sm-section > .sm-section-content {
-    padding: 8px 0 4px 0;
+/* ── Info icon and tooltip ───────────────────────────────────────────────── */
+
+/*
+ * Usage: <span class="sm-info" data-tooltip="Explanation here.">ⓘ</span>
+ *
+ * The tooltip div (#sm-tooltip) is injected into <body> once by index.js
+ * and positioned with position:fixed so it escapes ST's overflow:hidden
+ * extensions panel. This ensures it is never clipped.
+ */
+#smart_memory_settings .sm-info {
+    display: inline-block;
+    cursor: help;
+    font-style: normal;
+    font-size: 0.85em;
+    margin-left: 3px;
+    opacity: 0.4;
+    vertical-align: middle;
+    transition: opacity 0.1s ease;
+}
+
+#smart_memory_settings .sm-info:hover,
+#smart_memory_settings .sm-info:focus {
+    opacity: 0.85;
+    outline: none;
+}
+
+/* Global tooltip div - created once by index.js, reused for all .sm-info elements. */
+#sm-tooltip {
+    position: fixed;
+    z-index: 99999;
+    max-width: 240px;
+    padding: 7px 10px;
+    border-radius: 5px;
+    background: rgba(18, 18, 18, 0.93);
+    color: #e8e8e8;
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.45;
+    white-space: normal;
+    pointer-events: none;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+#sm-tooltip.sm-tooltip-visible {
+    opacity: 1;
 }
 
 /* ── Long-term memories list ─────────────────────────────────────────────── */
@@ -183,13 +291,6 @@
     font-style: italic;
     font-size: 0.9em;
     padding: 4px 0;
-}
-
-#smart_memory_settings .sm_section_desc {
-    color: var(--SmartReplyColor, #aaa);
-    font-size: 0.85em;
-    margin: 0 0 8px 0;
-    line-height: 1.4;
 }
 
 #smart_memory_settings hr {
