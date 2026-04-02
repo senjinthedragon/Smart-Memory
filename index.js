@@ -1004,7 +1004,7 @@ function bindSettingsUI() {
     setStatusMessage('Extracting session memories...');
     try {
       const context = getContext();
-      const count = await extractSessionMemories(context.chat);
+      const count = await extractSessionMemories(context.chat.slice(-40));
       injectSessionMemories();
       updateSessionUI();
       updateTokenDisplay();
@@ -1087,8 +1087,9 @@ function bindSettingsUI() {
     setStatusMessage('Summarizing current scene...');
     try {
       const context = getContext();
-      // Use buffered messages since last break if available, else fall back to full chat.
-      const messages = sceneMessageBuffer.length > 0 ? sceneMessageBuffer : context.chat;
+      // Use buffered messages since last break if available, else fall back to
+      // the last 40 messages - capped to avoid overflowing the model context.
+      const messages = sceneMessageBuffer.length > 0 ? sceneMessageBuffer : context.chat.slice(-40);
       const summary = await summarizeScene(messages);
       if (summary) {
         const history = loadSceneHistory();
@@ -1172,7 +1173,7 @@ function bindSettingsUI() {
     setStatusMessage('Extracting story arcs...');
     try {
       const context = getContext();
-      const count = await extractArcs(context.chat);
+      const count = await extractArcs(context.chat.slice(-100));
       injectArcs();
       updateArcsUI();
       setStatusMessage(
