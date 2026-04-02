@@ -30,7 +30,7 @@
  * checkContinuity - runs a contradiction check against the last AI message
  */
 
-import { generateRaw } from '../../../../script.js';
+import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY } from './constants.js';
 import { buildContinuityPrompt } from './prompts.js';
@@ -110,11 +110,10 @@ export async function checkContinuity(characterName) {
 
     const prompt = buildContinuityPrompt(facts, lastAiMessage.mes);
 
-    const response = await generateRaw({
+    const response = await generateMemoryExtract(
       prompt,
-      quietToLoud: false,
-      responseLength: settings.continuity_response_length ?? 300,
-    });
+      { responseLength: settings.continuity_response_length ?? 300 },
+    );
 
     console.log('[SmartMemory] Continuity check response:', response);
 

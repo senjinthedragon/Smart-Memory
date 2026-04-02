@@ -35,11 +35,11 @@
  */
 
 import {
-  generateRaw,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
 } from '../../../../script.js';
+import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
 import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
@@ -82,11 +82,7 @@ export async function detectSceneBreakAI(messageText) {
       '{{text}}',
       messageText.slice(0, 800),
     );
-    const response = await generateRaw({
-      prompt,
-      quietToLoud: false,
-      responseLength: 5,
-    });
+    const response = await generateMemoryExtract(prompt, { responseLength: 5 });
     return response?.trim().toUpperCase().startsWith('YES') ?? false;
   } catch {
     return false;
@@ -150,11 +146,10 @@ export async function summarizeScene(sceneMessages) {
       sceneText.slice(0, 2000),
     );
 
-    const response = await generateRaw({
+    const response = await generateMemoryExtract(
       prompt,
-      quietToLoud: false,
-      responseLength: settings.scene_summary_length ?? 200,
-    });
+      { responseLength: settings.scene_summary_length ?? 200 },
+    );
 
     return response?.trim() || null;
   } catch (err) {

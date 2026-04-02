@@ -34,11 +34,11 @@
  */
 
 import {
-  generateRaw,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
 } from '../../../../script.js';
+import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import {
   MODULE_NAME,
@@ -46,10 +46,7 @@ import {
   PROMPT_KEY_SESSION,
   SESSION_TYPES,
 } from './constants.js';
-import {
-  SESSION_EXTRACTION_SYSTEM,
-  buildSessionExtractionPrompt,
-} from './prompts.js';
+import { buildSessionExtractionPrompt } from './prompts.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
@@ -166,12 +163,10 @@ export async function extractSessionMemories(recentMessages) {
       .map((m) => `[${m.type}] ${m.content}`)
       .join('\n');
 
-    const response = await generateRaw({
-      prompt: buildSessionExtractionPrompt(chatHistory, existingText),
-      systemPrompt: SESSION_EXTRACTION_SYSTEM,
-      quietToLoud: false,
-      responseLength: settings.session_response_length ?? 500,
-    });
+    const response = await generateMemoryExtract(
+      buildSessionExtractionPrompt(chatHistory, existingText),
+      { responseLength: settings.session_response_length ?? 500 },
+    );
 
     console.log('[SmartMemory] Session extraction response:', response);
 

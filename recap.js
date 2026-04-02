@@ -32,11 +32,11 @@
  */
 
 import {
-  generateQuietPrompt,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
 } from '../../../../script.js';
+import { generateMemorySummarize } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_RECAP } from './constants.js';
 import { RECAP_PROMPT } from './prompts.js';
@@ -75,12 +75,10 @@ export function getAwayHours() {
 export async function generateRecap() {
   const settings = extension_settings[MODULE_NAME];
   try {
-    const response = await generateQuietPrompt({
-      quietPrompt: RECAP_PROMPT,
-      skipWIAN: true,
-      responseLength: settings.recap_response_length ?? 300,
-      removeReasoning: true,
-    });
+    const response = await generateMemorySummarize(
+      RECAP_PROMPT,
+      { responseLength: settings.recap_response_length ?? 300 },
+    );
     return response?.trim() || null;
   } catch (err) {
     console.error('[SmartMemory] Recap generation failed:', err);

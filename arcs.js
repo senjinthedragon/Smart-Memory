@@ -34,14 +34,14 @@
  */
 
 import {
-  generateRaw,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
 } from '../../../../script.js';
+import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_ARCS } from './constants.js';
-import { ARC_EXTRACTION_SYSTEM, buildArcExtractionPrompt } from './prompts.js';
+import { buildArcExtractionPrompt } from './prompts.js';
 
 // ---- Storage ------------------------------------------------------------
 
@@ -158,12 +158,10 @@ export async function extractArcs(messages) {
     const existing = loadArcs();
     const existingText = existing.map((a) => `[arc] ${a.content}`).join('\n');
 
-    const response = await generateRaw({
-      prompt: buildArcExtractionPrompt(chatHistory, existingText),
-      systemPrompt: ARC_EXTRACTION_SYSTEM,
-      quietToLoud: false,
-      responseLength: settings.arcs_response_length ?? 400,
-    });
+    const response = await generateMemoryExtract(
+      buildArcExtractionPrompt(chatHistory, existingText),
+      { responseLength: settings.arcs_response_length ?? 400 },
+    );
 
     console.log('[SmartMemory] Arc extraction response:', response);
 

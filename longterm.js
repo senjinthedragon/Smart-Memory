@@ -35,11 +35,11 @@
  */
 
 import {
-  generateRaw,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
 } from '../../../../script.js';
+import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import {
   MODULE_NAME,
@@ -47,7 +47,7 @@ import {
   MEMORY_TYPES,
   META_KEY,
 } from './constants.js';
-import { EXTRACTION_SYSTEM_PROMPT, buildExtractionPrompt } from './prompts.js';
+import { buildExtractionPrompt } from './prompts.js';
 
 // ---- Storage helpers ----------------------------------------------------
 
@@ -196,12 +196,10 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     const existingMemories = loadCharacterMemories(characterName);
     const existingText = formatMemoriesForPrompt(existingMemories);
 
-    const response = await generateRaw({
-      prompt: buildExtractionPrompt(chatHistory, existingText),
-      systemPrompt: EXTRACTION_SYSTEM_PROMPT,
-      quietToLoud: false,
-      responseLength: settings.longterm_response_length || 600,
-    });
+    const response = await generateMemoryExtract(
+      buildExtractionPrompt(chatHistory, existingText),
+      { responseLength: settings.longterm_response_length || 600 },
+    );
 
     console.log(
       `[SmartMemory] Raw extraction response for "${characterName}":`,

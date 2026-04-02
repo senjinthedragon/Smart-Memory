@@ -30,12 +30,12 @@
  */
 
 import {
-  generateQuietPrompt,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
   getMaxContextSize,
 } from '../../../../script.js';
+import { generateMemorySummarize } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
@@ -126,22 +126,16 @@ export async function runCompaction() {
         existingSummary,
       ).replace('{{new_events}}', newEvents);
 
-      raw = await generateQuietPrompt({
-        quietPrompt: updatePrompt,
-        quietToLoud: false,
-        skipWIAN: true,
-        responseLength: settings.compaction_response_length || 1500,
-        removeReasoning: true,
-      });
+      raw = await generateMemorySummarize(
+        updatePrompt,
+        { responseLength: settings.compaction_response_length || 1500 },
+      );
     } else {
       // Full compaction: first time or fresh chat with no existing summary.
-      raw = await generateQuietPrompt({
-        quietPrompt: SUMMARY_PROMPT,
-        quietToLoud: false,
-        skipWIAN: true,
-        responseLength: settings.compaction_response_length || 1500,
-        removeReasoning: true,
-      });
+      raw = await generateMemorySummarize(
+        SUMMARY_PROMPT,
+        { responseLength: settings.compaction_response_length || 1500 },
+      );
     }
 
     if (!raw || raw.trim() === '') return null;

@@ -45,6 +45,7 @@ import {
   renderExtensionTemplateAsync,
 } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY } from './constants.js';
+import { memory_sources } from './generate.js';
 
 import {
   shouldCompact,
@@ -92,6 +93,9 @@ import { checkContinuity } from './continuity.js';
 
 const defaultSettings = {
   enabled: true,
+
+  // LLM source for all memory operations (extraction, summarization, recap)
+  source: memory_sources.main,
 
   // Short-term (compaction)
   compaction_enabled: true,
@@ -538,6 +542,14 @@ function bindSettingsUI() {
     .prop('checked', s.enabled)
     .on('change', function () {
       getSettings().enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
+  // ---- LLM source -----------------------------------------------------
+  $('#sm_source')
+    .val(s.source ?? memory_sources.main)
+    .on('change', function () {
+      getSettings().source = $(this).val();
       saveSettingsDebounced();
     });
 
