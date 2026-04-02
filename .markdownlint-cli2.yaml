@@ -1,0 +1,3 @@
+config:
+  # Disable line-length rule - documentation prose shouldn't be hard-wrapped at 80 chars
+  MD013: false

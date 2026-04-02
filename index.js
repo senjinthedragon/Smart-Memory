@@ -71,9 +71,7 @@ import {
 import {
   extractSessionMemories,
   injectSessionMemories,
-  loadSessionMemories,
   clearSessionMemories,
-  formatSessionMemories,
 } from './session.js';
 import {
   processSceneBreak,

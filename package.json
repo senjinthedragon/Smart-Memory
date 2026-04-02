@@ -1,0 +1,12 @@
+{
+  "name": "smart-memory",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Smart Memory - SillyTavern extension",
+  "license": "AGPL-3.0-or-later",
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "markdownlint-cli2": "^0.17.0"
+  }
+}

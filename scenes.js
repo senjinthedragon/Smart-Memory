@@ -36,7 +36,6 @@
 
 import {
   generateRaw,
-  generateQuietPrompt,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
