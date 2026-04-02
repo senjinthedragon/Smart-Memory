@@ -119,7 +119,7 @@ const defaultSettings = {
   session_response_length: 500,
   session_inject_budget: 400,
   session_position: extension_prompt_types.IN_CHAT,
-  session_depth: 4,
+  session_depth: 3,
   session_role: extension_prompt_roles.SYSTEM,
   session_template: '[Details from this session:\n{{session}}]',
 
