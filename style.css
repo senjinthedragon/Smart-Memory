@@ -264,6 +264,12 @@
 #smart_memory_settings .sm_type_preference   { background: #5a8e5a; }
 #smart_memory_settings .sm_type_event        { background: #8e6e3a; }
 
+/* Session memory type badges */
+#smart_memory_settings .sm_type_scene        { background: #5a8e7a; }
+#smart_memory_settings .sm_type_revelation   { background: #8e5a5a; }
+#smart_memory_settings .sm_type_development  { background: #7a7a3a; }
+#smart_memory_settings .sm_type_detail       { background: #3a7a8e; }
+
 #smart_memory_settings .sm_memory_text {
     flex: 1;
     line-height: 1.4;

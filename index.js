@@ -72,7 +72,12 @@ import {
   setFreshStart,
 } from './longterm.js';
 import { updateLastActive, getAwayHours, generateRecap, injectRecap, clearRecap } from './recap.js';
-import { extractSessionMemories, injectSessionMemories, clearSessionMemories } from './session.js';
+import {
+  extractSessionMemories,
+  injectSessionMemories,
+  loadSessionMemories,
+  clearSessionMemories,
+} from './session.js';
 import {
   processSceneBreak,
   injectSceneHistory,
@@ -290,6 +295,7 @@ async function onCharacterMessageRendered() {
         jobs.push(
           extractSessionMemories(recentMessages).then((count) => {
             injectSessionMemories();
+            updateSessionUI();
             return count;
           }),
         );
@@ -371,6 +377,7 @@ async function onChatChanged() {
 
   updateLongTermUI(characterName);
   updateFreshStartUI(freshStart);
+  updateSessionUI();
   updateScenesUI();
   updateArcsUI();
   updateTokenDisplay();
@@ -526,6 +533,45 @@ function updateLongTermUI(characterName) {
 /** Syncs the Fresh Start checkbox state. */
 function updateFreshStartUI(freshStart) {
   $('#sm_fresh_start').prop('checked', !!freshStart);
+}
+
+/**
+ * Re-renders the session memory list with per-entry delete buttons.
+ * Shows a placeholder when no session memories exist yet.
+ */
+function updateSessionUI() {
+  const memories = loadSessionMemories();
+  const $list = $('#sm_session_list');
+  $list.empty();
+
+  if (memories.length === 0) {
+    $list.append('<div class="sm_no_char">No session memories yet.</div>');
+    return;
+  }
+
+  memories.forEach((mem, idx) => {
+    const $item = $(`
+            <div class="sm_memory_item" data-index="${idx}">
+                <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
+                <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                <button class="sm_delete_session_memory menu_button" data-index="${idx}" title="Delete this memory">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
+        `);
+    $list.append($item);
+  });
+
+  $list.find('.sm_delete_session_memory').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const context = getContext();
+    const meta = context.chatMetadata?.[META_KEY];
+    if (!meta?.sessionMemories) return;
+    meta.sessionMemories.splice(idx, 1);
+    await context.saveMetadata();
+    injectSessionMemories();
+    updateSessionUI();
+  });
 }
 
 /** Re-renders the scene history list. */
@@ -926,6 +972,7 @@ function bindSettingsUI() {
     if (!confirm('Clear all session memories for this chat?')) return;
     await clearSessionMemories();
     injectSessionMemories();
+    updateSessionUI();
     setStatusMessage('Session memories cleared.');
   });
 
