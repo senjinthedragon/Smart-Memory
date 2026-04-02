@@ -33,6 +33,33 @@
         </select>
       </div>
 
+      <!-- Catch Up / Reset buttons -->
+      <div class="sm-block">
+        <button id="sm_catch_up" class="menu_button menu_button_icon" style="width: 100%;">
+          <i class="fa-solid fa-forward-fast"></i>
+          <span>
+            Catch Up - Extract All from Full Chat
+            <span class="sm-info" data-tooltip="Runs every enabled extraction tier (long-term memories, session details, story arcs, scene history, and short-term summary) against the full chat history at once. Use this to onboard an existing chat that Smart Memory has not processed yet.">ⓘ</span>
+          </span>
+        </button>
+      </div>
+      <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <button id="sm_clear_chat_context" class="menu_button menu_button_icon">
+          <i class="fa-solid fa-broom"></i>
+          <span>
+            Clear Chat Context
+            <span class="sm-info" data-tooltip="Clears Smart Memory's extracted state for this chat - summary, session memories, scene history, and story arcs. Long-term memories are not affected. Use before Catch Up to re-derive everything cleanly from scratch.">ⓘ</span>
+          </span>
+        </button>
+        <button id="sm_fresh_start_button" class="menu_button menu_button_icon">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span>
+            Fresh Start
+            <span class="sm-info" data-tooltip="Clears everything including long-term memories for this character, then suppresses future memory injection for this chat. Use after throwaway or test sessions so nothing carries over to future chats.">ⓘ</span>
+          </span>
+        </button>
+      </div>
+
       <hr class="sysHR" />
 
       <!-- ══ TOKEN USAGE ══ -->
@@ -238,7 +265,11 @@
 
           <p class="sm-section-title">Memories for Current Session</p>
           <div id="sm_session_list" class="sm_memories_list"></div>
-          <div class="sm-block" style="margin-top: 6px;">
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+            <button id="sm_extract_session_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>Extract Now</span>
+            </button>
             <button id="sm_clear_session" class="menu_button menu_button_icon">
               <i class="fa-solid fa-trash-can"></i>
               <span>Clear Session Memories</span>
@@ -405,7 +436,11 @@
           <div id="sm_scenes_list" class="sm_scenes_list">
             <div class="sm_no_char">No scenes recorded yet.</div>
           </div>
-          <div class="sm-block" style="margin-top: 6px;">
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+            <button id="sm_extract_scenes_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>Extract Scene</span>
+            </button>
             <button id="sm_clear_scenes" class="menu_button menu_button_icon">
               <i class="fa-solid fa-trash-can"></i>
               <span>Clear Scene History</span>

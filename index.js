@@ -81,8 +81,10 @@ import {
 } from './session.js';
 import {
   processSceneBreak,
+  summarizeScene,
   injectSceneHistory,
   loadSceneHistory,
+  saveSceneHistory,
   clearSceneHistory,
 } from './scenes.js';
 import { extractArcs, injectArcs, loadArcs, clearArcs, deleteArc } from './arcs.js';
@@ -994,6 +996,25 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  $('#sm_extract_session_now').on('click', async function () {
+    $(this).prop('disabled', true);
+    setStatusMessage('Extracting session memories...');
+    try {
+      const context = getContext();
+      const count = await extractSessionMemories(context.chat);
+      injectSessionMemories();
+      updateSessionUI();
+      updateTokenDisplay();
+      setStatusMessage(
+        count > 0
+          ? `${count} session item${count === 1 ? '' : 's'} saved.`
+          : 'No new session items found.',
+      );
+    } finally {
+      $(this).prop('disabled', false);
+    }
+  });
+
   $('#sm_clear_session').on('click', async function () {
     if (!confirm('Clear all session memories for this chat?')) return;
     await clearSessionMemories();
@@ -1057,6 +1078,34 @@ function bindSettingsUI() {
       $('#sm_scene_inject_budget_value').text(v);
       saveSettingsDebounced();
     });
+
+  $('#sm_extract_scenes_now').on('click', async function () {
+    $(this).prop('disabled', true);
+    setStatusMessage('Summarizing current scene...');
+    try {
+      const context = getContext();
+      // Use buffered messages since last break if available, else fall back to full chat.
+      const messages = sceneMessageBuffer.length > 0 ? sceneMessageBuffer : context.chat;
+      const summary = await summarizeScene(messages);
+      if (summary) {
+        const history = loadSceneHistory();
+        const max = getSettings().scene_max_history ?? 5;
+        history.push({ summary, ts: Date.now() });
+        if (history.length > max) history.splice(0, history.length - max);
+        await saveSceneHistory(history);
+        // Reset the buffer - we just archived what was in it.
+        sceneMessageBuffer = [];
+        injectSceneHistory();
+        updateScenesUI();
+        updateTokenDisplay();
+        setStatusMessage('Scene added to history.');
+      } else {
+        setStatusMessage('Scene summary failed.');
+      }
+    } finally {
+      $(this).prop('disabled', false);
+    }
+  });
 
   $('#sm_clear_scenes').on('click', async function () {
     if (!confirm('Clear all scene history for this chat?')) return;
@@ -1192,6 +1241,212 @@ function bindSettingsUI() {
     } finally {
       $(this).prop('disabled', false);
     }
+  });
+
+  // ---- Catch Up -------------------------------------------------------
+  $('#sm_catch_up').on('click', async function () {
+    if (extractionRunning || compactionRunning) {
+      toastr.warning('An extraction is already running.', 'Smart Memory', { timeOut: 3000 });
+      return;
+    }
+    const characterName = getCurrentCharacterName();
+    if (!characterName) {
+      toastr.warning('No character is active.', 'Smart Memory', { timeOut: 3000 });
+      return;
+    }
+
+    extractionRunning = true;
+    compactionRunning = true;
+    $(this).prop('disabled', true);
+    setStatusMessage('Running full catch-up...');
+
+    try {
+      const context = getContext();
+      const chat = context.chat;
+      const settings = getSettings();
+
+      const jobs = [];
+
+      // Long-term extraction + optional consolidation.
+      if (settings.longterm_enabled) {
+        jobs.push(
+          extractAndStoreMemories(characterName, chat).then(async (count) => {
+            if (count > 0 && settings.longterm_consolidate) {
+              await consolidateMemories(characterName);
+            }
+            injectMemories(characterName, isFreshStart());
+            updateLongTermUI(characterName);
+            saveSettingsDebounced();
+            return count;
+          }),
+        );
+      }
+
+      // Session extraction.
+      if (settings.session_enabled) {
+        jobs.push(
+          extractSessionMemories(chat).then((count) => {
+            injectSessionMemories();
+            updateSessionUI();
+            return count;
+          }),
+        );
+      }
+
+      // Story arc extraction.
+      if (settings.arcs_enabled) {
+        jobs.push(
+          extractArcs(chat).then((count) => {
+            injectArcs();
+            updateArcsUI();
+            return count;
+          }),
+        );
+      }
+
+      // Scene - summarize the whole chat as the current active scene and
+      // append it to history, then reset the buffer.
+      if (settings.scene_enabled) {
+        jobs.push(
+          summarizeScene(chat).then(async (summary) => {
+            if (!summary) return 0;
+            const history = loadSceneHistory();
+            const max = settings.scene_max_history ?? 5;
+            history.push({ summary, ts: Date.now() });
+            if (history.length > max) history.splice(0, history.length - max);
+            await saveSceneHistory(history);
+            sceneMessageBuffer = [];
+            injectSceneHistory();
+            updateScenesUI();
+            return 1;
+          }),
+        );
+      }
+
+      // Short-term compaction.
+      if (settings.compaction_enabled) {
+        jobs.push(
+          runCompaction().then((summary) => {
+            if (summary) {
+              injectSummary(summary);
+              updateShortTermUI(summary);
+            }
+            return summary ? 1 : 0;
+          }),
+        );
+      }
+
+      const counts = await Promise.all(jobs);
+      const total = counts.reduce((a, b) => a + b, 0);
+      updateTokenDisplay();
+      setStatusMessage(
+        total > 0
+          ? `Catch-up complete: ${total} item${total === 1 ? '' : 's'} processed.`
+          : 'Catch-up complete.',
+      );
+      toastr.success('Full catch-up extraction finished.', 'Smart Memory', {
+        timeOut: 4000,
+        positionClass: 'toast-bottom-right',
+      });
+    } catch (err) {
+      console.error('[SmartMemory] Catch-up failed:', err);
+      setStatusMessage('Catch-up failed.');
+    } finally {
+      $(this).prop('disabled', false);
+      extractionRunning = false;
+      compactionRunning = false;
+    }
+  });
+
+  // ---- Clear Chat Context ---------------------------------------------
+  $('#sm_clear_chat_context').on('click', async function () {
+    if (
+      !confirm(
+        'Clear all Smart Memory context for this chat?\n\nThis will erase the summary, session memories, scene history, and story arcs. Long-term memories are not affected.',
+      )
+    )
+      return;
+
+    const context = getContext();
+    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+    // Wipe short-term summary state.
+    delete context.chatMetadata[META_KEY].summary;
+    delete context.chatMetadata[META_KEY].summaryEnd;
+    delete context.chatMetadata[META_KEY].summaryUpdated;
+
+    // Clear the other chat-scoped tiers.
+    await clearSessionMemories();
+    await clearSceneHistory();
+    await clearArcs();
+    await context.saveMetadata();
+
+    // Clearing chatMetadata means loadAndInjectSummary will clear the slot.
+    loadAndInjectSummary();
+    injectSessionMemories();
+    injectSceneHistory();
+    injectArcs();
+
+    updateShortTermUI(null);
+    updateSessionUI();
+    updateScenesUI();
+    updateArcsUI();
+    updateTokenDisplay();
+    sceneMessageBuffer = [];
+    setStatusMessage('Chat context cleared.');
+  });
+
+  // ---- Fresh Start ----------------------------------------------------
+  $('#sm_fresh_start_button').on('click', async function () {
+    const characterName = getCurrentCharacterName();
+    const nameLabel = characterName ? `"${characterName}"` : 'this character';
+    if (
+      !confirm(
+        `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nMemory injection will also be suppressed for this chat.\n\nThis cannot be undone. Continue?`,
+      )
+    )
+      return;
+
+    // Clear long-term memories for the character.
+    if (characterName) {
+      clearCharacterMemories(characterName);
+      saveSettingsDebounced();
+    }
+
+    // Clear all chat-scoped tiers.
+    const context = getContext();
+    if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+    delete context.chatMetadata[META_KEY].summary;
+    delete context.chatMetadata[META_KEY].summaryEnd;
+    delete context.chatMetadata[META_KEY].summaryUpdated;
+
+    await clearSessionMemories();
+    await clearSceneHistory();
+    await clearArcs();
+
+    // Enable the fresh-start flag so long-term injection stays suppressed.
+    await setFreshStart(true);
+    await context.saveMetadata();
+
+    // Clear all injection slots.
+    loadAndInjectSummary();
+    injectMemories(characterName, true);
+    injectSessionMemories();
+    injectSceneHistory();
+    injectArcs();
+
+    updateShortTermUI(null);
+    updateLongTermUI(characterName);
+    updateFreshStartUI(true);
+    updateSessionUI();
+    updateScenesUI();
+    updateArcsUI();
+    updateTokenDisplay();
+    sceneMessageBuffer = [];
+    setStatusMessage('Fresh start complete.');
+    toastr.success(`All memories cleared for ${nameLabel}.`, 'Smart Memory', {
+      timeOut: 4000,
+      positionClass: 'toast-bottom-right',
+    });
   });
 
   // ---- Continuity checker ---------------------------------------------
