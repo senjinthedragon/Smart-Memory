@@ -34,13 +34,17 @@
       </div>
 
       <!-- Catch Up / Reset buttons -->
-      <div class="sm-block">
-        <button id="sm_catch_up" class="menu_button menu_button_icon" style="width: 100%;">
+      <div class="sm-block" style="display: flex; gap: 6px; align-items: center;">
+        <button id="sm_catch_up" class="menu_button menu_button_icon" style="flex: 1;">
           <i class="fa-solid fa-forward-fast"></i>
           <span>
             Catch Up - Extract All from Full Chat
-            <span class="sm-info" data-tooltip="Runs every enabled extraction tier (long-term memories, session details, story arcs, scene history, and short-term summary) against the full chat history at once. Use this to onboard an existing chat that Smart Memory has not processed yet.">ⓘ</span>
+            <span class="sm-info" data-tooltip="Processes the full chat history in chunks of 20 messages, running every enabled extraction tier (long-term, session, arcs, scenes, summary) across the whole backlog. Use this to onboard an existing chat. May take a while on long chats.">ⓘ</span>
           </span>
+        </button>
+        <button id="sm_cancel_catch_up" class="menu_button menu_button_icon" style="display: none;">
+          <i class="fa-solid fa-stop"></i>
+          <span>Cancel</span>
         </button>
       </div>
       <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap;">

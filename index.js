@@ -174,6 +174,9 @@ let messagesSinceLastExtraction = 0;
 let compactionRunning = false;
 let extractionRunning = false;
 
+// Set to true by the Cancel button to abort an in-progress catch-up loop.
+let catchUpCancelled = false;
+
 // True while a recap is injected; cleared after the first AI response.
 let recapActive = false;
 
@@ -1244,6 +1247,12 @@ function bindSettingsUI() {
   });
 
   // ---- Catch Up -------------------------------------------------------
+
+  // Number of messages processed per extraction call. Large enough to give
+  // the model meaningful context, small enough to stay within local model
+  // context windows. Must match what users would expect for cost on paid APIs.
+  const CATCH_UP_CHUNK_SIZE = 20;
+
   $('#sm_catch_up').on('click', async function () {
     if (extractionRunning || compactionRunning) {
       toastr.warning('An extraction is already running.', 'Smart Memory', { timeOut: 3000 });
@@ -1257,105 +1266,117 @@ function bindSettingsUI() {
 
     extractionRunning = true;
     compactionRunning = true;
-    $(this).prop('disabled', true);
-    setStatusMessage('Running full catch-up...');
+    catchUpCancelled = false;
+    $('#sm_catch_up').hide();
+    $('#sm_cancel_catch_up').show().prop('disabled', false);
 
     try {
       const context = getContext();
-      const chat = context.chat;
       const settings = getSettings();
 
-      const jobs = [];
+      // Filter to real messages only so system/hidden entries don't inflate
+      // the chunk count or confuse the model.
+      const allMessages = context.chat.filter((m) => m.mes && !m.is_system);
+      const total = allMessages.length;
 
-      // Long-term extraction + optional consolidation.
-      if (settings.longterm_enabled) {
-        jobs.push(
-          extractAndStoreMemories(characterName, chat).then(async (count) => {
-            if (count > 0 && settings.longterm_consolidate) {
-              await consolidateMemories(characterName);
-            }
-            injectMemories(characterName, isFreshStart());
-            updateLongTermUI(characterName);
-            saveSettingsDebounced();
-            return count;
-          }),
-        );
+      // Process the chat in fixed-size chunks sequentially. Each extraction
+      // function loads its existing results and passes them as context to the
+      // model, so each chunk naturally builds on what the previous one found.
+      for (let i = 0; i < total; i += CATCH_UP_CHUNK_SIZE) {
+        if (catchUpCancelled) break;
+
+        const chunk = allMessages.slice(i, i + CATCH_UP_CHUNK_SIZE);
+        const processed = Math.min(i + CATCH_UP_CHUNK_SIZE, total);
+        const pct = Math.round((processed / total) * 100);
+        setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
+
+        if (settings.longterm_enabled && characterName) {
+          await extractAndStoreMemories(characterName, chunk);
+        }
+        if (settings.session_enabled) {
+          await extractSessionMemories(chunk);
+        }
+        if (settings.arcs_enabled) {
+          await extractArcs(chunk);
+        }
       }
 
-      // Session extraction.
-      if (settings.session_enabled) {
-        jobs.push(
-          extractSessionMemories(chat).then((count) => {
-            injectSessionMemories();
-            updateSessionUI();
-            return count;
-          }),
-        );
-      }
-
-      // Story arc extraction.
-      if (settings.arcs_enabled) {
-        jobs.push(
-          extractArcs(chat).then((count) => {
-            injectArcs();
-            updateArcsUI();
-            return count;
-          }),
-        );
-      }
-
-      // Scene - summarize the whole chat as the current active scene and
-      // append it to history, then reset the buffer.
-      if (settings.scene_enabled) {
-        jobs.push(
-          summarizeScene(chat).then(async (summary) => {
-            if (!summary) return 0;
+      if (!catchUpCancelled) {
+        // Scene: summarize the full chat as a single scene entry rather than
+        // one entry per chunk, since scene history is a coarse narrative view.
+        if (settings.scene_enabled) {
+          setStatusMessage('Summarizing scene history...');
+          const sceneSummary = await summarizeScene(context.chat);
+          if (sceneSummary) {
             const history = loadSceneHistory();
             const max = settings.scene_max_history ?? 5;
-            history.push({ summary, ts: Date.now() });
+            history.push({ summary: sceneSummary, ts: Date.now() });
             if (history.length > max) history.splice(0, history.length - max);
             await saveSceneHistory(history);
             sceneMessageBuffer = [];
-            injectSceneHistory();
-            updateScenesUI();
-            return 1;
-          }),
-        );
+          }
+        }
+
+        // Consolidate after all chunks so the model sees the full merged set.
+        if (settings.longterm_enabled && settings.longterm_consolidate && characterName) {
+          setStatusMessage('Consolidating memories...');
+          await consolidateMemories(characterName);
+        }
+
+        // Short-term compaction runs once at the end - it uses the real token
+        // count to decide what to include, so chunking doesn't apply.
+        if (settings.compaction_enabled) {
+          setStatusMessage('Generating summary...');
+          const summary = await runCompaction();
+          if (summary) {
+            injectSummary(summary);
+            updateShortTermUI(summary);
+          }
+        }
       }
 
-      // Short-term compaction.
-      if (settings.compaction_enabled) {
-        jobs.push(
-          runCompaction().then((summary) => {
-            if (summary) {
-              injectSummary(summary);
-              updateShortTermUI(summary);
-            }
-            return summary ? 1 : 0;
-          }),
-        );
-      }
-
-      const counts = await Promise.all(jobs);
-      const total = counts.reduce((a, b) => a + b, 0);
+      // Re-inject and refresh UI for everything processed so far, whether the
+      // run completed or was cancelled partway through.
+      injectMemories(characterName, isFreshStart());
+      injectSessionMemories();
+      injectSceneHistory();
+      injectArcs();
+      updateLongTermUI(characterName);
+      updateSessionUI();
+      updateScenesUI();
+      updateArcsUI();
       updateTokenDisplay();
-      setStatusMessage(
-        total > 0
-          ? `Catch-up complete: ${total} item${total === 1 ? '' : 's'} processed.`
-          : 'Catch-up complete.',
-      );
-      toastr.success('Full catch-up extraction finished.', 'Smart Memory', {
-        timeOut: 4000,
-        positionClass: 'toast-bottom-right',
-      });
+      saveSettingsDebounced();
+
+      if (catchUpCancelled) {
+        setStatusMessage('Catch-up cancelled.');
+        toastr.warning('Catch-up cancelled. Partial results have been saved.', 'Smart Memory', {
+          timeOut: 5000,
+          positionClass: 'toast-bottom-right',
+        });
+      } else {
+        setStatusMessage('Catch-up complete.');
+        toastr.success('Full catch-up extraction finished.', 'Smart Memory', {
+          timeOut: 4000,
+          positionClass: 'toast-bottom-right',
+        });
+      }
     } catch (err) {
       console.error('[SmartMemory] Catch-up failed:', err);
       setStatusMessage('Catch-up failed.');
     } finally {
-      $(this).prop('disabled', false);
+      $('#sm_cancel_catch_up').hide();
+      $('#sm_catch_up').show();
       extractionRunning = false;
       compactionRunning = false;
+      catchUpCancelled = false;
     }
+  });
+
+  $('#sm_cancel_catch_up').on('click', function () {
+    catchUpCancelled = true;
+    $(this).prop('disabled', true);
+    setStatusMessage('Cancelling...');
   });
 
   // ---- Clear Chat Context ---------------------------------------------
