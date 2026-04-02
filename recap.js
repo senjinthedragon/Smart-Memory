@@ -103,13 +103,14 @@ export function injectRecap(recap) {
       ? `[You've been away for ${Math.round(hoursAway / 24)} day(s). Previously in this story:]`
       : `[Picking up where you left off:]`;
 
+  const settings = extension_settings[MODULE_NAME];
   setExtensionPrompt(
     PROMPT_KEY_RECAP,
     `${header}\n${recap}`,
-    extension_prompt_types.IN_PROMPT,
-    0,
+    settings.recap_position ?? extension_prompt_types.IN_PROMPT,
+    settings.recap_depth ?? 0,
     false,
-    extension_prompt_roles.SYSTEM,
+    settings.recap_role ?? extension_prompt_roles.SYSTEM,
   );
 }
 

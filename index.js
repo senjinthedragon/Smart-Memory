@@ -149,6 +149,9 @@ const defaultSettings = {
   recap_enabled: true,
   recap_threshold_hours: 4,
   recap_response_length: 300,
+  recap_position: extension_prompt_types.IN_PROMPT,
+  recap_depth: 0,
+  recap_role: extension_prompt_roles.SYSTEM,
 
   // Continuity
   continuity_response_length: 300,
@@ -784,6 +787,26 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  $(`input[name="sm_session_position"][value="${s.session_position}"]`).prop('checked', true);
+  $('input[name="sm_session_position"]').on('change', function () {
+    getSettings().session_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_session_depth')
+    .val(s.session_depth)
+    .on('input', function () {
+      getSettings().session_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_session_role')
+    .val(s.session_role)
+    .on('change', function () {
+      getSettings().session_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
   $('#sm_clear_session').on('click', async function () {
     if (!confirm('Clear all session memories for this chat?')) return;
     await clearSessionMemories();
@@ -817,6 +840,26 @@ function bindSettingsUI() {
     });
   $('#sm_scene_max_history_value').text(s.scene_max_history);
 
+  $(`input[name="sm_scene_position"][value="${s.scene_position}"]`).prop('checked', true);
+  $('input[name="sm_scene_position"]').on('change', function () {
+    getSettings().scene_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_scene_depth')
+    .val(s.scene_depth)
+    .on('input', function () {
+      getSettings().scene_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_scene_role')
+    .val(s.scene_role)
+    .on('change', function () {
+      getSettings().scene_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
   $('#sm_clear_scenes').on('click', async function () {
     if (!confirm('Clear all scene history for this chat?')) return;
     await clearSceneHistory();
@@ -843,6 +886,26 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
   $('#sm_arcs_max_value').text(s.arcs_max);
+
+  $(`input[name="sm_arcs_position"][value="${s.arcs_position}"]`).prop('checked', true);
+  $('input[name="sm_arcs_position"]').on('change', function () {
+    getSettings().arcs_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_arcs_depth')
+    .val(s.arcs_depth)
+    .on('input', function () {
+      getSettings().arcs_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_arcs_role')
+    .val(s.arcs_role)
+    .on('change', function () {
+      getSettings().arcs_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
 
   $('#sm_extract_arcs_now').on('click', async function () {
     $(this).prop('disabled', true);
@@ -887,6 +950,26 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
   $('#sm_recap_threshold_value').text(s.recap_threshold_hours + 'h');
+
+  $(`input[name="sm_recap_position"][value="${s.recap_position}"]`).prop('checked', true);
+  $('input[name="sm_recap_position"]').on('change', function () {
+    getSettings().recap_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_recap_depth')
+    .val(s.recap_depth)
+    .on('input', function () {
+      getSettings().recap_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_recap_role')
+    .val(s.recap_role)
+    .on('change', function () {
+      getSettings().recap_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
 
   $('#sm_recap_now').on('click', async function () {
     $(this).prop('disabled', true);

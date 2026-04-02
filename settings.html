@@ -331,6 +331,36 @@
             placeholder="[Details from this session:\n{{session}}]"
           ></textarea>
 
+          <label>Injection position</label>
+          <div class="radio_group">
+            <label>
+              <input type="radio" name="sm_session_position" value="2" />
+              <span>Before Main Prompt</span>
+            </label>
+            <label>
+              <input type="radio" name="sm_session_position" value="0" />
+              <span>After Main Prompt</span>
+            </label>
+            <label class="flex-container alignItemsCenter">
+              <input type="radio" name="sm_session_position" value="1" />
+              <span>In-chat @ Depth</span>
+              <input
+                id="sm_session_depth"
+                class="text_pole widthUnset"
+                type="number"
+                min="0"
+                max="999"
+                style="width: 4em; margin: 0 4px"
+              />
+              <span>as</span>
+              <select id="sm_session_role" class="text_pole widthNatural">
+                <option value="0">System</option>
+                <option value="1">User</option>
+                <option value="2">Assistant</option>
+              </select>
+            </label>
+          </div>
+
           <div style="margin-top: 6px">
             <button id="sm_clear_session" class="menu_button menu_button_icon">
               <i class="fa-solid fa-trash-can"></i>
@@ -382,6 +412,36 @@
             value="{{defaultSettings.scene_max_history}}"
           />
 
+          <label>Injection position</label>
+          <div class="radio_group">
+            <label>
+              <input type="radio" name="sm_scene_position" value="2" />
+              <span>Before Main Prompt</span>
+            </label>
+            <label>
+              <input type="radio" name="sm_scene_position" value="0" />
+              <span>After Main Prompt</span>
+            </label>
+            <label class="flex-container alignItemsCenter">
+              <input type="radio" name="sm_scene_position" value="1" />
+              <span>In-chat @ Depth</span>
+              <input
+                id="sm_scene_depth"
+                class="text_pole widthUnset"
+                type="number"
+                min="0"
+                max="999"
+                style="width: 4em; margin: 0 4px"
+              />
+              <span>as</span>
+              <select id="sm_scene_role" class="text_pole widthNatural">
+                <option value="0">System</option>
+                <option value="1">User</option>
+                <option value="2">Assistant</option>
+              </select>
+            </label>
+          </div>
+
           <label>Scene history</label>
           <div id="sm_scenes_list" class="sm_scenes_list">
             <div class="sm_no_char">No scenes recorded yet.</div>
@@ -427,6 +487,36 @@
             step="1"
             value="{{defaultSettings.arcs_max}}"
           />
+
+          <label>Injection position</label>
+          <div class="radio_group">
+            <label>
+              <input type="radio" name="sm_arcs_position" value="2" />
+              <span>Before Main Prompt</span>
+            </label>
+            <label>
+              <input type="radio" name="sm_arcs_position" value="0" />
+              <span>After Main Prompt</span>
+            </label>
+            <label class="flex-container alignItemsCenter">
+              <input type="radio" name="sm_arcs_position" value="1" />
+              <span>In-chat @ Depth</span>
+              <input
+                id="sm_arcs_depth"
+                class="text_pole widthUnset"
+                type="number"
+                min="0"
+                max="999"
+                style="width: 4em; margin: 0 4px"
+              />
+              <span>as</span>
+              <select id="sm_arcs_role" class="text_pole widthNatural">
+                <option value="0">System</option>
+                <option value="1">User</option>
+                <option value="2">Assistant</option>
+              </select>
+            </label>
+          </div>
 
           <label>Active story threads</label>
           <div id="sm_arcs_list" class="sm_arcs_list">
@@ -482,6 +572,36 @@
             step="1"
             value="{{defaultSettings.recap_threshold_hours}}"
           />
+
+          <label>Injection position</label>
+          <div class="radio_group">
+            <label>
+              <input type="radio" name="sm_recap_position" value="2" />
+              <span>Before Main Prompt</span>
+            </label>
+            <label>
+              <input type="radio" name="sm_recap_position" value="0" />
+              <span>After Main Prompt</span>
+            </label>
+            <label class="flex-container alignItemsCenter">
+              <input type="radio" name="sm_recap_position" value="1" />
+              <span>In-chat @ Depth</span>
+              <input
+                id="sm_recap_depth"
+                class="text_pole widthUnset"
+                type="number"
+                min="0"
+                max="999"
+                style="width: 4em; margin: 0 4px"
+              />
+              <span>as</span>
+              <select id="sm_recap_role" class="text_pole widthNatural">
+                <option value="0">System</option>
+                <option value="1">User</option>
+                <option value="2">Assistant</option>
+              </select>
+            </label>
+          </div>
 
           <div style="margin-top: 6px">
             <button id="sm_recap_now" class="menu_button menu_button_icon">
