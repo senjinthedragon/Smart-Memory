@@ -1343,13 +1343,19 @@ function bindSettingsUI() {
         setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
 
         if (settings.longterm_enabled && characterName) {
-          await extractAndStoreMemories(characterName, chunk);
+          await extractAndStoreMemories(characterName, chunk).catch((err) => {
+            console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
+          });
         }
         if (settings.session_enabled) {
-          await extractSessionMemories(chunk);
+          await extractSessionMemories(chunk).catch((err) => {
+            console.error('[SmartMemory] Catch-up session extraction error (chunk):', err);
+          });
         }
         if (settings.arcs_enabled) {
-          await extractArcs(chunk);
+          await extractArcs(chunk).catch((err) => {
+            console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
+          });
         }
       }
 
