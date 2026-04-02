@@ -38,7 +38,7 @@ import {
 import { generateMemorySummarize } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
-import { MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
+import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
 import { SUMMARY_PROMPT, UPDATE_SUMMARY_PROMPT } from './prompts.js';
 
 /**
@@ -167,8 +167,15 @@ export function injectSummary(summary) {
     return;
   }
 
+  // Truncate summary text if it exceeds the token budget.
+  const budget = settings.compaction_inject_budget ?? 800;
+  let summaryText = summary;
+  if (estimateTokens(summaryText) > budget) {
+    summaryText = summaryText.slice(0, budget * 4) + '... [truncated]';
+  }
+
   const template = settings.compaction_template || '[Story so far:\n{{summary}}]';
-  const content = template.replace('{{summary}}', summary);
+  const content = template.replace('{{summary}}', summaryText);
 
   setExtensionPrompt(
     PROMPT_KEY_SHORT,

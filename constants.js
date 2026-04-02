@@ -18,11 +18,11 @@
  */
 
 /**
- * Shared constants used across all modules.
+ * Shared constants and utilities used across all modules.
  *
  * Defines the extension/module name, chatMetadata key, setExtensionPrompt
  * injection keys, and the valid memory type enums for both long-term and
- * session memory.
+ * session memory. Also exports estimateTokens for injection budget checks.
  */
 
 /** Extension name as registered in extension_settings. */
@@ -47,3 +47,14 @@ export const SESSION_TYPES = ['scene', 'revelation', 'development', 'detail'];
 
 /** Top-level key under chatMetadata where all per-chat state is stored. */
 export const META_KEY = 'smartMemory';
+
+/**
+ * Rough token estimate for a string. Uses the standard ~4 chars-per-token
+ * heuristic - accurate enough for budget enforcement without needing an async
+ * tokenizer call.
+ * @param {string} text
+ * @returns {number}
+ */
+export function estimateTokens(text) {
+  return Math.ceil((text?.length ?? 0) / 4);
+}

@@ -40,7 +40,7 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY, PROMPT_KEY_ARCS } from './constants.js';
+import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_ARCS } from './constants.js';
 import { buildArcExtractionPrompt } from './prompts.js';
 
 // ---- Storage ------------------------------------------------------------
@@ -201,7 +201,16 @@ export function injectArcs() {
     return;
   }
 
-  const text = arcs.map((a) => `- ${a.content}`).join('\n');
+  // Trim to token budget: drop oldest arcs (from the front) until we fit.
+  const budget = settings.arcs_inject_budget ?? 200;
+  const trimmed = [...arcs];
+  while (trimmed.length > 1) {
+    const text = trimmed.map((a) => `- ${a.content}`).join('\n');
+    if (estimateTokens(text) <= budget) break;
+    trimmed.shift();
+  }
+
+  const text = trimmed.map((a) => `- ${a.content}`).join('\n');
   const content = `[Active story threads:\n${text}]`;
 
   setExtensionPrompt(

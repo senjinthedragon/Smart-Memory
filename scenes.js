@@ -41,7 +41,7 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
+import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
 import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
 
 // ---- Heuristics ---------------------------------------------------------
@@ -208,7 +208,16 @@ export function injectSceneHistory() {
     return;
   }
 
-  const text = history.map((s, i) => `Scene ${i + 1}: ${s.summary}`).join('\n');
+  // Trim to token budget: drop oldest scenes (from the front) until we fit.
+  const budget = settings.scene_inject_budget ?? 300;
+  const trimmed = [...history];
+  while (trimmed.length > 1) {
+    const text = trimmed.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
+    if (estimateTokens(text) <= budget) break;
+    trimmed.shift();
+  }
+
+  const text = trimmed.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
   const content = `[Previous scenes:\n${text}]`;
 
   setExtensionPrompt(

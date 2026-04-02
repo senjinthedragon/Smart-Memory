@@ -41,7 +41,13 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, PROMPT_KEY_LONG, MEMORY_TYPES, META_KEY } from './constants.js';
+import {
+  estimateTokens,
+  MODULE_NAME,
+  PROMPT_KEY_LONG,
+  MEMORY_TYPES,
+  META_KEY,
+} from './constants.js';
 import { buildExtractionPrompt } from './prompts.js';
 
 // ---- Storage helpers ----------------------------------------------------
@@ -242,7 +248,14 @@ export function injectMemories(characterName, freshStart = false) {
     return;
   }
 
-  const memoryText = formatMemoriesForPrompt(memories);
+  // Trim to token budget: sort newest-first, drop oldest entries until we fit.
+  const budget = settings.longterm_inject_budget ?? 500;
+  const trimmed = [...memories].sort((a, b) => b.ts - a.ts);
+  while (trimmed.length > 1 && estimateTokens(formatMemoriesForPrompt(trimmed)) > budget) {
+    trimmed.pop();
+  }
+
+  const memoryText = formatMemoriesForPrompt(trimmed);
   const template =
     settings.longterm_template || '[Memories from previous conversations:\n{{memories}}]';
   const content = template.replace('{{memories}}', memoryText);

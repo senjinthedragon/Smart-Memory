@@ -84,6 +84,7 @@ const defaultSettings = {
   compaction_threshold: 80,
   compaction_keep_recent: 10,
   compaction_response_length: 1500,
+  compaction_inject_budget: 800,
   compaction_position: extension_prompt_types.IN_PROMPT,
   compaction_depth: 0,
   compaction_role: extension_prompt_roles.SYSTEM,
@@ -95,6 +96,7 @@ const defaultSettings = {
   longterm_extract_every: 3,
   longterm_max_memories: 25,
   longterm_response_length: 600,
+  longterm_inject_budget: 500,
   longterm_position: extension_prompt_types.IN_PROMPT,
   longterm_depth: 2,
   longterm_role: extension_prompt_roles.SYSTEM,
@@ -105,6 +107,7 @@ const defaultSettings = {
   session_extract_every: 3,
   session_max_memories: 30,
   session_response_length: 500,
+  session_inject_budget: 400,
   session_position: extension_prompt_types.IN_PROMPT,
   session_depth: 1,
   session_role: extension_prompt_roles.SYSTEM,
@@ -115,6 +118,7 @@ const defaultSettings = {
   scene_ai_detect: false,
   scene_max_history: 5,
   scene_summary_length: 200,
+  scene_inject_budget: 300,
   scene_position: extension_prompt_types.IN_PROMPT,
   scene_depth: 3,
   scene_role: extension_prompt_roles.SYSTEM,
@@ -123,6 +127,7 @@ const defaultSettings = {
   arcs_enabled: true,
   arcs_max: 10,
   arcs_response_length: 400,
+  arcs_inject_budget: 200,
   arcs_position: extension_prompt_types.IN_PROMPT,
   arcs_depth: 1,
   arcs_role: extension_prompt_roles.SYSTEM,
@@ -621,6 +626,16 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  $('#sm_compaction_inject_budget_value').text(s.compaction_inject_budget ?? 800);
+  $('#sm_compaction_inject_budget')
+    .val(s.compaction_inject_budget ?? 800)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      getSettings().compaction_inject_budget = v;
+      $('#sm_compaction_inject_budget_value').text(v);
+      saveSettingsDebounced();
+    });
+
   $('#sm_summarize_now').on('click', async function () {
     if (compactionRunning) return;
     compactionRunning = true;
@@ -709,6 +724,16 @@ function bindSettingsUI() {
     .val(s.longterm_role)
     .on('change', function () {
       getSettings().longterm_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_longterm_inject_budget_value').text(s.longterm_inject_budget ?? 500);
+  $('#sm_longterm_inject_budget')
+    .val(s.longterm_inject_budget ?? 500)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      getSettings().longterm_inject_budget = v;
+      $('#sm_longterm_inject_budget_value').text(v);
       saveSettingsDebounced();
     });
 
@@ -809,6 +834,16 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  $('#sm_session_inject_budget_value').text(s.session_inject_budget ?? 400);
+  $('#sm_session_inject_budget')
+    .val(s.session_inject_budget ?? 400)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      getSettings().session_inject_budget = v;
+      $('#sm_session_inject_budget_value').text(v);
+      saveSettingsDebounced();
+    });
+
   $('#sm_clear_session').on('click', async function () {
     if (!confirm('Clear all session memories for this chat?')) return;
     await clearSessionMemories();
@@ -862,6 +897,16 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  $('#sm_scene_inject_budget_value').text(s.scene_inject_budget ?? 300);
+  $('#sm_scene_inject_budget')
+    .val(s.scene_inject_budget ?? 300)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      getSettings().scene_inject_budget = v;
+      $('#sm_scene_inject_budget_value').text(v);
+      saveSettingsDebounced();
+    });
+
   $('#sm_clear_scenes').on('click', async function () {
     if (!confirm('Clear all scene history for this chat?')) return;
     await clearSceneHistory();
@@ -906,6 +951,16 @@ function bindSettingsUI() {
     .val(s.arcs_role)
     .on('change', function () {
       getSettings().arcs_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_arcs_inject_budget_value').text(s.arcs_inject_budget ?? 200);
+  $('#sm_arcs_inject_budget')
+    .val(s.arcs_inject_budget ?? 200)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      getSettings().arcs_inject_budget = v;
+      $('#sm_arcs_inject_budget_value').text(v);
       saveSettingsDebounced();
     });
 

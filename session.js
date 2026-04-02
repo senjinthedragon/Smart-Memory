@@ -40,7 +40,13 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY, PROMPT_KEY_SESSION, SESSION_TYPES } from './constants.js';
+import {
+  estimateTokens,
+  MODULE_NAME,
+  META_KEY,
+  PROMPT_KEY_SESSION,
+  SESSION_TYPES,
+} from './constants.js';
 import { buildSessionExtractionPrompt } from './prompts.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
@@ -208,8 +214,15 @@ export function injectSessionMemories() {
     return;
   }
 
+  // Trim to token budget: sort newest-first, drop oldest entries until we fit.
+  const budget = settings.session_inject_budget ?? 400;
+  const trimmed = [...memories].sort((a, b) => b.ts - a.ts);
+  while (trimmed.length > 1 && estimateTokens(formatSessionMemories(trimmed)) > budget) {
+    trimmed.pop();
+  }
+
   const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
-  const content = template.replace('{{session}}', formatSessionMemories(memories));
+  const content = template.replace('{{session}}', formatSessionMemories(trimmed));
 
   setExtensionPrompt(
     PROMPT_KEY_SESSION,
