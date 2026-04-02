@@ -118,8 +118,8 @@ const defaultSettings = {
   session_max_memories: 30,
   session_response_length: 500,
   session_inject_budget: 400,
-  session_position: extension_prompt_types.IN_PROMPT,
-  session_depth: 1,
+  session_position: extension_prompt_types.IN_CHAT,
+  session_depth: 4,
   session_role: extension_prompt_roles.SYSTEM,
   session_template: '[Details from this session:\n{{session}}]',
 
@@ -129,8 +129,8 @@ const defaultSettings = {
   scene_max_history: 5,
   scene_summary_length: 200,
   scene_inject_budget: 300,
-  scene_position: extension_prompt_types.IN_PROMPT,
-  scene_depth: 3,
+  scene_position: extension_prompt_types.IN_CHAT,
+  scene_depth: 6,
   scene_role: extension_prompt_roles.SYSTEM,
 
   // Story arcs
@@ -138,15 +138,15 @@ const defaultSettings = {
   arcs_max: 10,
   arcs_response_length: 400,
   arcs_inject_budget: 200,
-  arcs_position: extension_prompt_types.IN_PROMPT,
-  arcs_depth: 1,
+  arcs_position: extension_prompt_types.IN_CHAT,
+  arcs_depth: 2,
   arcs_role: extension_prompt_roles.SYSTEM,
 
   // Away recap
   recap_enabled: true,
   recap_threshold_hours: 4,
   recap_response_length: 300,
-  recap_position: extension_prompt_types.IN_PROMPT,
+  recap_position: extension_prompt_types.IN_CHAT,
   recap_depth: 0,
   recap_role: extension_prompt_roles.SYSTEM,
 
