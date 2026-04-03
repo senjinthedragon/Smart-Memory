@@ -244,6 +244,7 @@ async function onCharacterMessageRendered() {
   if (recapActive) {
     clearRecap();
     recapActive = false;
+    updateTokenDisplay();
   }
 
   // Step 2: compaction (runs async - does not block extraction below).
