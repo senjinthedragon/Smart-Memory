@@ -221,7 +221,9 @@ If no significant arcs exist or nothing new, output: NONE`
  * @returns {string} The complete prompt string.
  */
 export function buildContinuityPrompt(establishedFacts, latestResponse) {
-  return `[CONTINUITY CHECK - Do NOT roleplay. Identify contradictions only.]
+  return (
+    NO_ACTION_PREAMBLE +
+    `[CONTINUITY CHECK - Do NOT roleplay. Identify contradictions only.]
 
 ESTABLISHED FACTS (from memories and summary):
 ${establishedFacts}
@@ -230,7 +232,8 @@ LATEST STORY RESPONSE:
 ${latestResponse}
 
 ---
-Does the latest response contradict or conflict with any established fact? List each contradiction precisely and briefly. If there are none, output: NONE`;
+Does the latest response contradict or conflict with any established fact? List each contradiction precisely and briefly. If there are none, output: NONE`
+  );
 }
 
 // ---- Long-term memory consolidation -------------------------------------
