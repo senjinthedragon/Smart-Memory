@@ -229,6 +229,15 @@ async function onCharacterMessageRendered() {
     .find((m) => !m.is_user && !m.is_system && m.mes);
   const lastMsgText = lastMsg?.mes ?? '';
 
+  // Also grab the last user message so scene break detection catches
+  // transitions the user wrote (e.g. "a year passed") that the AI may
+  // not have echoed back in its own response.
+  const lastUserMsg = context.chat
+    .slice()
+    .reverse()
+    .find((m) => m.is_user && !m.is_system && m.mes);
+  const lastUserMsgText = lastUserMsg?.mes ?? '';
+
   sceneMessageBuffer.push(...context.chat.slice(-1));
 
   // Step 1: clear the recap after the first AI response.
@@ -263,8 +272,11 @@ async function onCharacterMessageRendered() {
   }
 
   // Step 3: scene break detection (runs async - does not block extraction).
-  if (settings.scene_enabled && lastMsgText) {
-    processSceneBreak(lastMsgText, sceneMessageBuffer)
+  // Check both the AI response and the preceding user message - transitions
+  // are often written by the user and not echoed by the AI.
+  const sceneCheckText = [lastUserMsgText, lastMsgText].filter(Boolean).join('\n');
+  if (settings.scene_enabled && sceneCheckText) {
+    processSceneBreak(sceneCheckText, sceneMessageBuffer)
       .then((wasBreak) => {
         if (wasBreak) {
           injectSceneHistory();
