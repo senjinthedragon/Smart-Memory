@@ -91,8 +91,25 @@ function gatherEstablishedFacts(characterName) {
  * @param {string} text - Raw model response.
  * @returns {string[]}
  */
+// Phrases that indicate the model is saying "all clear" rather than listing
+// contradictions. Local models often write verbose explanations instead of
+// the single word "NONE" the prompt asks for.
+const ALL_CLEAR_PATTERNS = [
+  /\bno contradictions?\b/i,
+  /\bno conflicts?\b/i,
+  /\bdoes not contradict\b/i,
+  /\bdoes not conflict\b/i,
+  /\bconsistent with\b/i,
+  /\baligns? with\b/i,
+  /\bno issues? found\b/i,
+];
+
 function parseContradictions(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
+
+  // If the response is the model explaining there are no contradictions,
+  // treat it as clean rather than returning the explanation as false positives.
+  if (ALL_CLEAR_PATTERNS.some((p) => p.test(text))) return [];
 
   return text
     .split('\n')
