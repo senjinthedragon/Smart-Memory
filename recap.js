@@ -102,15 +102,19 @@ export function injectRecap(recap) {
     return;
   }
   const hoursAway = Math.round(getAwayHours() * 10) / 10;
-  const header =
+  const timeNote =
     hoursAway > 24
-      ? `[You've been away for ${Math.round(hoursAway / 24)} day(s). Previously in this story:]`
-      : `[Picking up where you left off:]`;
+      ? `The user has been away for ${Math.round(hoursAway / 24)} day(s).`
+      : `The user is returning after a short break.`;
+
+  // The header explicitly tells the model these events are already in the past
+  // and that it should continue from the present moment rather than re-enact them.
+  const header = `[CONTEXT: ${timeNote} The following events have ALREADY occurred - do NOT re-enact them. Continue the story from the current moment.]`;
 
   const settings = extension_settings[MODULE_NAME];
   setExtensionPrompt(
     PROMPT_KEY_RECAP,
-    `${header}\n${recap}`,
+    `${header}\n[Previously: ${recap}]`,
     settings.recap_position ?? extension_prompt_types.IN_PROMPT,
     settings.recap_depth ?? 0,
     false,
