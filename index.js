@@ -1683,8 +1683,16 @@ jQuery(async function () {
             injectSummary(summary);
             updateShortTermUI(summary);
             setStatusMessage('Summary updated.');
+            toastr.success('Short-term summary updated.', 'Smart Memory', {
+              timeOut: 4000,
+              positionClass: 'toast-bottom-right',
+            });
             return summary;
           }
+          toastr.info('Nothing to summarize yet.', 'Smart Memory', {
+            timeOut: 4000,
+            positionClass: 'toast-bottom-right',
+          });
           return 'Nothing to summarize yet.';
         } finally {
           compactionRunning = false;
@@ -1715,6 +1723,10 @@ jQuery(async function () {
           updateLongTermUI(characterName);
           updateArcsUI();
           setStatusMessage('Extraction complete.');
+          toastr.success('Memory extraction complete.', 'Smart Memory', {
+            timeOut: 4000,
+            positionClass: 'toast-bottom-right',
+          });
           return 'Memory extraction complete.';
         } finally {
           extractionRunning = false;
@@ -1731,10 +1743,21 @@ jQuery(async function () {
       name: 'sm-recap',
       callback: async () => {
         const recap = await generateRecap();
-        if (!recap) return 'Recap generation failed.';
+        if (!recap) {
+          toastr.error('Recap generation failed.', 'Smart Memory', {
+            timeOut: 4000,
+            positionClass: 'toast-bottom-right',
+          });
+          return 'Recap generation failed.';
+        }
         injectRecap(recap);
         recapActive = true;
+        updateTokenDisplay();
         setStatusMessage('Recap injected.');
+        toastr.info('Recap injected into context.', 'Smart Memory', {
+          timeOut: 4000,
+          positionClass: 'toast-bottom-right',
+        });
         return recap;
       },
       helpString:
