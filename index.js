@@ -1649,8 +1649,20 @@ jQuery(async function () {
         const characterName = getCurrentCharacterName();
         if (!characterName) return 'No character active.';
         const contradictions = await checkContinuity(characterName);
-        if (contradictions.length === 0) return 'No contradictions found.';
-        return contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+        if (contradictions.length === 0) {
+          toastr.info('No contradictions found.', 'Smart Memory', {
+            timeOut: 4000,
+            positionClass: 'toast-bottom-right',
+          });
+          return 'No contradictions found.';
+        }
+        const message = contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+        toastr.warning(
+          `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found. Check the Smart Memory panel for details.`,
+          'Smart Memory',
+          { timeOut: 8000, positionClass: 'toast-bottom-right' },
+        );
+        return message;
       },
       helpString:
         'Checks the last AI response for contradictions against established facts and memories.',
