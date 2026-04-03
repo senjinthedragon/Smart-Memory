@@ -36,6 +36,7 @@ import {
   event_types,
   extension_prompts,
   saveSettingsDebounced,
+  setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
   is_send_press,
@@ -195,6 +196,21 @@ function getSettings() {
 function getCurrentCharacterName() {
   const context = getContext();
   return context.name2 || context.characterName || null;
+}
+
+/**
+ * Clears all active injection slots. Called when the master toggle is turned
+ * off so that no Smart Memory content lingers in the current prompt.
+ */
+function clearAllInjections() {
+  const none = extension_prompt_types.NONE;
+  setExtensionPrompt(PROMPT_KEY_SHORT, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_LONG, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_SESSION, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_SCENES, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_ARCS, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_RECAP, '', none, 0);
+  updateTokenDisplay();
 }
 
 // ---- Event handlers -----------------------------------------------------
@@ -765,6 +781,13 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().enabled = $(this).prop('checked');
       saveSettingsDebounced();
+      if (!getSettings().enabled) {
+        // Remove all injections immediately so nothing lingers in the prompt.
+        clearAllInjections();
+      } else {
+        // Restore injections from stored data so the user picks up where they left off.
+        onChatChanged();
+      }
     });
 
   // ---- LLM source -----------------------------------------------------
