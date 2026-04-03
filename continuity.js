@@ -107,9 +107,16 @@ const ALL_CLEAR_PATTERNS = [
 function parseContradictions(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
 
-  // If the response is the model explaining there are no contradictions,
-  // treat it as clean rather than returning the explanation as false positives.
-  if (ALL_CLEAR_PATTERNS.some((p) => p.test(text))) return [];
+  // Local models often write a verdict on the first line ("NO CONFLICTS",
+  // "No contradictions found") followed by a verbose explanation, rather than
+  // outputting NONE. Check only the first non-empty line so we don't
+  // accidentally swallow a real contradiction response that happens to contain
+  // an all-clear phrase mid-text.
+  const firstLine = text
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (firstLine && ALL_CLEAR_PATTERNS.some((p) => p.test(firstLine))) return [];
 
   return text
     .split('\n')
