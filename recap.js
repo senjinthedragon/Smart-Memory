@@ -61,9 +61,14 @@ export function updateLastActive() {
 export function getAwayHours() {
   const context = getContext();
   const meta = context.chatMetadata?.[META_KEY];
-  if (!meta?.lastActive) return 0;
 
-  const gapHours = (Date.now() - meta.lastActive) / (1000 * 60 * 60);
+  // Prefer the precise lastActive timestamp. Fall back to summaryUpdated if
+  // Smart Memory was not active the last time this chat was open - that gives
+  // a rough "last seen" time from the most recent compaction pass.
+  const lastSeen = meta?.lastActive ?? meta?.summaryUpdated ?? null;
+  if (!lastSeen) return 0;
+
+  const gapHours = (Date.now() - lastSeen) / (1000 * 60 * 60);
   const threshold = extension_settings[MODULE_NAME].recap_threshold_hours ?? 4;
   return gapHours >= threshold ? gapHours : 0;
 }
