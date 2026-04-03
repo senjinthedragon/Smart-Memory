@@ -229,6 +229,14 @@ function clearAllInjections() {
  *   3. Check for scene break in the latest message (async, non-blocking).
  *   4. Every N messages: batch extraction for session + long-term + arcs.
  *   5. Update lastActive timestamp for the away recap system.
+ *
+ * Compaction and extraction both pass a responseLength to ST's generateRaw /
+ * generateQuietPrompt, which temporarily modifies the global amount_gen via
+ * ST's TempResponseLength singleton. Running them concurrently corrupts that
+ * singleton and leaves amount_gen at the extraction value. They therefore run
+ * sequentially: compaction first, extraction only after compaction completes.
+ * Compaction fires infrequently (only at the context threshold) so the latency
+ * cost is negligible in practice.
  */
 async function onCharacterMessageRendered() {
   // is_send_press is true while ST is still streaming - skip to avoid
@@ -285,29 +293,29 @@ async function onCharacterMessageRendered() {
     updateTokenDisplay();
   }
 
-  // Step 2: compaction (runs async - does not block extraction below).
+  // Step 2: compaction - awaited before extraction to prevent concurrent use
+  // of ST's TempResponseLength singleton, which would corrupt amount_gen.
   if (settings.compaction_enabled && !compactionRunning) {
     compactionRunning = true;
-    shouldCompact()
-      .then(async (needed) => {
-        if (needed) {
-          setStatusMessage('Updating story summary...');
-          const summary = await runCompaction();
-          if (summary) {
-            injectSummary(summary);
-            updateShortTermUI(summary);
-            updateTokenDisplay();
-            setStatusMessage('Summary updated.');
-          } else {
-            setStatusMessage('');
-          }
+    try {
+      const needed = await shouldCompact();
+      if (needed) {
+        setStatusMessage('Updating story summary...');
+        const summary = await runCompaction();
+        if (summary) {
+          injectSummary(summary);
+          updateShortTermUI(summary);
+          updateTokenDisplay();
+          setStatusMessage('Summary updated.');
+        } else {
+          setStatusMessage('');
         }
-        compactionRunning = false;
-      })
-      .catch((err) => {
-        console.error('[SmartMemory] Compaction error:', err);
-        compactionRunning = false;
-      });
+      }
+    } catch (err) {
+      console.error('[SmartMemory] Compaction error:', err);
+    } finally {
+      compactionRunning = false;
+    }
   }
 
   // Step 3: scene break detection (runs async - does not block extraction).
