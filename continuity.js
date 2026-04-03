@@ -49,6 +49,20 @@ function gatherEstablishedFacts(characterName) {
   const meta = context.chatMetadata?.[META_KEY];
   const parts = [];
 
+  // The character card is the canonical source of truth - check it first.
+  // Characters may contradict their card (wrong gender, species, etc.) in ways
+  // that no extracted memory would catch, especially in a fresh chat.
+  const char = context.characters?.[context.characterId];
+  if (char) {
+    const cardParts = [];
+    if (char.description) cardParts.push(char.description);
+    if (char.personality) cardParts.push('Personality: ' + char.personality);
+    if (char.scenario) cardParts.push('Scenario: ' + char.scenario);
+    if (cardParts.length > 0) {
+      parts.push('-- CHARACTER CARD --\n' + cardParts.join('\n'));
+    }
+  }
+
   if (meta?.summary) {
     parts.push('-- STORY SUMMARY --\n' + meta.summary);
   }
