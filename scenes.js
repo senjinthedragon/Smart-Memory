@@ -50,10 +50,14 @@ import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
 // Grouped by category for easier tuning: time skips, location transitions,
 // and explicit separator markers authors use between scenes.
 const SCENE_BREAK_PATTERNS = [
-  // Time skips
-  /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|the following (day|morning|week)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
-  // Location transitions
-  /\b(arrived at|walked into|stepped into|entered the|found (himself|herself|themselves) in|made (his|her|their) way to|headed (to|toward|towards))\b/i,
+  // Time skips - relative (hours/days/weeks/months/years later)
+  /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|weeks later|months later|years? later|a (few )?(hours?|days?|weeks?|months?|years?) (later|passed|had passed)|the following (day|morning|week|month|year)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
+  // Time skips - absolute jumps ("a year passed", "three months went by")
+  /\b(a (year|month|week|decade)|several (years?|months?|weeks?|days?)|[a-z]+ (years?|months?|weeks?|days?) (passed|went by|had passed|had gone by))\b/i,
+  // Location transitions - arriving somewhere
+  /\b(arrived at|walked into|stepped into|entered the|found (himself|herself|themselves|myself|yourself) in|made (his|her|their|my|your) way to|headed (to|toward|towards)|ran (into|toward|towards|through)|fled (to|into|through)|escaped (to|into))\b/i,
+  // Location transitions - establishing new setting
+  /\b(settled (in|into|down in)|made (a|his|her|their|my) (home|camp|base) (in|at)|hid (in|inside|within|among)|took (shelter|refuge) (in|at|among))\b/i,
   // Explicit separator markers (---, ***, * * *)
   /^[-*~]{3,}$/m,
   /\*\s*\*\s*\*/,
