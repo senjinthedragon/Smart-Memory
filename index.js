@@ -181,6 +181,10 @@ let catchUpCancelled = false;
 // True while a recap is injected; cleared after the first AI response.
 let recapActive = false;
 
+// Tracks whether the group chat warning toast has already been shown this
+// session so it doesn't fire on every message in a group.
+let groupChatWarningShown = false;
+
 // Accumulates messages since the last detected scene break. Reset to []
 // when a break is detected so the next scene starts from a clean buffer.
 let sceneMessageBuffer = [];
@@ -236,6 +240,20 @@ async function onCharacterMessageRendered() {
 
   const context = getContext();
   if (!context.chat || context.chat.length === 0) return;
+
+  // Group chats are not yet supported - character name resolution is unreliable
+  // in that context and memories could be attributed to the wrong character.
+  if (context.groupId) {
+    if (!groupChatWarningShown) {
+      groupChatWarningShown = true;
+      toastr.warning(
+        'Smart Memory is not active in group chats. 1:1 chats only for now.',
+        'Smart Memory',
+        { timeOut: 6000, positionClass: 'toast-bottom-right' },
+      );
+    }
+    return;
+  }
 
   const characterName = getCurrentCharacterName();
 
@@ -414,9 +432,16 @@ async function onChatChanged() {
   extractionRunning = false;
   recapActive = false;
   sceneMessageBuffer = [];
+  groupChatWarningShown = false;
 
   const settings = getSettings();
   if (!settings.enabled) return;
+
+  // Clear any lingering injections and skip restore for group chats.
+  if (getContext().groupId) {
+    clearAllInjections();
+    return;
+  }
 
   const characterName = getCurrentCharacterName();
   const freshStart = isFreshStart();
