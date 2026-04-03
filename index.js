@@ -254,7 +254,11 @@ async function onCharacterMessageRendered() {
     .find((m) => m.is_user && !m.is_system && m.mes);
   const lastUserMsgText = lastUserMsg?.mes ?? '';
 
-  sceneMessageBuffer.push(...context.chat.slice(-1));
+  // Push the last two messages (user turn + AI response) so scene summaries
+  // include both sides of each exchange, not just the AI response.
+  // CHARACTER_MESSAGE_RENDERED fires once per new AI message, so the preceding
+  // user message is always new to the buffer at this point.
+  sceneMessageBuffer.push(...context.chat.slice(-2));
 
   // Step 1: clear the recap after the first AI response.
   if (recapActive) {
@@ -325,84 +329,73 @@ async function onCharacterMessageRendered() {
 
       setStatusMessage('Extracting memories...');
 
-      const jobs = [];
+      // Run extraction tiers sequentially rather than in parallel.
+      // Parallel model calls overwhelm local hardware (RTX 2080 / 8GB VRAM)
+      // and gain nothing on Ollama which serializes requests anyway.
+      (async () => {
+        let total = 0;
 
-      if (settings.session_enabled) {
-        jobs.push(
-          extractSessionMemories(recentMessages)
-            .then((count) => {
-              injectSessionMemories();
-              updateSessionUI();
-              return count;
-            })
-            .catch((err) => {
-              console.error('[SmartMemory] Background session extraction error:', err);
-              return 0;
-            }),
-        );
-      }
+        if (settings.session_enabled) {
+          const count = await extractSessionMemories(recentMessages).catch((err) => {
+            console.error('[SmartMemory] Background session extraction error:', err);
+            return 0;
+          });
+          injectSessionMemories();
+          updateSessionUI();
+          total += count;
+        }
 
-      if (settings.longterm_enabled && characterName) {
-        jobs.push(
-          extractAndStoreMemories(characterName, recentMessages)
-            .then(async (count) => {
-              // Run consolidation after extraction if new memories were added.
-              if (count > 0 && settings.longterm_consolidate) {
-                const removed = await consolidateMemories(characterName).catch((err) => {
-                  console.error('[SmartMemory] Background consolidation error:', err);
-                  return 0;
-                });
-                if (removed > 0) {
-                  injectMemories(characterName, isFreshStart());
-                  setStatusMessage(`Consolidated ${removed} redundant memories.`);
-                  toastr.info(
-                    `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
-                    'Smart Memory',
-                    { timeOut: 3000, positionClass: 'toast-bottom-right' },
-                  );
-                }
-              }
-              updateLongTermUI(characterName);
-              saveSettingsDebounced();
-              return count;
-            })
-            .catch((err) => {
+        if (settings.longterm_enabled && characterName) {
+          const count = await extractAndStoreMemories(characterName, recentMessages).catch(
+            (err) => {
               console.error('[SmartMemory] Background long-term extraction error:', err);
               return 0;
-            }),
-        );
-      }
-
-      if (settings.arcs_enabled) {
-        // Arc extraction uses the full chat rather than just recent messages
-        // so it can resolve arcs that were opened many turns ago.
-        jobs.push(
-          extractArcs(context.chat)
-            .then((count) => {
-              injectArcs();
-              updateArcsUI();
-              return count;
-            })
-            .catch((err) => {
-              console.error('[SmartMemory] Background arc extraction error:', err);
+            },
+          );
+          // Run consolidation after extraction if new memories were added.
+          if (count > 0 && settings.longterm_consolidate) {
+            const removed = await consolidateMemories(characterName).catch((err) => {
+              console.error('[SmartMemory] Background consolidation error:', err);
               return 0;
-            }),
-        );
-      }
+            });
+            if (removed > 0) {
+              injectMemories(characterName, isFreshStart());
+              setStatusMessage(`Consolidated ${removed} redundant memories.`);
+              toastr.info(
+                `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
+                'Smart Memory',
+                { timeOut: 3000, positionClass: 'toast-bottom-right' },
+              );
+            }
+          }
+          updateLongTermUI(characterName);
+          saveSettingsDebounced();
+          total += count;
+        }
 
-      Promise.all(jobs)
-        .then((counts) => {
-          const total = counts.reduce((a, b) => a + b, 0);
-          updateTokenDisplay();
-          setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
-        })
-        .catch((err) => {
-          console.error('[SmartMemory] Extraction error:', err);
-          setStatusMessage('');
-        })
-        .finally(() => {
-          extractionRunning = false;
-        });
+        if (settings.arcs_enabled) {
+          // Arc extraction uses a wider window than other tiers so it can catch
+          // arcs opened earlier in the session, but is capped to avoid overflowing
+          // the model's context on long chats. Existing arcs are passed to the
+          // prompt so resolution still works even outside this window.
+          const arcWindow = context.chat.slice(-100);
+          const count = await extractArcs(arcWindow).catch((err) => {
+            console.error('[SmartMemory] Background arc extraction error:', err);
+            return 0;
+          });
+          injectArcs();
+          updateArcsUI();
+          total += count;
+        }
+
+        updateTokenDisplay();
+        setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
+        extractionRunning = false;
+      })().catch((err) => {
+        console.error('[SmartMemory] Extraction error:', err);
+        setStatusMessage('');
+        extractionRunning = false;
+      });
     }
   }
 
@@ -457,7 +450,10 @@ async function onChatChanged() {
       generateRecap()
         .then((recap) => {
           if (recap) {
-            injectRecap(recap);
+            // Pass hoursAway explicitly - updateLastActive() runs after this
+            // async block starts, so getAwayHours() inside injectRecap would
+            // return 0 and always show "short break" regardless of actual gap.
+            injectRecap(recap, hoursAway);
             recapActive = true;
             updateTokenDisplay();
             toastr.info('A recap of your last session has been added to context.', 'Smart Memory', {
@@ -863,6 +859,7 @@ function bindSettingsUI() {
       if (summary) {
         injectSummary(summary);
         updateShortTermUI(summary);
+        updateTokenDisplay();
         setStatusMessage('Summary updated.');
       }
     } catch (err) {
@@ -1714,9 +1711,9 @@ jQuery(async function () {
         setStatusMessage('Extracting memories...');
         try {
           const context = getContext();
-          await extractAndStoreMemories(characterName, context.chat);
-          await extractSessionMemories(context.chat);
-          await extractArcs(context.chat);
+          await extractAndStoreMemories(characterName, context.chat.slice(-20));
+          await extractSessionMemories(context.chat.slice(-40));
+          await extractArcs(context.chat.slice(-100));
           injectMemories(characterName, isFreshStart());
           injectSessionMemories();
           injectArcs();

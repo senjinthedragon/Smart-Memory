@@ -117,13 +117,62 @@ function parseArcOutput(text, existingArcs) {
     if (content.length > 5) toAdd.push({ content, ts: Date.now() });
   }
 
+  // Common English stop words that appear in almost any sentence and would
+  // produce false matches if included in the word-overlap calculation.
+  const STOP_WORDS = new Set([
+    'a',
+    'an',
+    'the',
+    'and',
+    'or',
+    'but',
+    'in',
+    'on',
+    'at',
+    'to',
+    'for',
+    'of',
+    'with',
+    'by',
+    'from',
+    'is',
+    'was',
+    'are',
+    'were',
+    'be',
+    'been',
+    'has',
+    'had',
+    'have',
+    'that',
+    'this',
+    'it',
+    'he',
+    'she',
+    'they',
+    'we',
+    'his',
+    'her',
+    'their',
+    'its',
+    'my',
+    'your',
+    'not',
+    'no',
+    'so',
+    'as',
+  ]);
+
   while ((match = resolvedPattern.exec(text)) !== null) {
     const resolvedText = match[1].trim().toLowerCase();
-    // Match against existing arcs by word overlap - 2+ shared words is enough
-    // to identify which arc is being referred to even if phrasing differs.
+    // Match against existing arcs by meaningful word overlap - stop words are
+    // excluded so common filler words don't cause false resolution matches.
     existingArcs.forEach((arc, idx) => {
-      const arcWords = arc.content.toLowerCase().split(/\s+/);
-      const resolvedWords = resolvedText.split(/\s+/);
+      const arcWords = arc.content
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => !STOP_WORDS.has(w));
+      const resolvedWords = resolvedText.split(/\s+/).filter((w) => !STOP_WORDS.has(w));
       const overlap = arcWords.filter((w) => resolvedWords.includes(w)).length;
       if (overlap >= 2) toResolve.push(idx);
     });

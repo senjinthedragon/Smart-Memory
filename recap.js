@@ -92,19 +92,23 @@ export async function generateRecap() {
 
 /**
  * Injects the recap into the prompt with a context-appropriate header.
- * The header distinguishes short gaps ("Picking up where you left off")
- * from long ones ("You've been away for N days").
+ * The header distinguishes short gaps from long ones ("N days").
  * @param {string|null} recap - The recap text to inject, or null to clear.
+ * @param {number} [hoursAway] - Pre-computed away hours. If omitted, computed
+ *   fresh via getAwayHours(). Callers that already have the value should pass
+ *   it in - by the time injectRecap runs, updateLastActive() may have already
+ *   reset the clock and getAwayHours() would return 0.
  */
-export function injectRecap(recap) {
+export function injectRecap(recap, hoursAway) {
   if (!recap) {
     setExtensionPrompt(PROMPT_KEY_RECAP, '', extension_prompt_types.NONE, 0);
     return;
   }
-  const hoursAway = Math.round(getAwayHours() * 10) / 10;
+  const hours = hoursAway !== undefined ? hoursAway : getAwayHours();
+  const hoursAwayClamped = Math.round(hours * 10) / 10;
   const timeNote =
-    hoursAway > 24
-      ? `The user has been away for ${Math.round(hoursAway / 24)} day(s).`
+    hoursAwayClamped > 24
+      ? `The user has been away for ${Math.round(hoursAwayClamped / 24)} day(s).`
       : `The user is returning after a short break.`;
 
   // The header explicitly tells the model these events are already in the past

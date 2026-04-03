@@ -54,10 +54,12 @@ const SCENE_BREAK_PATTERNS = [
   /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|weeks later|months later|years? later|a (few )?(hours?|days?|weeks?|months?|years?) (later|passed|had passed)|the following (day|morning|week|month|year)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
   // Time skips - absolute jumps ("a year passed", "three months went by")
   /\b(a (year|month|week|decade)|several (years?|months?|weeks?|days?)|[a-z]+ (years?|months?|weeks?|days?) (passed|went by|had passed|had gone by))\b/i,
-  // Location transitions - arriving somewhere
-  /\b(arrived at|walked into|stepped into|entered the|found (himself|herself|themselves|myself|yourself) in|made (his|her|their|my|your) way to|headed (to|toward|towards)|ran (into|toward|towards|through)|fled (to|into|through)|escaped (to|into))\b/i,
-  // Location transitions - establishing new setting
-  /\b(settled (in|into|down in)|made (a|his|her|their|my) (home|camp|base) (in|at)|hid (in|inside|within|among)|took (shelter|refuge) (in|at|among))\b/i,
+  // Location transitions - arriving at a named or distinct new place.
+  // Deliberately narrow: "entered the room" is not a scene break, but
+  // "arrived at the castle" or "found himself in a foreign city" is.
+  /\b(arrived at (the|a|an)\s+\w+|found (himself|herself|themselves|myself|yourself) (in|at) (a|an|the)\s+\w+|made (his|her|their|my|your) way (to|into) (the|a|an)\s+\w+|fled (to|into) (the|a|an)\s+\w+|escaped (to|into) (the|a|an)\s+\w+)\b/i,
+  // Location transitions - establishing a new base or camp.
+  /\b(settled (in|into|down in)|made (a|his|her|their|my) (home|camp|base) (in|at)|took (shelter|refuge) (in|at|among))\b/i,
   // Explicit separator markers (---, ***, * * *)
   /^[-*~]{3,}$/m,
   /\*\s*\*\s*\*/,
