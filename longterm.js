@@ -170,6 +170,7 @@ function mergeMemories(existing, incoming, maxTotal) {
   for (const mem of incoming) {
     const newWords = new Set(mem.content.toLowerCase().split(/\s+/));
     const isDuplicate = merged.some((ex) => {
+      if (ex.type !== mem.type) return false;
       const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
       const intersection = [...newWords].filter((w) => exWords.has(w)).length;
       const union = new Set([...newWords, ...exWords]).size;
@@ -234,12 +235,13 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     const maxMemories = settings.longterm_max_memories || 25;
     const merged = mergeMemories(existingMemories, newMemories, maxMemories);
+    const added = merged.length - Math.min(existingMemories.length, maxMemories);
     saveCharacterMemories(characterName, merged);
 
     console.log(
-      `[SmartMemory] Saved ${newMemories.length} new memories for "${characterName}". Total: ${merged.length}`,
+      `[SmartMemory] Saved ${added} new memories for "${characterName}". Total: ${merged.length}`,
     );
-    return newMemories.length;
+    return Math.max(0, added);
   } catch (err) {
     console.error('[SmartMemory] Memory extraction failed:', err);
     throw err;

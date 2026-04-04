@@ -141,6 +141,7 @@ function deduplicateSession(existing, incoming, max) {
   for (const mem of incoming) {
     const words = new Set(mem.content.toLowerCase().split(/\s+/));
     const isDuplicate = merged.some((ex) => {
+      if (ex.type !== mem.type) return false;
       const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
       const intersection = [...words].filter((w) => exWords.has(w)).length;
       // Normalise against the larger set to avoid short strings
@@ -200,9 +201,10 @@ export async function extractSessionMemories(recentMessages) {
 
     const max = settings.session_max_memories ?? 30;
     const merged = deduplicateSession(existing, incoming, max);
+    const added = merged.length - Math.min(existing.length, max);
     await saveSessionMemories(merged);
 
-    return incoming.length;
+    return Math.max(0, added);
   } catch (err) {
     console.error('[SmartMemory] Session extraction failed:', err);
     throw err;
