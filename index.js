@@ -318,22 +318,25 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 3: scene break detection (runs async - does not block extraction).
+  // Step 3: scene break detection - awaited before extraction for the same
+  // reason as compaction: the AI detection path uses responseLength: 5 which
+  // would corrupt amount_gen if it raced with extraction.
   // Check both the AI response and the preceding user message - transitions
   // are often written by the user and not echoed by the AI.
   const sceneCheckText = [lastUserMsgText, lastMsgText].filter(Boolean).join('\n');
   if (settings.scene_enabled && sceneCheckText) {
-    processSceneBreak(sceneCheckText, sceneMessageBuffer)
-      .then((wasBreak) => {
-        if (wasBreak) {
-          injectSceneHistory();
-          updateScenesUI();
-          updateTokenDisplay();
-          sceneMessageBuffer = [];
-          setStatusMessage('Scene break detected.');
-        }
-      })
-      .catch(() => {});
+    try {
+      const wasBreak = await processSceneBreak(sceneCheckText, sceneMessageBuffer);
+      if (wasBreak) {
+        injectSceneHistory();
+        updateScenesUI();
+        updateTokenDisplay();
+        sceneMessageBuffer = [];
+        setStatusMessage('Scene break detected.');
+      }
+    } catch (err) {
+      console.error('[SmartMemory] Scene detection error:', err);
+    }
   }
 
   // Step 4: batched extraction every N messages.
