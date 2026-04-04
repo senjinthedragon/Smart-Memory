@@ -50,6 +50,7 @@ import {
   META_KEY,
 } from './constants.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
+import { reconcileTypeEntries, trimByPriority } from './memory-utils.js';
 
 // ---- Storage helpers ----------------------------------------------------
 
@@ -303,13 +304,16 @@ export async function consolidateMemories(characterName) {
       // Mark all incoming as consolidated since they've been through the process.
       const promoted = incoming.map((m) => ({ ...m, consolidated: true }));
 
-      // Replace this type's entries: keep the existing base, replace with promoted.
-      // Other types are untouched.
+      // Reconcile promoted entries with the base so "updated" base entries
+      // replace older variants instead of being appended as duplicates.
+      const reconciledType = reconcileTypeEntries(base, promoted, 0.7);
+
+      // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
-      memories.splice(0, memories.length, ...otherTypes, ...base, ...promoted);
+      memories.splice(0, memories.length, ...otherTypes, ...reconciledType);
 
       const before = base.length + unprocessed.length;
-      const after = base.length + promoted.length;
+      const after = reconciledType.length;
       const removed = before - after;
       totalRemoved += Math.max(0, removed);
 
@@ -323,8 +327,14 @@ export async function consolidateMemories(characterName) {
     }
   }
 
-  if (totalRemoved > 0 || memories.some((m) => m.consolidated)) {
-    saveCharacterMemories(characterName, memories);
+  const maxMemories = settings.longterm_max_memories || 25;
+  const finalMemories = trimByPriority(memories, maxMemories);
+  if (
+    totalRemoved > 0 ||
+    finalMemories.length !== memories.length ||
+    memories.some((m) => m.consolidated)
+  ) {
+    saveCharacterMemories(characterName, finalMemories);
   }
 
   return totalRemoved;

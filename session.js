@@ -49,6 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
+import { reconcileTypeEntries, trimByPriority } from './memory-utils.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
@@ -266,13 +267,16 @@ export async function consolidateSessionMemories() {
       // Mark all incoming as consolidated since they've been through the process.
       const promoted = incoming.map((m) => ({ ...m, consolidated: true }));
 
-      // Replace this type's entries: keep the existing base, add promoted entries.
-      // Other types are untouched.
+      // Reconcile promoted entries with the base so "updated" base entries
+      // replace older variants instead of being appended as duplicates.
+      const reconciledType = reconcileTypeEntries(base, promoted, 0.65);
+
+      // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
-      memories.splice(0, memories.length, ...otherTypes, ...base, ...promoted);
+      memories.splice(0, memories.length, ...otherTypes, ...reconciledType);
 
       const before = base.length + unprocessed.length;
-      const after = base.length + promoted.length;
+      const after = reconciledType.length;
       const removed = before - after;
       totalRemoved += Math.max(0, removed);
 
@@ -286,8 +290,14 @@ export async function consolidateSessionMemories() {
     }
   }
 
-  if (totalRemoved > 0 || memories.some((m) => m.consolidated)) {
-    await saveSessionMemories(memories);
+  const max = settings.session_max_memories ?? 30;
+  const finalMemories = trimByPriority(memories, max);
+  if (
+    totalRemoved > 0 ||
+    finalMemories.length !== memories.length ||
+    memories.some((m) => m.consolidated)
+  ) {
+    await saveSessionMemories(finalMemories);
   }
 
   return totalRemoved;
