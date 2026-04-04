@@ -25,12 +25,13 @@
  * capturing scene details, named objects, specific revelations - but do not
  * survive past the current chat.
  *
- * loadSessionMemories    - returns the current session memory array
- * saveSessionMemories    - persists the session memory array to chatMetadata
- * clearSessionMemories   - empties session memories for the current chat
- * extractSessionMemories - runs extraction against recent messages and merges results
- * formatSessionMemories  - formats the memory array as [type] content lines
- * injectSessionMemories  - pushes session memories into the prompt via setExtensionPrompt
+ * loadSessionMemories        - returns the current session memory array
+ * saveSessionMemories        - persists the session memory array to chatMetadata
+ * clearSessionMemories       - empties session memories for the current chat
+ * extractSessionMemories     - runs extraction against recent messages and merges results
+ * consolidateSessionMemories - evaluates unprocessed entries against the consolidated base per type
+ * formatSessionMemories      - formats the memory array as [type] content lines
+ * injectSessionMemories      - pushes session memories into the prompt via setExtensionPrompt
  */
 
 import {
@@ -47,17 +48,21 @@ import {
   PROMPT_KEY_SESSION,
   SESSION_TYPES,
 } from './constants.js';
-import { buildSessionExtractionPrompt } from './prompts.js';
+import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
 /**
  * Returns the session memory array for the current chat.
- * @returns {Array<{type: string, content: string, ts: number}>}
+ * Migrates legacy entries (no consolidated flag) to consolidated: true on load
+ * so existing memories are treated as the stable base.
+ * @returns {Array<{type: string, content: string, ts: number, consolidated: boolean}>}
  */
 export function loadSessionMemories() {
   const context = getContext();
-  return context.chatMetadata?.[META_KEY]?.sessionMemories ?? [];
+  const memories = context.chatMetadata?.[META_KEY]?.sessionMemories ?? [];
+  // Migrate: entries without the consolidated flag are pre-existing stable memories.
+  return memories.map((m) => (m.consolidated === undefined ? { ...m, consolidated: true } : m));
 }
 
 /**
@@ -100,7 +105,9 @@ function parseSessionOutput(text) {
     const type = match[1].toLowerCase();
     const content = match[2].trim();
     if (SESSION_TYPES.includes(type) && content.length > 3) {
-      results.push({ type, content, ts: Date.now() });
+      // New entries start as unprocessed - they will be evaluated against the
+      // consolidated base before being promoted.
+      results.push({ type, content, ts: Date.now(), consolidated: false });
     }
   }
   return results;
@@ -183,6 +190,88 @@ export async function extractSessionMemories(recentMessages) {
     console.error('[SmartMemory] Session extraction failed:', err);
     throw err;
   }
+}
+
+// ---- Consolidation ------------------------------------------------------
+
+// How many unprocessed entries of a single type must accumulate before
+// consolidation fires for that type.
+const SESSION_CONSOLIDATION_THRESHOLD = 4;
+
+/**
+ * Runs a consolidation pass on session memories for the current chat.
+ *
+ * Maintains a stable consolidated base per session memory type. When enough
+ * unprocessed entries accumulate for a given type, the model evaluates only
+ * that batch against the base - it may drop duplicates, fold new details into
+ * existing base entries, or add genuinely new entries. The base is never
+ * rewritten, only extended.
+ *
+ * Fires per-type independently - a burst of new [scene] entries does not
+ * trigger [detail] consolidation.
+ *
+ * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
+ */
+export async function consolidateSessionMemories() {
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.session_enabled) return 0;
+
+  const memories = loadSessionMemories();
+  let totalRemoved = 0;
+
+  for (const type of SESSION_TYPES) {
+    const base = memories.filter((m) => m.type === type && m.consolidated);
+    const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
+
+    if (unprocessed.length < SESSION_CONSOLIDATION_THRESHOLD) continue;
+
+    try {
+      const baseText = base.map((m) => `[${m.type}] ${m.content}`).join('\n');
+      const batchText = unprocessed.map((m) => `[${m.type}] ${m.content}`).join('\n');
+
+      const response = await generateMemoryExtract(
+        buildSessionConsolidationPrompt(type, baseText, batchText),
+        { responseLength: Math.max(400, (base.length + unprocessed.length) * 60) },
+      );
+
+      console.log(`[SmartMemory] Session consolidation response for [${type}]:`, response);
+
+      if (!response || response.trim().toUpperCase() === 'NONE') {
+        // Nothing to add - mark unprocessed as consolidated as-is.
+        unprocessed.forEach((m) => (m.consolidated = true));
+        continue;
+      }
+
+      // Parse the model's output - these are the entries to add/update in the base.
+      const incoming = parseSessionOutput(response);
+      // Mark all incoming as consolidated since they've been through the process.
+      const promoted = incoming.map((m) => ({ ...m, consolidated: true }));
+
+      // Replace this type's entries: keep the existing base, add promoted entries.
+      // Other types are untouched.
+      const otherTypes = memories.filter((m) => m.type !== type);
+      memories.splice(0, memories.length, ...otherTypes, ...base, ...promoted);
+
+      const before = base.length + unprocessed.length;
+      const after = base.length + promoted.length;
+      const removed = before - after;
+      totalRemoved += Math.max(0, removed);
+
+      console.log(
+        `[SmartMemory] Session [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
+      );
+    } catch (err) {
+      console.error(`[SmartMemory] Session consolidation failed for type [${type}]:`, err);
+      // On failure, mark unprocessed as consolidated so they don't block future passes.
+      unprocessed.forEach((m) => (m.consolidated = true));
+    }
+  }
+
+  if (totalRemoved > 0 || memories.some((m) => m.consolidated)) {
+    await saveSessionMemories(memories);
+  }
+
+  return totalRemoved;
 }
 
 // ---- Injection ----------------------------------------------------------

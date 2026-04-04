@@ -29,7 +29,7 @@
  * clearCharacterMemories   - deletes all memories for a character
  * formatMemoriesForPrompt  - formats the memory array as [type] content lines
  * extractAndStoreMemories  - runs extraction against recent messages and merges results
- * consolidateMemories      - asks the LLM to merge redundant entries in the stored memory list
+ * consolidateMemories      - evaluates unprocessed entries against the stable consolidated base per type
  * injectMemories           - pushes memories into the prompt via setExtensionPrompt
  * isFreshStart             - returns whether the current chat has fresh-start enabled
  * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
@@ -49,19 +49,23 @@ import {
   MEMORY_TYPES,
   META_KEY,
 } from './constants.js';
-import { buildExtractionPrompt, buildConsolidationPrompt } from './prompts.js';
+import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
 
 // ---- Storage helpers ----------------------------------------------------
 
 /**
  * Returns the memory array for a character, or an empty array if none exist.
+ * Migrates legacy entries (no consolidated flag) to consolidated: true on load
+ * so existing memories are treated as the stable base.
  * @param {string} characterName
- * @returns {Array<{type: string, content: string, ts: number}>}
+ * @returns {Array<{type: string, content: string, ts: number, consolidated: boolean}>}
  */
 export function loadCharacterMemories(characterName) {
   if (!characterName) return [];
   const chars = extension_settings[MODULE_NAME].characters;
-  return chars?.[characterName]?.memories ?? [];
+  const memories = chars?.[characterName]?.memories ?? [];
+  // Migrate: entries without the consolidated flag are pre-existing stable memories.
+  return memories.map((m) => (m.consolidated === undefined ? { ...m, consolidated: true } : m));
 }
 
 /**
@@ -126,7 +130,9 @@ function parseExtractionOutput(text) {
     const type = match[1].toLowerCase();
     const content = match[2].trim();
     if (MEMORY_TYPES.includes(type) && content.length > 5) {
-      results.push({ type, content, ts: Date.now() });
+      // New entries start as unprocessed - they will be evaluated against the
+      // consolidated base before being promoted.
+      results.push({ type, content, ts: Date.now(), consolidated: false });
     }
   }
 
@@ -226,15 +232,21 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
   }
 }
 
+// How many unprocessed entries of a single type must accumulate before
+// consolidation fires for that type.
+const CONSOLIDATION_THRESHOLD = 4;
+
 /**
  * Runs a consolidation pass on the stored memories for a character.
- * Sends the full memory list to the LLM and asks it to merge redundant
- * or near-duplicate entries into single richer ones. Only runs when
- * consolidation is enabled in settings and there are enough memories
- * to be worth consolidating.
  *
- * Called after extraction adds new memories, so it sees the freshly
- * merged list. Saves the consolidated result back to storage.
+ * New approach: maintains a stable consolidated base per memory type. When
+ * enough unprocessed entries accumulate for a given type, the model evaluates
+ * only that batch against the base for that type - it may drop duplicates, fold
+ * new details into existing base entries, or add genuinely new entries. The
+ * base itself is never rewritten, only extended.
+ *
+ * Consolidation fires per-type independently - a burst of new [fact] entries
+ * does not trigger [relationship] consolidation.
  *
  * @param {string} characterName
  * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
@@ -244,49 +256,68 @@ export async function consolidateMemories(characterName) {
   if (!settings.longterm_consolidate || !characterName) return 0;
 
   const memories = loadCharacterMemories(characterName);
+  let totalRemoved = 0;
 
-  // Not worth running a consolidation pass on a small list.
-  if (memories.length < 5) return 0;
+  for (const type of MEMORY_TYPES) {
+    const base = memories.filter((m) => m.type === type && m.consolidated);
+    const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
-  try {
-    const memoriesText = formatMemoriesForPrompt(memories);
-    const response = await generateMemoryExtract(buildConsolidationPrompt(memoriesText), {
-      // Budget enough tokens for the full consolidated list.
-      responseLength: Math.max(600, memories.length * 60),
-    });
+    if (unprocessed.length < CONSOLIDATION_THRESHOLD) continue;
 
-    if (!response || response.trim().toUpperCase() === 'NONE') return 0;
+    try {
+      const baseText = formatMemoriesForPrompt(base);
+      const batchText = formatMemoriesForPrompt(unprocessed);
 
-    const consolidated = parseExtractionOutput(response);
-    if (consolidated.length === 0) return 0;
-
-    // Only accept the result if it didn't grow - a larger list means the
-    // model misunderstood the task (extracted new things instead of merging).
-    if (consolidated.length >= memories.length) {
-      console.log('[SmartMemory] Consolidation result not smaller than input - discarding.');
-      return 0;
-    }
-
-    // Preserve timestamps from the originals where possible: for each
-    // consolidated entry find the oldest matching original and inherit its ts.
-    const timestamped = consolidated.map((entry) => {
-      const match = memories.find(
-        (m) => m.type === entry.type && m.content.slice(0, 30) === entry.content.slice(0, 30),
+      const response = await generateMemoryExtract(
+        buildLongtermConsolidationPrompt(type, baseText, batchText),
+        { responseLength: Math.max(400, (base.length + unprocessed.length) * 60) },
       );
-      return { ...entry, ts: match?.ts ?? entry.ts };
-    });
 
-    saveCharacterMemories(characterName, timestamped);
+      console.log(`[SmartMemory] Consolidation response for [${type}]:`, response);
 
-    const removed = memories.length - consolidated.length;
-    console.log(
-      `[SmartMemory] Consolidation reduced memories from ${memories.length} to ${consolidated.length} (-${removed}) for "${characterName}".`,
-    );
-    return removed;
-  } catch (err) {
-    console.error('[SmartMemory] Memory consolidation failed:', err);
-    throw err;
+      if (!response || response.trim().toUpperCase() === 'NONE') {
+        // Model found nothing to add - mark unprocessed as consolidated as-is.
+        unprocessed.forEach((m) => (m.consolidated = true));
+        continue;
+      }
+
+      // Parse the model's output - these are the entries to add/update in the base.
+      const incoming = parseExtractionOutput(response);
+
+      // Mark all incoming as consolidated since they've been through the process.
+      const promoted = incoming.map((m) => ({ ...m, consolidated: true }));
+
+      // Replace this type's entries: keep the existing base, replace with promoted.
+      // Other types are untouched.
+      const otherTypes = memories.filter((m) => m.type !== type);
+      memories.splice(
+        0,
+        memories.length,
+        ...otherTypes,
+        ...base,
+        ...promoted,
+      );
+
+      const before = base.length + unprocessed.length;
+      const after = base.length + promoted.length;
+      const removed = before - after;
+      totalRemoved += Math.max(0, removed);
+
+      console.log(
+        `[SmartMemory] [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
+      );
+    } catch (err) {
+      console.error(`[SmartMemory] Consolidation failed for type [${type}]:`, err);
+      // On failure, mark unprocessed as consolidated so they don't block future passes.
+      unprocessed.forEach((m) => (m.consolidated = true));
+    }
   }
+
+  if (totalRemoved > 0 || memories.some((m) => m.consolidated)) {
+    saveCharacterMemories(characterName, memories);
+  }
+
+  return totalRemoved;
 }
 
 // ---- Injection ----------------------------------------------------------

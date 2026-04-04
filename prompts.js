@@ -35,7 +35,8 @@
  * buildContinuityPrompt        - assembles the continuity check prompt
  * EXTRACTION_SYSTEM_PROMPT     - system role string for long-term extraction
  * buildExtractionPrompt        - assembles the long-term memory extraction prompt
- * buildConsolidationPrompt     - assembles the long-term memory consolidation prompt
+ * buildLongtermConsolidationPrompt - evaluates a batch of unprocessed long-term entries against the consolidated base for one type
+ * buildSessionConsolidationPrompt  - same as above but for session memory types (scene, revelation, development, detail)
  */
 
 // Prepended to every extraction prompt to prevent the local model from
@@ -239,38 +240,94 @@ Does the latest response contradict or conflict with any established fact? List 
 // ---- Long-term memory consolidation -------------------------------------
 
 /**
- * Assembles the memory consolidation prompt.
- * Takes the full memory list and asks the LLM to merge redundant or
- * near-duplicate entries into single richer ones while preserving all
- * unique information. Output uses the same [type] content format so the
- * existing parser can handle it without any changes.
+ * Assembles the long-term memory consolidation prompt.
  *
- * @param {string} memoriesText - Full memory list as [type] content lines.
+ * Shows the stable consolidated base for a single type as read-only context,
+ * then a small batch of unprocessed entries. The model classifies each
+ * unprocessed entry as: duplicate (drop it), new detail (fold into an existing
+ * base entry), or genuinely new (keep as-is). Output is only the entries to
+ * ADD to the base - never the base itself.
+ *
+ * @param {string} type - Memory type being consolidated ('fact', 'relationship', 'preference', 'event').
+ * @param {string} baseText - Existing consolidated base for this type as [type] content lines (may be empty).
+ * @param {string} batchText - Unprocessed entries to evaluate as [type] content lines.
  * @returns {string} The complete prompt string.
  */
-export function buildConsolidationPrompt(memoriesText) {
+export function buildLongtermConsolidationPrompt(type, baseText, batchText) {
+  const baseSection = baseText
+    ? `CONSOLIDATED BASE (read-only - do NOT modify or reproduce these):\n${baseText}\n\n`
+    : `CONSOLIDATED BASE: (empty - no existing entries for this type)\n\n`;
+
   return (
     NO_ACTION_PREAMBLE +
     `[MEMORY CONSOLIDATION TASK - Do NOT roleplay. Output structured data only.]
 
-CURRENT MEMORY LIST:
-${memoriesText}
+${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
+${batchText}
 
 ---
-Your task: Consolidate the memory list above by merging entries that are redundant, near-duplicate, or say the same thing in different words. Combine them into a single richer entry that preserves ALL unique details from the originals.
+For each new entry above, decide:
+1. DUPLICATE - already fully captured by a base entry. Drop it entirely.
+2. NEW DETAIL - adds specific information to an existing base entry. Output a revised version of that base entry with the detail folded in.
+3. GENUINELY NEW - not covered by any base entry. Keep it as-is.
 
 Rules:
-- Only merge entries that are genuinely redundant or overlapping. Do NOT merge entries that contain distinct information.
-- Do NOT invent new information or add anything not present in the originals.
-- Do NOT drop any unique detail - if merging would lose information, keep them separate.
+- Never remove or paraphrase base entries that are not being extended.
+- Never invent information not present in the originals.
+- If folding a detail in would make a base entry too long or unwieldy, keep it as a separate entry instead.
 - Preserve the most specific and informative wording.
-- Keep the original type tag ([fact], [relationship], [preference], [event]) for each entry. If merging entries of different types, use the most appropriate type.
+- Use the [${type}] type tag for all output entries.
 
-Output the complete consolidated list, one entry per line, using the same format as the input:
-[fact] The consolidated memory here.
-[relationship] The consolidated relationship detail here.
+Output ONLY the entries to ADD or UPDATE in the base, one per line:
+[${type}] The memory entry here.
 
-Output ONLY the memory lines. No explanations, no commentary.`
+If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
+  );
+}
+
+// ---- Session memory consolidation ---------------------------------------
+
+/**
+ * Assembles the session memory consolidation prompt.
+ *
+ * Same approach as long-term consolidation but uses session memory types
+ * (scene, revelation, development, detail). Operates per-type on a small
+ * batch of unprocessed entries evaluated against the stable consolidated base.
+ *
+ * @param {string} type - Session memory type ('scene', 'revelation', 'development', 'detail').
+ * @param {string} baseText - Existing consolidated base for this type as [type] content lines (may be empty).
+ * @param {string} batchText - Unprocessed entries to evaluate as [type] content lines.
+ * @returns {string} The complete prompt string.
+ */
+export function buildSessionConsolidationPrompt(type, baseText, batchText) {
+  const baseSection = baseText
+    ? `CONSOLIDATED BASE (read-only - do NOT modify or reproduce these):\n${baseText}\n\n`
+    : `CONSOLIDATED BASE: (empty - no existing entries for this type)\n\n`;
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `[SESSION MEMORY CONSOLIDATION TASK - Do NOT roleplay. Output structured data only.]
+
+${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
+${batchText}
+
+---
+For each new entry above, decide:
+1. DUPLICATE - already fully captured by a base entry. Drop it entirely.
+2. NEW DETAIL - adds specific information to an existing base entry. Output a revised version of that base entry with the detail folded in.
+3. GENUINELY NEW - not covered by any base entry. Keep it as-is.
+
+Rules:
+- Never remove or paraphrase base entries that are not being extended.
+- Never invent information not present in the originals.
+- If folding a detail in would make a base entry too long or unwieldy, keep it as a separate entry instead.
+- Preserve the most specific and informative wording.
+- Use the [${type}] type tag for all output entries.
+
+Output ONLY the entries to ADD or UPDATE in the base, one per line:
+[${type}] The session memory entry here.
+
+If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
   );
 }
 

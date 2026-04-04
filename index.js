@@ -76,6 +76,7 @@ import {
 import { updateLastActive, getAwayHours, generateRecap, injectRecap, clearRecap } from './recap.js';
 import {
   extractSessionMemories,
+  consolidateSessionMemories,
   injectSessionMemories,
   loadSessionMemories,
   clearSessionMemories,
@@ -368,6 +369,10 @@ async function onCharacterMessageRendered() {
           const count = await extractSessionMemories(recentMessages).catch((err) => {
             console.error('[SmartMemory] Background session extraction error:', err);
             return 0;
+          });
+          // Run session consolidation after extraction - fires per-type when threshold is reached.
+          await consolidateSessionMemories().catch((err) => {
+            console.error('[SmartMemory] Background session consolidation error:', err);
           });
           injectSessionMemories();
           updateSessionUI();
@@ -1456,9 +1461,15 @@ function bindSettingsUI() {
 
         // Consolidate after all chunks so the model sees the full merged set.
         if (settings.longterm_enabled && settings.longterm_consolidate && characterName) {
-          setStatusMessage('Consolidating memories...');
+          setStatusMessage('Consolidating long-term memories...');
           await consolidateMemories(characterName).catch((err) => {
             console.error('[SmartMemory] Catch-up consolidation failed:', err);
+          });
+        }
+        if (settings.session_enabled) {
+          setStatusMessage('Consolidating session memories...');
+          await consolidateSessionMemories().catch((err) => {
+            console.error('[SmartMemory] Catch-up session consolidation failed:', err);
           });
         }
 
