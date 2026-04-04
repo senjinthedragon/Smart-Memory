@@ -65,7 +65,12 @@ export function loadCharacterMemories(characterName) {
   const chars = extension_settings[MODULE_NAME].characters;
   const memories = chars?.[characterName]?.memories ?? [];
   // Migrate: entries without the consolidated flag are pre-existing stable memories.
-  return memories.map((m) => (m.consolidated === undefined ? { ...m, consolidated: true } : m));
+  // Entries without an importance score default to 2 (medium).
+  return memories.map((m) => ({
+    ...m,
+    consolidated: m.consolidated ?? true,
+    importance: m.importance ?? 2,
+  }));
 }
 
 /**
@@ -122,17 +127,19 @@ function parseExtractionOutput(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
 
   const results = [];
-  // Matches lines like: [fact] The character is tall.
-  const linePattern = /^\[(fact|relationship|preference|event)\]\s+(.+)$/gim;
+  // Matches lines like: [fact:2] The character is tall.
+  // The importance score (:N) is optional - defaults to 2 if omitted.
+  const linePattern = /^\[(fact|relationship|preference|event)(?::([123]))?\]\s+(.+)$/gim;
   let match;
 
   while ((match = linePattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
-    const content = match[2].trim();
+    const importance = match[2] ? parseInt(match[2], 10) : 2;
+    const content = match[3].trim();
     if (MEMORY_TYPES.includes(type) && content.length > 5) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, ts: Date.now(), consolidated: false });
+      results.push({ type, content, importance, ts: Date.now(), consolidated: false });
     }
   }
 
@@ -174,9 +181,16 @@ function mergeMemories(existing, incoming, maxTotal) {
     }
   }
 
-  // Drop oldest entries first when over the limit.
+  // When over the cap, drop the least valuable entries first:
+  // sort by importance ascending then age ascending, remove from the tail.
   if (merged.length > maxTotal) {
-    merged.splice(0, merged.length - maxTotal);
+    merged.sort((a, b) => {
+      const ia = a.importance ?? 2;
+      const ib = b.importance ?? 2;
+      if (ia !== ib) return ib - ia; // higher importance first
+      return b.ts - a.ts; // newer first within same importance
+    });
+    merged.splice(maxTotal);
   }
 
   return merged;
@@ -290,13 +304,7 @@ export async function consolidateMemories(characterName) {
       // Replace this type's entries: keep the existing base, replace with promoted.
       // Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
-      memories.splice(
-        0,
-        memories.length,
-        ...otherTypes,
-        ...base,
-        ...promoted,
-      );
+      memories.splice(0, memories.length, ...otherTypes, ...base, ...promoted);
 
       const before = base.length + unprocessed.length;
       const after = base.length + promoted.length;
@@ -343,9 +351,16 @@ export function injectMemories(characterName, freshStart = false) {
     return;
   }
 
-  // Trim to token budget: sort newest-first, drop oldest entries until we fit.
+  // Trim to token budget: sort so low-importance old entries are dropped first.
+  // Primary sort: importance ascending (1 before 3). Secondary: age ascending (oldest first).
+  // This way a low-importance old entry is always dropped before a high-importance new one.
   const budget = settings.longterm_inject_budget ?? 500;
-  const trimmed = [...memories].sort((a, b) => b.ts - a.ts);
+  const trimmed = [...memories].sort((a, b) => {
+    const ia = a.importance ?? 2;
+    const ib = b.importance ?? 2;
+    if (ia !== ib) return ib - ia; // higher importance first
+    return b.ts - a.ts; // newer first within same importance
+  });
   while (trimmed.length > 1 && estimateTokens(formatMemoriesForPrompt(trimmed)) > budget) {
     trimmed.pop();
   }

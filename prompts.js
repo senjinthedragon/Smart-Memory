@@ -158,9 +158,15 @@ Types:
 - development - how the relationship or situation changed
 - detail      - specific facts, names, objects, or details mentioned (e.g. "The whiskey is Dragon's Fire brand")
 
+For each item, also rate its importance on a scale of 1-3:
+- 1 = low    - passing detail, unlikely to matter later this session
+- 2 = medium - useful context, standard session fact (use this when unsure)
+- 3 = high   - pivotal scene, major revelation, or relationship-defining moment
+
 One item per line, exact format:
-[scene] We are in a candlelit tavern, late evening, rain outside.
-[detail] The character's horse is named Ember, a chestnut mare.
+[scene:2] We are in a candlelit tavern, late evening, rain outside.
+[detail:3] The character's horse is named Ember, a chestnut mare.
+[revelation:1] He mentioned in passing that it rained last week.
 
 If nothing new, output: NONE`
   );
@@ -361,10 +367,16 @@ Use one of these memory types:
 - preference  - what the user demonstrably enjoys (themes, tone, pacing, specific content)
 - event       - significant events that occurred and should be recalled
 
+For each memory, also rate its importance on a scale of 1-3:
+- 1 = low    - incidental detail, minor observation, unlikely to matter in future sessions
+- 2 = medium - useful context, standard fact (use this when unsure)
+- 3 = high   - character-defining trait, core relationship fact, major event, or plot-critical information
+
 Output ONLY one memory per line using this exact format (nothing else):
-[fact] The character's name is Elara and she works as a blacksmith.
-[relationship] We have developed a close friendship after helping each other escape the dungeon.
-[preference] The user enjoys slow-burn romance and witty banter.
+[fact:2] The character's name is Elara and she works as a blacksmith.
+[relationship:3] We have developed a close friendship after helping each other escape the dungeon.
+[preference:2] The user enjoys slow-burn romance and witty banter.
+[event:1] They briefly discussed the weather near the harbour.
 
 If there is nothing new worth preserving, output exactly: NONE`
   );

@@ -62,7 +62,12 @@ export function loadSessionMemories() {
   const context = getContext();
   const memories = context.chatMetadata?.[META_KEY]?.sessionMemories ?? [];
   // Migrate: entries without the consolidated flag are pre-existing stable memories.
-  return memories.map((m) => (m.consolidated === undefined ? { ...m, consolidated: true } : m));
+  // Entries without an importance score default to 2 (medium).
+  return memories.map((m) => ({
+    ...m,
+    consolidated: m.consolidated ?? true,
+    importance: m.importance ?? 2,
+  }));
 }
 
 /**
@@ -98,16 +103,18 @@ export async function clearSessionMemories() {
 function parseSessionOutput(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
   const results = [];
-  // Matches lines like: [scene] Candlelit tavern, late evening.
-  const pattern = /^\[(scene|revelation|development|detail)\]\s+(.+)$/gim;
+  // Matches lines like: [scene:2] Candlelit tavern, late evening.
+  // The importance score (:N) is optional - defaults to 2 if omitted.
+  const pattern = /^\[(scene|revelation|development|detail)(?::([123]))?\]\s+(.+)$/gim;
   let match;
   while ((match = pattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
-    const content = match[2].trim();
+    const importance = match[2] ? parseInt(match[2], 10) : 2;
+    const content = match[3].trim();
     if (SESSION_TYPES.includes(type) && content.length > 3) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, ts: Date.now(), consolidated: false });
+      results.push({ type, content, importance, ts: Date.now(), consolidated: false });
     }
   }
   return results;
@@ -142,7 +149,17 @@ function deduplicateSession(existing, incoming, max) {
     });
     if (!isDuplicate) merged.push(mem);
   }
-  if (merged.length > max) merged.splice(0, merged.length - max);
+  // When over the cap, drop the least valuable entries first:
+  // sort by importance ascending then age ascending, remove from the tail.
+  if (merged.length > max) {
+    merged.sort((a, b) => {
+      const ia = a.importance ?? 2;
+      const ib = b.importance ?? 2;
+      if (ia !== ib) return ib - ia; // higher importance first
+      return b.ts - a.ts; // newer first within same importance
+    });
+    merged.splice(max);
+  }
   return merged;
 }
 
@@ -303,9 +320,15 @@ export function injectSessionMemories() {
     return;
   }
 
-  // Trim to token budget: sort newest-first, drop oldest entries until we fit.
+  // Trim to token budget: sort so low-importance old entries are dropped first.
+  // Primary sort: importance descending (3 before 1). Secondary: age descending (newest first).
   const budget = settings.session_inject_budget ?? 400;
-  const trimmed = [...memories].sort((a, b) => b.ts - a.ts);
+  const trimmed = [...memories].sort((a, b) => {
+    const ia = a.importance ?? 2;
+    const ib = b.importance ?? 2;
+    if (ia !== ib) return ib - ia; // higher importance first
+    return b.ts - a.ts; // newer first within same importance
+  });
   while (trimmed.length > 1 && estimateTokens(formatSessionMemories(trimmed)) > budget) {
     trimmed.pop();
   }
