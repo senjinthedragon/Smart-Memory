@@ -5,13 +5,12 @@
         <b>Smart Memory</b>
         <small
           id="sm_status"
-          style="margin-left: 8px; color: var(--SmartReplyColor, #aaa); font-weight: normal;"
+          style="margin-left: 8px; color: var(--SmartReplyColor, #aaa); font-weight: normal"
         ></small>
       </div>
       <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
-
       <!-- Master toggle -->
       <div class="sm-block">
         <label class="checkbox_label">
@@ -25,7 +24,11 @@
       <div class="sm-block">
         <label>
           Memory LLM
-          <span class="sm-info" data-tooltip="Which LLM handles all Smart Memory work - extraction, summarization, and recap. Set this to a lighter model to save your main roleplay LLM for the actual story.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Which LLM handles all Smart Memory work - extraction, summarization, and recap. Set this to a lighter model to save your main roleplay LLM for the actual story."
+            >ⓘ</span
+          >
         </label>
         <select id="sm_source" class="text_pole">
           <option value="main">Main API</option>
@@ -34,32 +37,44 @@
       </div>
 
       <!-- Catch Up / Reset buttons -->
-      <div class="sm-block" style="display: flex; gap: 6px; align-items: center;">
-        <button id="sm_catch_up" class="menu_button menu_button_icon" style="flex: 1;">
+      <div class="sm-block" style="display: flex; gap: 6px; align-items: center">
+        <button id="sm_catch_up" class="menu_button menu_button_icon" style="flex: 1">
           <i class="fa-solid fa-forward-fast"></i>
           <span>
             Catch Up - Extract All from Full Chat
-            <span class="sm-info" data-tooltip="Processes the full chat history in chunks of 20 messages, running every enabled extraction tier (long-term, session, arcs, scenes, summary) across the whole backlog. Use this to onboard an existing chat. May take a while on long chats.">ⓘ</span>
+            <span
+              class="sm-info"
+              data-tooltip="Processes the full chat history in chunks of 20 messages, running every enabled extraction tier (long-term, session, arcs, scenes, summary) across the whole backlog. Use this to onboard an existing chat. May take a while on long chats."
+              >ⓘ</span
+            >
           </span>
         </button>
-        <button id="sm_cancel_catch_up" class="menu_button menu_button_icon" style="display: none;">
+        <button id="sm_cancel_catch_up" class="menu_button menu_button_icon" style="display: none">
           <i class="fa-solid fa-xmark"></i>
           <span>Cancel</span>
         </button>
       </div>
-      <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap;">
+      <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap">
         <button id="sm_clear_chat_context" class="menu_button menu_button_icon">
           <i class="fa-solid fa-broom"></i>
           <span>
             Clear Chat Context
-            <span class="sm-info" data-tooltip="Clears Smart Memory's extracted state for this chat - summary, session memories, scene history, and story arcs. Long-term memories are not affected. Use before Catch Up to re-derive everything cleanly from scratch.">ⓘ</span>
+            <span
+              class="sm-info"
+              data-tooltip="Clears Smart Memory's extracted state for this chat - summary, session memories, scene history, and story arcs. Long-term memories are not affected. Use before Catch Up to re-derive everything cleanly from scratch."
+              >ⓘ</span
+            >
           </span>
         </button>
         <button id="sm_fresh_start_button" class="menu_button menu_button_icon">
           <i class="fa-solid fa-rotate-left"></i>
           <span>
             Fresh Start
-            <span class="sm-info" data-tooltip="Clears everything including long-term memories for this character, then suppresses future memory injection for this chat. Use after throwaway or test sessions so nothing carries over to future chats.">ⓘ</span>
+            <span
+              class="sm-info"
+              data-tooltip="Clears everything including long-term memories for this character, then suppresses future memory injection for this chat. Use after throwaway or test sessions so nothing carries over to future chats."
+              >ⓘ</span
+            >
           </span>
         </button>
       </div>
@@ -71,7 +86,11 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Token Usage
-          <span class="sm-info" data-tooltip="Estimated tokens currently injected by each Smart Memory tier. Updates after each generation. Uses ~4 chars/token - accurate enough for tuning budgets, not for exact counts.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Estimated tokens currently injected by each Smart Memory tier. Updates after each generation. Uses ~4 chars/token - accurate enough for tuning budgets, not for exact counts."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
           <div class="sm-token-bar-wrap">
@@ -79,8 +98,8 @@
           </div>
           <div id="sm_token_legend" class="sm-token-legend"></div>
           <div class="sm-token-total">
-            <span id="sm_token_used">~0</span> / <span id="sm_token_max">?</span> tokens
-            &mdash; <span id="sm_token_pct">0</span>% of context
+            <span id="sm_token_used">~0</span> / <span id="sm_token_max">?</span> tokens &mdash;
+            <span id="sm_token_pct">0</span>% of context
           </div>
         </div>
       </details>
@@ -90,10 +109,13 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Long-term Memory
-          <span class="sm-info" data-tooltip="Extracts facts, relationship history, preferences, and significant events from the conversation and stores them permanently per character. These memories are injected at the start of every chat with that character so the AI always knows who they are.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Extracts facts, relationship history, preferences, and significant events from the conversation and stores them permanently per character. These memories are injected at the start of every chat with that character so the AI always knows who they are."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
-
           <div class="sm-block">
             <label class="checkbox_label">
               <input id="sm_longterm_enabled" type="checkbox" />
@@ -109,11 +131,18 @@
             </label>
           </div>
           <div class="sm-block">
-            <label class="checkbox_label" title="When checked, long-term memories are NOT injected for this specific chat.">
+            <label
+              class="checkbox_label"
+              title="When checked, long-term memories are NOT injected for this specific chat."
+            >
               <input id="sm_fresh_start" type="checkbox" />
               <span>
                 Fresh start - suppress memories for this chat
-                <span class="sm-info" data-tooltip="Suppresses long-term memory injection for this specific chat only. Useful when you want to start a story without the AI knowing what happened in past sessions.">ⓘ</span>
+                <span
+                  class="sm-info"
+                  data-tooltip="Suppresses long-term memory injection for this specific chat only. Useful when you want to start a story without the AI knowing what happened in past sessions."
+                  >ⓘ</span
+                >
               </span>
             </label>
           </div>
@@ -124,24 +153,113 @@
               <input id="sm_longterm_consolidate" type="checkbox" />
               <span>
                 Auto-consolidate redundant memories
-                <span class="sm-info" data-tooltip="After each extraction, sends the full memory list to the LLM and asks it to merge near-duplicate or redundant entries into single richer ones. Runs silently in the background after generation. Recommended - prevents the same information being stored in many slightly different forms.">ⓘ</span>
+                <span
+                  class="sm-info"
+                  data-tooltip="After each extraction, sends the full memory list to the LLM and asks it to merge near-duplicate or redundant entries into single richer ones. Runs silently in the background after generation. Recommended - prevents the same information being stored in many slightly different forms."
+                  >ⓘ</span
+                >
               </span>
             </label>
           </div>
           <div class="sm-block">
-            <label>Extract after every <b><span id="sm_longterm_extract_every_value"></span></b> AI messages</label>
-            <input id="sm_longterm_extract_every" type="range" min="1" max="10" step="1"
-              value="{{defaultSettings.longterm_extract_every}}" />
+            <label>
+              Consolidate [fact] after
+              <b><span id="sm_longterm_threshold_fact_value"></span></b> unprocessed items
+              <span
+                class="sm-info"
+                data-tooltip="Per-type trigger for long-term consolidation. Lower values merge duplicates sooner but run consolidation more often."
+                >ⓘ</span
+              >
+            </label>
+            <input
+              id="sm_longterm_threshold_fact"
+              type="range"
+              min="2"
+              max="8"
+              step="1"
+              value="{{defaultSettings.longterm_consolidation_threshold_fact}}"
+            />
           </div>
           <div class="sm-block">
-            <label>Max stored memories per character: <b><span id="sm_longterm_max_memories_value"></span></b></label>
-            <input id="sm_longterm_max_memories" type="range" min="5" max="50" step="5"
-              value="{{defaultSettings.longterm_max_memories}}" />
+            <label
+              >Consolidate [relationship] after
+              <b><span id="sm_longterm_threshold_relationship_value"></span></b> unprocessed
+              items</label
+            >
+            <input
+              id="sm_longterm_threshold_relationship"
+              type="range"
+              min="2"
+              max="8"
+              step="1"
+              value="{{defaultSettings.longterm_consolidation_threshold_relationship}}"
+            />
+          </div>
+          <div class="sm-block">
+            <label
+              >Consolidate [preference] after
+              <b><span id="sm_longterm_threshold_preference_value"></span></b> unprocessed
+              items</label
+            >
+            <input
+              id="sm_longterm_threshold_preference"
+              type="range"
+              min="2"
+              max="8"
+              step="1"
+              value="{{defaultSettings.longterm_consolidation_threshold_preference}}"
+            />
+          </div>
+          <div class="sm-block">
+            <label
+              >Consolidate [event] after
+              <b><span id="sm_longterm_threshold_event_value"></span></b> unprocessed items</label
+            >
+            <input
+              id="sm_longterm_threshold_event"
+              type="range"
+              min="2"
+              max="8"
+              step="1"
+              value="{{defaultSettings.longterm_consolidation_threshold_event}}"
+            />
+          </div>
+          <div class="sm-block">
+            <label
+              >Extract after every <b><span id="sm_longterm_extract_every_value"></span></b> AI
+              messages</label
+            >
+            <input
+              id="sm_longterm_extract_every"
+              type="range"
+              min="1"
+              max="10"
+              step="1"
+              value="{{defaultSettings.longterm_extract_every}}"
+            />
+          </div>
+          <div class="sm-block">
+            <label
+              >Max stored memories per character:
+              <b><span id="sm_longterm_max_memories_value"></span></b
+            ></label>
+            <input
+              id="sm_longterm_max_memories"
+              type="range"
+              min="5"
+              max="50"
+              step="5"
+              value="{{defaultSettings.longterm_max_memories}}"
+            />
           </div>
           <div class="sm-block">
             <label>
               Injection token budget: <b><span id="sm_longterm_inject_budget_value"></span></b>
-              <span class="sm-info" data-tooltip="Maximum tokens injected per generation. Oldest memories are dropped first if the total would exceed this limit.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Maximum tokens injected per generation. Oldest memories are dropped first if the total would exceed this limit."
+                >ⓘ</span
+              >
             </label>
             <input id="sm_longterm_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
@@ -150,10 +268,18 @@
           <div class="sm-block">
             <label>
               Template
-              <span class="sm-info" data-tooltip="Wraps the memory list before injecting it into the prompt. Use {{memories}} as the placeholder.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Wraps the memory list before injecting it into the prompt. Use {{memories}} as the placeholder."
+                >ⓘ</span
+              >
             </label>
-            <textarea id="sm_longterm_template" class="text_pole textarea_compact" rows="2"
-              placeholder="[Memories from previous conversations:\n{{memories}}]"></textarea>
+            <textarea
+              id="sm_longterm_template"
+              class="text_pole textarea_compact"
+              rows="2"
+              placeholder="[Memories from previous conversations:\n{{memories}}]"
+            ></textarea>
           </div>
           <div class="sm-block">
             <label>Injection position</label>
@@ -169,8 +295,14 @@
               <label class="flex-container alignItemsCenter">
                 <input type="radio" name="sm_longterm_position" value="1" />
                 <span>In-chat @ Depth</span>
-                <input id="sm_longterm_depth" class="text_pole widthUnset" type="number"
-                  min="0" max="999" style="width: 4em; margin: 0 4px" />
+                <input
+                  id="sm_longterm_depth"
+                  class="text_pole widthUnset"
+                  type="number"
+                  min="0"
+                  max="999"
+                  style="width: 4em; margin: 0 4px"
+                />
                 <span>as</span>
                 <select id="sm_longterm_role" class="text_pole widthNatural">
                   <option value="0">System</option>
@@ -183,12 +315,16 @@
 
           <p class="sm-section-title">Memories for Current Character</p>
           <div id="sm_memories_list" class="sm_memories_list"></div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
             <button id="sm_extract_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
                 Extract Now
-                <span class="sm-info" data-tooltip="Extracts long-term memories from the last 20 messages. For the full chat backlog use Catch Up instead.">ⓘ</span>
+                <span
+                  class="sm-info"
+                  data-tooltip="Extracts long-term memories from the last 20 messages. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
               </span>
             </button>
             <button id="sm_clear_memories" class="menu_button menu_button_icon">
@@ -196,7 +332,6 @@
               <span>Clear Memories</span>
             </button>
           </div>
-
         </div>
       </details>
 
@@ -205,10 +340,13 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Session Memory
-          <span class="sm-info" data-tooltip="Captures granular details from the current chat - scene details, revelations, character developments. More specific than long-term memories and doesn't persist between sessions. Helps the AI stay oriented to what has already been established this session.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Captures granular details from the current chat - scene details, revelations, character developments. More specific than long-term memories and doesn't persist between sessions. Helps the AI stay oriented to what has already been established this session."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
-
           <div class="sm-block">
             <label class="checkbox_label">
               <input id="sm_session_enabled" type="checkbox" />
@@ -218,19 +356,59 @@
 
           <p class="sm-section-title">Extraction</p>
           <div class="sm-block">
-            <label>Extract after every <b><span id="sm_session_extract_every_value"></span></b> AI messages</label>
-            <input id="sm_session_extract_every" type="range" min="1" max="10" step="1"
-              value="{{defaultSettings.session_extract_every}}" />
+            <label>
+              Consolidate after
+              <b><span id="sm_session_consolidation_threshold_value"></span></b> unprocessed items
+              <span
+                class="sm-info"
+                data-tooltip="Trigger for session memory consolidation per session-memory type. Lower values merge near-duplicates sooner."
+                >ⓘ</span
+              >
+            </label>
+            <input
+              id="sm_session_consolidation_threshold"
+              type="range"
+              min="2"
+              max="8"
+              step="1"
+              value="{{defaultSettings.session_consolidation_threshold}}"
+            />
           </div>
           <div class="sm-block">
-            <label>Max session memories: <b><span id="sm_session_max_memories_value"></span></b></label>
-            <input id="sm_session_max_memories" type="range" min="5" max="60" step="5"
-              value="{{defaultSettings.session_max_memories}}" />
+            <label
+              >Extract after every <b><span id="sm_session_extract_every_value"></span></b> AI
+              messages</label
+            >
+            <input
+              id="sm_session_extract_every"
+              type="range"
+              min="1"
+              max="10"
+              step="1"
+              value="{{defaultSettings.session_extract_every}}"
+            />
+          </div>
+          <div class="sm-block">
+            <label
+              >Max session memories: <b><span id="sm_session_max_memories_value"></span></b
+            ></label>
+            <input
+              id="sm_session_max_memories"
+              type="range"
+              min="5"
+              max="60"
+              step="5"
+              value="{{defaultSettings.session_max_memories}}"
+            />
           </div>
           <div class="sm-block">
             <label>
               Injection token budget: <b><span id="sm_session_inject_budget_value"></span></b>
-              <span class="sm-info" data-tooltip="Maximum tokens injected per generation. Oldest memories are dropped first if the total would exceed this limit.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Maximum tokens injected per generation. Oldest memories are dropped first if the total would exceed this limit."
+                >ⓘ</span
+              >
             </label>
             <input id="sm_session_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
@@ -239,10 +417,18 @@
           <div class="sm-block">
             <label>
               Template
-              <span class="sm-info" data-tooltip="Use {{session}} as the placeholder for the session memory list.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Use {{session}} as the placeholder for the session memory list."
+                >ⓘ</span
+              >
             </label>
-            <textarea id="sm_session_template" class="text_pole textarea_compact" rows="2"
-              placeholder="[Details from this session:\n{{session}}]"></textarea>
+            <textarea
+              id="sm_session_template"
+              class="text_pole textarea_compact"
+              rows="2"
+              placeholder="[Details from this session:\n{{session}}]"
+            ></textarea>
           </div>
           <div class="sm-block">
             <label>Injection position</label>
@@ -258,8 +444,14 @@
               <label class="flex-container alignItemsCenter">
                 <input type="radio" name="sm_session_position" value="1" />
                 <span>In-chat @ Depth</span>
-                <input id="sm_session_depth" class="text_pole widthUnset" type="number"
-                  min="0" max="999" style="width: 4em; margin: 0 4px" />
+                <input
+                  id="sm_session_depth"
+                  class="text_pole widthUnset"
+                  type="number"
+                  min="0"
+                  max="999"
+                  style="width: 4em; margin: 0 4px"
+                />
                 <span>as</span>
                 <select id="sm_session_role" class="text_pole widthNatural">
                   <option value="0">System</option>
@@ -272,12 +464,16 @@
 
           <p class="sm-section-title">Memories for Current Session</p>
           <div id="sm_session_list" class="sm_memories_list"></div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
             <button id="sm_extract_session_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
                 Extract Now
-                <span class="sm-info" data-tooltip="Extracts session details from the last 40 messages. For the full chat backlog use Catch Up instead.">ⓘ</span>
+                <span
+                  class="sm-info"
+                  data-tooltip="Extracts session details from the last 40 messages. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
               </span>
             </button>
             <button id="sm_clear_session" class="menu_button menu_button_icon">
@@ -285,7 +481,6 @@
               <span>Clear Session Memories</span>
             </button>
           </div>
-
         </div>
       </details>
 
@@ -294,10 +489,13 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Short-term Memory
-          <span class="sm-info" data-tooltip="Watches the context usage percentage and generates a rolling summary once it crosses a threshold. Older messages that fall off the context window are still covered by the summary. Uses progressive compaction - subsequent runs extend the existing summary rather than rewriting it from scratch.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Watches the context usage percentage and generates a rolling summary once it crosses a threshold. Older messages that fall off the context window are still covered by the summary. Uses progressive compaction - subsequent runs extend the existing summary rather than rewriting it from scratch."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
-
           <div class="sm-block">
             <label class="checkbox_label">
               <input id="sm_compaction_enabled" type="checkbox" />
@@ -310,26 +508,50 @@
             <label>
               Context threshold:
               <b><span id="sm_compaction_threshold_value"></span></b>
-              <span class="sm-info" data-tooltip="Smart Memory waits until context usage crosses this percentage before generating a summary. Lower values produce more frequent summaries; higher values let the context fill up more before compacting.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Smart Memory waits until context usage crosses this percentage before generating a summary. Lower values produce more frequent summaries; higher values let the context fill up more before compacting."
+                >ⓘ</span
+              >
             </label>
-            <input id="sm_compaction_threshold" type="range" min="50" max="95" step="5"
-              value="{{defaultSettings.compaction_threshold}}" />
+            <input
+              id="sm_compaction_threshold"
+              type="range"
+              min="50"
+              max="95"
+              step="5"
+              value="{{defaultSettings.compaction_threshold}}"
+            />
           </div>
           <div class="sm-block">
             <label>
               Response length: <b><span id="sm_compaction_response_length_value"></span></b> tokens
             </label>
-            <input id="sm_compaction_response_length" type="range" min="500" max="3000" step="100"
-              value="{{defaultSettings.compaction_response_length}}" />
+            <input
+              id="sm_compaction_response_length"
+              type="range"
+              min="500"
+              max="3000"
+              step="100"
+              value="{{defaultSettings.compaction_response_length}}"
+            />
           </div>
           <p class="sm-section-title">Injection</p>
           <div class="sm-block">
             <label>
               Template
-              <span class="sm-info" data-tooltip="Wraps the summary text before injecting it into the prompt. Use {{summary}} as the placeholder for the summary content.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Wraps the summary text before injecting it into the prompt. Use {{summary}} as the placeholder for the summary content."
+                >ⓘ</span
+              >
             </label>
-            <textarea id="sm_compaction_template" class="text_pole textarea_compact" rows="2"
-              placeholder="[Story so far:\n{{summary}}]"></textarea>
+            <textarea
+              id="sm_compaction_template"
+              class="text_pole textarea_compact"
+              rows="2"
+              placeholder="[Story so far:\n{{summary}}]"
+            ></textarea>
           </div>
           <div class="sm-block">
             <label>Injection position</label>
@@ -345,8 +567,14 @@
               <label class="flex-container alignItemsCenter">
                 <input type="radio" name="sm_compaction_position" value="1" />
                 <span>In-chat @ Depth</span>
-                <input id="sm_compaction_depth" class="text_pole widthUnset" type="number"
-                  min="0" max="999" style="width: 4em; margin: 0 4px" />
+                <input
+                  id="sm_compaction_depth"
+                  class="text_pole widthUnset"
+                  type="number"
+                  min="0"
+                  max="999"
+                  style="width: 4em; margin: 0 4px"
+                />
                 <span>as</span>
                 <select id="sm_compaction_role" class="text_pole widthNatural">
                   <option value="0">System</option>
@@ -361,10 +589,16 @@
           <div class="sm-block">
             <label>
               Summary
-              <small style="color: var(--SmartReplyColor, #aaa)">(editable - changes apply immediately)</small>
+              <small style="color: var(--SmartReplyColor, #aaa)"
+                >(editable - changes apply immediately)</small
+              >
             </label>
-            <textarea id="sm_current_summary" class="text_pole textarea_compact" rows="5"
-              placeholder="No summary yet. One will be generated automatically when the context threshold is reached."></textarea>
+            <textarea
+              id="sm_current_summary"
+              class="text_pole textarea_compact"
+              rows="5"
+              placeholder="No summary yet. One will be generated automatically when the context threshold is reached."
+            ></textarea>
           </div>
           <div class="sm-block">
             <button id="sm_summarize_now" class="menu_button menu_button_icon">
@@ -372,7 +606,6 @@
               <span>Summarize Now</span>
             </button>
           </div>
-
         </div>
       </details>
 
@@ -381,10 +614,13 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Scene Detection &amp; History
-          <span class="sm-info" data-tooltip="Detects when the scene changes - time skips, location shifts, or mood breaks - and generates a short summary of the completed scene. Scene summaries are injected into context so the AI knows where you've been, not just where you are.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Detects when the scene changes - time skips, location shifts, or mood breaks - and generates a short summary of the completed scene. Scene summaries are injected into context so the AI knows where you've been, not just where you are."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
-
           <div class="sm-block">
             <label class="checkbox_label">
               <input id="sm_scene_enabled" type="checkbox" />
@@ -398,7 +634,11 @@
               <input id="sm_scene_ai_detect" type="checkbox" />
               <span>
                 Use AI detection
-                <span class="sm-info" data-tooltip="Asks the LLM whether a scene break occurred after each message. More accurate than the heuristic pattern matcher but costs an extra model call per message. Off by default due to hardware cost.">ⓘ</span>
+                <span
+                  class="sm-info"
+                  data-tooltip="Asks the LLM whether a scene break occurred after each message. More accurate than the heuristic pattern matcher but costs an extra model call per message. Off by default due to hardware cost."
+                  >ⓘ</span
+                >
               </span>
             </label>
           </div>
@@ -418,8 +658,14 @@
               <label class="flex-container alignItemsCenter">
                 <input type="radio" name="sm_scene_position" value="1" />
                 <span>In-chat @ Depth</span>
-                <input id="sm_scene_depth" class="text_pole widthUnset" type="number"
-                  min="0" max="999" style="width: 4em; margin: 0 4px" />
+                <input
+                  id="sm_scene_depth"
+                  class="text_pole widthUnset"
+                  type="number"
+                  min="0"
+                  max="999"
+                  style="width: 4em; margin: 0 4px"
+                />
                 <span>as</span>
                 <select id="sm_scene_role" class="text_pole widthNatural">
                   <option value="0">System</option>
@@ -432,26 +678,42 @@
 
           <p class="sm-section-title">Scene History</p>
           <div class="sm-block">
-            <label>Keep last <b><span id="sm_scene_max_history_value"></span></b> scenes</label>
-            <input id="sm_scene_max_history" type="range" min="1" max="15" step="1"
-              value="{{defaultSettings.scene_max_history}}" />
+            <label
+              >Keep last <b><span id="sm_scene_max_history_value"></span></b> scenes</label
+            >
+            <input
+              id="sm_scene_max_history"
+              type="range"
+              min="1"
+              max="15"
+              step="1"
+              value="{{defaultSettings.scene_max_history}}"
+            />
           </div>
           <div class="sm-block">
             <label>
               Injection token budget: <b><span id="sm_scene_inject_budget_value"></span></b>
-              <span class="sm-info" data-tooltip="Maximum tokens injected per generation. Oldest scenes are dropped first if the total would exceed this limit.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Maximum tokens injected per generation. Oldest scenes are dropped first if the total would exceed this limit."
+                >ⓘ</span
+              >
             </label>
             <input id="sm_scene_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
           <div id="sm_scenes_list" class="sm_scenes_list">
             <div class="sm_no_char">No scenes recorded yet.</div>
           </div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
             <button id="sm_extract_scenes_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
                 Extract Scene
-                <span class="sm-info" data-tooltip="Summarizes the current scene buffer (messages since the last detected scene break) as a scene entry. Falls back to the last 40 messages if no buffer exists. For the full chat backlog use Catch Up instead.">ⓘ</span>
+                <span
+                  class="sm-info"
+                  data-tooltip="Summarizes the current scene buffer (messages since the last detected scene break) as a scene entry. Falls back to the last 40 messages if no buffer exists. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
               </span>
             </button>
             <button id="sm_clear_scenes" class="menu_button menu_button_icon">
@@ -459,7 +721,6 @@
               <span>Clear Scene History</span>
             </button>
           </div>
-
         </div>
       </details>
 
@@ -468,10 +729,13 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Story Arcs
-          <span class="sm-info" data-tooltip="Tracks unresolved narrative threads - promises made, character goals, mysteries, tensions. Injected into context so the AI stays oriented toward where the story is going and doesn't forget what's been set up.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Tracks unresolved narrative threads - promises made, character goals, mysteries, tensions. Injected into context so the AI stays oriented toward where the story is going and doesn't forget what's been set up."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
-
           <div class="sm-block">
             <label class="checkbox_label">
               <input id="sm_arcs_enabled" type="checkbox" />
@@ -481,14 +745,26 @@
 
           <p class="sm-section-title">Extraction</p>
           <div class="sm-block">
-            <label>Max tracked arcs: <b><span id="sm_arcs_max_value"></span></b></label>
-            <input id="sm_arcs_max" type="range" min="3" max="20" step="1"
-              value="{{defaultSettings.arcs_max}}" />
+            <label
+              >Max tracked arcs: <b><span id="sm_arcs_max_value"></span></b
+            ></label>
+            <input
+              id="sm_arcs_max"
+              type="range"
+              min="3"
+              max="20"
+              step="1"
+              value="{{defaultSettings.arcs_max}}"
+            />
           </div>
           <div class="sm-block">
             <label>
               Injection token budget: <b><span id="sm_arcs_inject_budget_value"></span></b>
-              <span class="sm-info" data-tooltip="Maximum tokens injected per generation. Oldest story threads are dropped first if the total would exceed this limit.">ⓘ</span>
+              <span
+                class="sm-info"
+                data-tooltip="Maximum tokens injected per generation. Oldest story threads are dropped first if the total would exceed this limit."
+                >ⓘ</span
+              >
             </label>
             <input id="sm_arcs_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
@@ -508,8 +784,14 @@
               <label class="flex-container alignItemsCenter">
                 <input type="radio" name="sm_arcs_position" value="1" />
                 <span>In-chat @ Depth</span>
-                <input id="sm_arcs_depth" class="text_pole widthUnset" type="number"
-                  min="0" max="999" style="width: 4em; margin: 0 4px" />
+                <input
+                  id="sm_arcs_depth"
+                  class="text_pole widthUnset"
+                  type="number"
+                  min="0"
+                  max="999"
+                  style="width: 4em; margin: 0 4px"
+                />
                 <span>as</span>
                 <select id="sm_arcs_role" class="text_pole widthNatural">
                   <option value="0">System</option>
@@ -524,12 +806,16 @@
           <div id="sm_arcs_list" class="sm_arcs_list">
             <div class="sm_no_char">No open story threads.</div>
           </div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
             <button id="sm_extract_arcs_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
                 Extract Arcs Now
-                <span class="sm-info" data-tooltip="Extracts story arcs from the last 100 messages. Arcs need a broader window than other tiers to detect resolutions. For the full chat backlog use Catch Up instead.">ⓘ</span>
+                <span
+                  class="sm-info"
+                  data-tooltip="Extracts story arcs from the last 100 messages. Arcs need a broader window than other tiers to detect resolutions. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
               </span>
             </button>
             <button id="sm_clear_arcs" class="menu_button menu_button_icon">
@@ -537,7 +823,6 @@
               <span>Clear Arcs</span>
             </button>
           </div>
-
         </div>
       </details>
 
@@ -546,10 +831,13 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Away Recap
-          <span class="sm-info" data-tooltip="When you return to a chat after being away for longer than the threshold, Smart Memory generates a short &quot;Previously on...&quot; summary and injects it at the top of context. It's automatically cleared after the first AI response so it doesn't linger.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="When you return to a chat after being away for longer than the threshold, Smart Memory generates a short &quot;Previously on...&quot; summary and injects it at the top of context. It's automatically cleared after the first AI response so it doesn't linger."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
-
           <div class="sm-block">
             <label class="checkbox_label">
               <input id="sm_recap_enabled" type="checkbox" />
@@ -559,9 +847,17 @@
 
           <p class="sm-section-title">Trigger</p>
           <div class="sm-block">
-            <label>Generate recap after: <b><span id="sm_recap_threshold_value"></span></b></label>
-            <input id="sm_recap_threshold" type="range" min="1" max="48" step="1"
-              value="{{defaultSettings.recap_threshold_hours}}" />
+            <label
+              >Generate recap after: <b><span id="sm_recap_threshold_value"></span></b
+            ></label>
+            <input
+              id="sm_recap_threshold"
+              type="range"
+              min="1"
+              max="48"
+              step="1"
+              value="{{defaultSettings.recap_threshold_hours}}"
+            />
           </div>
 
           <p class="sm-section-title">Injection</p>
@@ -579,8 +875,14 @@
               <label class="flex-container alignItemsCenter">
                 <input type="radio" name="sm_recap_position" value="1" />
                 <span>In-chat @ Depth</span>
-                <input id="sm_recap_depth" class="text_pole widthUnset" type="number"
-                  min="0" max="999" style="width: 4em; margin: 0 4px" />
+                <input
+                  id="sm_recap_depth"
+                  class="text_pole widthUnset"
+                  type="number"
+                  min="0"
+                  max="999"
+                  style="width: 4em; margin: 0 4px"
+                />
                 <span>as</span>
                 <select id="sm_recap_role" class="text_pole widthNatural">
                   <option value="0">System</option>
@@ -591,13 +893,12 @@
             </div>
           </div>
 
-          <div class="sm-block" style="margin-top: 4px;">
+          <div class="sm-block" style="margin-top: 4px">
             <button id="sm_recap_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-clock-rotate-left"></i>
               <span>Generate Recap Now</span>
             </button>
           </div>
-
         </div>
       </details>
 
@@ -606,10 +907,13 @@
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
           Continuity Checker
-          <span class="sm-info" data-tooltip="Compares the last AI response against established facts in your summary and memories, then lists any contradictions it finds. Manual-only - click after a response that feels off. Also available as the /sm-check slash command.">ⓘ</span>
+          <span
+            class="sm-info"
+            data-tooltip="Compares the last AI response against established facts in your summary and memories, then lists any contradictions it finds. Manual-only - click after a response that feels off. Also available as the /sm-check slash command."
+            >ⓘ</span
+          >
         </summary>
         <div class="sm-section-content">
-
           <div class="sm-block">
             <button id="sm_check_continuity" class="menu_button menu_button_icon">
               <i class="fa-solid fa-scale-balanced"></i>
@@ -617,9 +921,11 @@
             </button>
           </div>
 
-          <div id="sm_continuity_result" class="sm_continuity_result"
-            style="display: none; margin-top: 8px"></div>
-
+          <div
+            id="sm_continuity_result"
+            class="sm_continuity_result"
+            style="display: none; margin-top: 8px"
+          ></div>
         </div>
       </details>
 

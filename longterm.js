@@ -252,14 +252,36 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 // How many unprocessed entries of a single type must accumulate before
 // consolidation fires for that type.
 //
-// Preference/relationship memories tend to reappear as paraphrases quickly,
-// so we run consolidation earlier for those types to reduce duplicate buildup.
-const CONSOLIDATION_THRESHOLDS = {
+// User-configurable via settings panel; defaults preserve earlier tuned values.
+const DEFAULT_CONSOLIDATION_THRESHOLDS = {
   fact: 4,
   relationship: 3,
   preference: 3,
   event: 4,
 };
+
+function getConsolidationThresholds(settings) {
+  return {
+    fact: Math.max(
+      2,
+      settings.longterm_consolidation_threshold_fact ?? DEFAULT_CONSOLIDATION_THRESHOLDS.fact,
+    ),
+    relationship: Math.max(
+      2,
+      settings.longterm_consolidation_threshold_relationship ??
+        DEFAULT_CONSOLIDATION_THRESHOLDS.relationship,
+    ),
+    preference: Math.max(
+      2,
+      settings.longterm_consolidation_threshold_preference ??
+        DEFAULT_CONSOLIDATION_THRESHOLDS.preference,
+    ),
+    event: Math.max(
+      2,
+      settings.longterm_consolidation_threshold_event ?? DEFAULT_CONSOLIDATION_THRESHOLDS.event,
+    ),
+  };
+}
 
 /**
  * Runs a consolidation pass on the stored memories for a character.
@@ -279,6 +301,7 @@ const CONSOLIDATION_THRESHOLDS = {
 export async function consolidateMemories(characterName) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.longterm_consolidate || !characterName) return 0;
+  const thresholds = getConsolidationThresholds(settings);
 
   const memories = loadCharacterMemories(characterName);
   let totalRemoved = 0;
@@ -287,7 +310,7 @@ export async function consolidateMemories(characterName) {
     const base = memories.filter((m) => m.type === type && m.consolidated);
     const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
-    const threshold = CONSOLIDATION_THRESHOLDS[type] ?? 4;
+    const threshold = thresholds[type] ?? DEFAULT_CONSOLIDATION_THRESHOLDS.fact;
     if (unprocessed.length < threshold) continue;
 
     try {

@@ -114,6 +114,10 @@ const defaultSettings = {
   longterm_enabled: true,
   longterm_carry_over: true,
   longterm_consolidate: true,
+  longterm_consolidation_threshold_fact: 4,
+  longterm_consolidation_threshold_relationship: 3,
+  longterm_consolidation_threshold_preference: 3,
+  longterm_consolidation_threshold_event: 4,
   longterm_extract_every: 3,
   longterm_max_memories: 25,
   longterm_response_length: 600,
@@ -125,6 +129,7 @@ const defaultSettings = {
 
   // Session memory
   session_enabled: true,
+  session_consolidation_threshold: 3,
   session_extract_every: 3,
   session_max_memories: 30,
   session_response_length: 500,
@@ -945,6 +950,50 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  $('#sm_longterm_threshold_fact')
+    .val(s.longterm_consolidation_threshold_fact ?? 4)
+    .on('input', function () {
+      const val = parseInt($(this).val(), 10);
+      getSettings().longterm_consolidation_threshold_fact = val;
+      $('#sm_longterm_threshold_fact_value').text(val);
+      saveSettingsDebounced();
+    });
+  $('#sm_longterm_threshold_fact_value').text(s.longterm_consolidation_threshold_fact ?? 4);
+
+  $('#sm_longterm_threshold_relationship')
+    .val(s.longterm_consolidation_threshold_relationship ?? 3)
+    .on('input', function () {
+      const val = parseInt($(this).val(), 10);
+      getSettings().longterm_consolidation_threshold_relationship = val;
+      $('#sm_longterm_threshold_relationship_value').text(val);
+      saveSettingsDebounced();
+    });
+  $('#sm_longterm_threshold_relationship_value').text(
+    s.longterm_consolidation_threshold_relationship ?? 3,
+  );
+
+  $('#sm_longterm_threshold_preference')
+    .val(s.longterm_consolidation_threshold_preference ?? 3)
+    .on('input', function () {
+      const val = parseInt($(this).val(), 10);
+      getSettings().longterm_consolidation_threshold_preference = val;
+      $('#sm_longterm_threshold_preference_value').text(val);
+      saveSettingsDebounced();
+    });
+  $('#sm_longterm_threshold_preference_value').text(
+    s.longterm_consolidation_threshold_preference ?? 3,
+  );
+
+  $('#sm_longterm_threshold_event')
+    .val(s.longterm_consolidation_threshold_event ?? 4)
+    .on('input', function () {
+      const val = parseInt($(this).val(), 10);
+      getSettings().longterm_consolidation_threshold_event = val;
+      $('#sm_longterm_threshold_event_value').text(val);
+      saveSettingsDebounced();
+    });
+  $('#sm_longterm_threshold_event_value').text(s.longterm_consolidation_threshold_event ?? 4);
+
   $('#sm_longterm_extract_every')
     .val(s.longterm_extract_every)
     .on('input', function () {
@@ -1054,6 +1103,16 @@ function bindSettingsUI() {
       saveSettingsDebounced();
       injectSessionMemories();
     });
+
+  $('#sm_session_consolidation_threshold')
+    .val(s.session_consolidation_threshold ?? 3)
+    .on('input', function () {
+      const val = parseInt($(this).val(), 10);
+      getSettings().session_consolidation_threshold = val;
+      $('#sm_session_consolidation_threshold_value').text(val);
+      saveSettingsDebounced();
+    });
+  $('#sm_session_consolidation_threshold_value').text(s.session_consolidation_threshold ?? 3);
 
   $('#sm_session_extract_every')
     .val(s.session_extract_every)

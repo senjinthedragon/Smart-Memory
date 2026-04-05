@@ -216,7 +216,7 @@ export async function extractSessionMemories(recentMessages) {
 
 // How many unprocessed entries of a single type must accumulate before
 // consolidation fires for that type.
-const SESSION_CONSOLIDATION_THRESHOLD = 3;
+const DEFAULT_SESSION_CONSOLIDATION_THRESHOLD = 3;
 
 /**
  * Runs a consolidation pass on session memories for the current chat.
@@ -235,6 +235,10 @@ const SESSION_CONSOLIDATION_THRESHOLD = 3;
 export async function consolidateSessionMemories() {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) return 0;
+  const threshold = Math.max(
+    2,
+    settings.session_consolidation_threshold ?? DEFAULT_SESSION_CONSOLIDATION_THRESHOLD,
+  );
 
   const memories = loadSessionMemories();
   let totalRemoved = 0;
@@ -243,7 +247,7 @@ export async function consolidateSessionMemories() {
     const base = memories.filter((m) => m.type === type && m.consolidated);
     const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
-    if (unprocessed.length < SESSION_CONSOLIDATION_THRESHOLD) continue;
+    if (unprocessed.length < threshold) continue;
 
     try {
       const baseText = base.map((m) => `[${m.type}] ${m.content}`).join('\n');
