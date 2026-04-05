@@ -216,7 +216,7 @@ export async function extractSessionMemories(recentMessages) {
 
 // How many unprocessed entries of a single type must accumulate before
 // consolidation fires for that type.
-const SESSION_CONSOLIDATION_THRESHOLD = 4;
+const SESSION_CONSOLIDATION_THRESHOLD = 3;
 
 /**
  * Runs a consolidation pass on session memories for the current chat.

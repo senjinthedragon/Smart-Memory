@@ -251,7 +251,15 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
 // How many unprocessed entries of a single type must accumulate before
 // consolidation fires for that type.
-const CONSOLIDATION_THRESHOLD = 4;
+//
+// Preference/relationship memories tend to reappear as paraphrases quickly,
+// so we run consolidation earlier for those types to reduce duplicate buildup.
+const CONSOLIDATION_THRESHOLDS = {
+  fact: 4,
+  relationship: 3,
+  preference: 3,
+  event: 4,
+};
 
 /**
  * Runs a consolidation pass on the stored memories for a character.
@@ -279,7 +287,8 @@ export async function consolidateMemories(characterName) {
     const base = memories.filter((m) => m.type === type && m.consolidated);
     const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
-    if (unprocessed.length < CONSOLIDATION_THRESHOLD) continue;
+    const threshold = CONSOLIDATION_THRESHOLDS[type] ?? 4;
+    if (unprocessed.length < threshold) continue;
 
     try {
       const baseText = formatMemoriesForPrompt(base);
