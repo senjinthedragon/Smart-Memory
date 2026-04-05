@@ -49,7 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
-import { reconcileTypeEntries, trimByPriority } from './memory-utils.js';
+import { reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
@@ -273,7 +273,7 @@ export async function consolidateSessionMemories() {
 
       // Reconcile promoted entries with the base so "updated" base entries
       // replace older variants instead of being appended as duplicates.
-      const reconciledType = reconcileTypeEntries(base, promoted, 0.65);
+      const reconciledType = reconcileTypeEntries(base, promoted, 0.65, [...base, ...unprocessed]);
 
       // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
@@ -295,7 +295,7 @@ export async function consolidateSessionMemories() {
   }
 
   const max = settings.session_max_memories ?? 30;
-  const finalMemories = trimByPriority(memories, max);
+  const finalMemories = sortByTimeline(trimByPriority(memories, max));
   if (
     totalRemoved > 0 ||
     finalMemories.length !== memories.length ||
@@ -316,7 +316,9 @@ export async function consolidateSessionMemories() {
  */
 export function formatSessionMemories(memories) {
   if (!memories || memories.length === 0) return '';
-  return memories.map((m) => `[${m.type}] ${m.content}`).join('\n');
+  return sortByTimeline(memories)
+    .map((m) => `[${m.type}] ${m.content}`)
+    .join('\n');
 }
 
 /**

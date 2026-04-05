@@ -22,7 +22,21 @@
  *
  * trimByPriority        - trims a memory array to a cap, keeping high-importance and newer entries
  * reconcileTypeEntries  - merges promoted consolidation entries into a base, replacing overlapping originals
+ * sortByTimeline        - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
  */
+
+function tokenSet(text) {
+  return new Set((text || '').toLowerCase().split(/\s+/).filter(Boolean));
+}
+
+function jaccardSimilarity(a, b) {
+  const aWords = tokenSet(a);
+  const bWords = tokenSet(b);
+  if (aWords.size === 0 || bWords.size === 0) return 0;
+  const intersection = [...aWords].filter((w) => bWords.has(w)).length;
+  const union = new Set([...aWords, ...bWords]).size;
+  return union > 0 ? intersection / union : 0;
+}
 
 /**
  * Trims a memory array to at most `max` entries, preferring to keep
@@ -47,6 +61,25 @@ export function trimByPriority(memories, max) {
 }
 
 /**
+ * Returns a new array sorted by timeline (oldest to newest).
+ * Falls back to the original index when timestamps tie/missing.
+ *
+ * @param {Array<{ts?: number}>} memories
+ * @returns {Array}
+ */
+export function sortByTimeline(memories) {
+  return [...memories]
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => {
+      const ta = Number.isFinite(a.m.ts) ? a.m.ts : Number.MAX_SAFE_INTEGER;
+      const tb = Number.isFinite(b.m.ts) ? b.m.ts : Number.MAX_SAFE_INTEGER;
+      if (ta !== tb) return ta - tb;
+      return a.i - b.i;
+    })
+    .map((x) => x.m);
+}
+
+/**
  * Reconciles a set of promoted consolidation entries against an existing base.
  *
  * When the model outputs an enriched or updated version of a base entry (e.g.
@@ -59,23 +92,34 @@ export function trimByPriority(memories, max) {
  * @param {Array<{type: string, content: string}>} base - Stable consolidated entries for one type.
  * @param {Array<{type: string, content: string}>} promoted - Entries output by consolidation for the same type.
  * @param {number} threshold - Jaccard overlap threshold above which a promoted entry replaces a base entry.
+ * @param {Array<{type: string, content: string, ts?: number}>} [timelinePool=[]] - Candidate entries for timestamp inference.
  * @returns {Array} The reconciled array (new array, base is not mutated).
  */
-export function reconcileTypeEntries(base, promoted, threshold) {
+export function reconcileTypeEntries(base, promoted, threshold, timelinePool = []) {
+  const sourcePool = timelinePool.length > 0 ? timelinePool : base;
   const reconciled = [...base];
   for (const mem of promoted) {
-    const memWords = new Set(mem.content.toLowerCase().split(/\s+/));
     const idx = reconciled.findIndex((ex) => {
       if (ex.type !== mem.type) return false;
-      const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
-      const intersection = [...memWords].filter((w) => exWords.has(w)).length;
-      const union = new Set([...memWords, ...exWords]).size;
-      return union > 0 && intersection / union > threshold;
+      return jaccardSimilarity(mem.content, ex.content) > threshold;
     });
+
+    let inferredTs = mem.ts;
+    let bestScore = 0;
+    for (const src of sourcePool) {
+      if (src.type !== mem.type) continue;
+      const score = jaccardSimilarity(mem.content, src.content);
+      if (score > bestScore && Number.isFinite(src.ts)) {
+        bestScore = score;
+        inferredTs = src.ts;
+      }
+    }
+
     if (idx >= 0) {
-      reconciled[idx] = mem;
+      const existingTs = reconciled[idx].ts;
+      reconciled[idx] = { ...mem, ts: Number.isFinite(existingTs) ? existingTs : inferredTs };
     } else {
-      reconciled.push(mem);
+      reconciled.push({ ...mem, ts: inferredTs });
     }
   }
   return reconciled;
