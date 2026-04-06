@@ -1,11 +1,11 @@
 {
-    "display_name": "Smart Memory",
-    "loading_order": 5,
-    "requires": [],
-    "optional": [],
-    "js": "index.js",
-    "css": "style.css",
-    "author": "Senjin the Dragon <senjin@hatchling.org>",
-    "version": "1.0.2",
-    "homePage": "https://github.com/senjinthedragon/Smart-Memory"
+  "display_name": "Smart Memory",
+  "loading_order": 5,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Senjin the Dragon <senjin@hatchling.org>",
+  "version": "1.1.0",
+  "homePage": "https://github.com/senjinthedragon/Smart-Memory"
 }
