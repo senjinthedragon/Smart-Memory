@@ -191,6 +191,29 @@ let recapActive = false;
 // session so it doesn't fire on every message in a group.
 let groupChatWarningShown = false;
 
+/**
+ * Returns a stable extraction window that excludes the currently swipable
+ * assistant reply (the trailing non-user message in 1:1 chats). This prevents
+ * storing memories from temporary swipe candidates the user may discard.
+ *
+ * The latest assistant reply is naturally included on the next turn after the
+ * user responds, so accepted content is still captured with a one-turn delay.
+ *
+ * @param {Array} chat - Full chat array from SillyTavern context.
+ * @param {number} windowSize - Max number of messages to return.
+ * @returns {Array} Stable message slice safe for extraction.
+ */
+function getStableExtractionWindow(chat, windowSize) {
+  if (!Array.isArray(chat) || chat.length === 0) return [];
+
+  const last = chat[chat.length - 1];
+  const cutoff = last && !last.is_user && !last.is_system ? chat.length - 1 : chat.length;
+  if (cutoff <= 0) return [];
+
+  const start = Math.max(0, cutoff - windowSize);
+  return chat.slice(start, cutoff);
+}
+
 // Accumulates messages since the last detected scene break. Reset to []
 // when a break is detected so the next scene starts from a clean buffer.
 let sceneMessageBuffer = [];
@@ -360,7 +383,14 @@ async function onCharacterMessageRendered() {
       extractionRunning = true;
 
       const recentCount = Math.min(extractEvery * 2, context.chat.length);
-      const recentMessages = context.chat.slice(-recentCount);
+      const recentMessages = getStableExtractionWindow(context.chat, recentCount);
+
+      // If only a fresh assistant reply exists beyond the stable boundary,
+      // postpone extraction until the next turn so swipes settle first.
+      if (recentMessages.length === 0) {
+        extractionRunning = false;
+        return;
+      }
 
       setStatusMessage('Extracting memories...');
 
@@ -417,7 +447,7 @@ async function onCharacterMessageRendered() {
           // arcs opened earlier in the session, but is capped to avoid overflowing
           // the model's context on long chats. Existing arcs are passed to the
           // prompt so resolution still works even outside this window.
-          const arcWindow = context.chat.slice(-100);
+          const arcWindow = getStableExtractionWindow(context.chat, 100);
           const count = await extractArcs(arcWindow).catch((err) => {
             console.error('[SmartMemory] Background arc extraction error:', err);
             return 0;
