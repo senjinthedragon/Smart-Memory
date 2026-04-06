@@ -49,7 +49,12 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
-import { prioritizeMemories, reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
+import {
+  prioritizeMemories,
+  reconcileTypeEntries,
+  sortByTimeline,
+  trimByPriority,
+} from './memory-utils.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 

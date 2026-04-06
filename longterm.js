@@ -50,7 +50,12 @@ import {
   META_KEY,
 } from './constants.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
-import { prioritizeMemories, reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
+import {
+  prioritizeMemories,
+  reconcileTypeEntries,
+  sortByTimeline,
+  trimByPriority,
+} from './memory-utils.js';
 
 const MAX_NEW_LONGTERM_PER_EXTRACTION = 4;
 

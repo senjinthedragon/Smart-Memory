@@ -146,19 +146,18 @@ function keywordFrequencyScore(mem, freq) {
  */
 export function prioritizeMemories(memories) {
   const keywordFreq = buildKeywordFrequency(memories);
-  return [...memories]
-    .sort((a, b) => {
-      const ia = a.importance ?? 2;
-      const ib = b.importance ?? 2;
-      const ea = EXPIRATION_WEIGHT[normalizeExpiration(a.expiration)] ?? 2;
-      const eb = EXPIRATION_WEIGHT[normalizeExpiration(b.expiration)] ?? 2;
-      if (ea !== eb) return eb - ea; // keep permanent/session before scene
-      if (ia !== ib) return ib - ia; // higher importance first
-      const ka = keywordFrequencyScore(a, keywordFreq);
-      const kb = keywordFrequencyScore(b, keywordFreq);
-      if (ka !== kb) return kb - ka; // keep memories with repeated key terms
-      return (b.ts ?? 0) - (a.ts ?? 0); // newer first within same tier
-    });
+  return [...memories].sort((a, b) => {
+    const ia = a.importance ?? 2;
+    const ib = b.importance ?? 2;
+    const ea = EXPIRATION_WEIGHT[normalizeExpiration(a.expiration)] ?? 2;
+    const eb = EXPIRATION_WEIGHT[normalizeExpiration(b.expiration)] ?? 2;
+    if (ea !== eb) return eb - ea; // keep permanent/session before scene
+    if (ia !== ib) return ib - ia; // higher importance first
+    const ka = keywordFrequencyScore(a, keywordFreq);
+    const kb = keywordFrequencyScore(b, keywordFreq);
+    if (ka !== kb) return kb - ka; // keep memories with repeated key terms
+    return (b.ts ?? 0) - (a.ts ?? 0); // newer first within same tier
+  });
 }
 
 export function trimByPriority(memories, max) {
