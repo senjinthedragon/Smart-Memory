@@ -214,6 +214,22 @@ function getStableExtractionWindow(chat, windowSize) {
   return chat.slice(start, cutoff);
 }
 
+/**
+ * Stable extraction window with fallback for small/new chats.
+ *
+ * @param {Array} chat - Full chat array from SillyTavern context.
+ * @param {number} windowSize - Max number of messages to return.
+ * @returns {Array} Stable message slice, or plain tail slice if none exist yet.
+ */
+function getStableExtractionWindowWithFallback(chat, windowSize) {
+  const stable = getStableExtractionWindow(chat, windowSize);
+  if (stable.length > 0) return stable;
+
+  if (!Array.isArray(chat) || chat.length === 0) return [];
+  const start = Math.max(0, chat.length - windowSize);
+  return chat.slice(start);
+}
+
 // Accumulates messages since the last detected scene break. Reset to []
 // when a break is detected so the next scene starts from a clean buffer.
 let sceneMessageBuffer = [];
@@ -1096,7 +1112,7 @@ function bindSettingsUI() {
     setStatusMessage('Extracting memories...');
     try {
       const context = getContext();
-      const recentMessages = context.chat.slice(-20);
+      const recentMessages = getStableExtractionWindowWithFallback(context.chat, 20);
       const count = await extractAndStoreMemories(characterName, recentMessages);
       saveSettingsDebounced();
       updateLongTermUI(characterName);
@@ -1206,7 +1222,8 @@ function bindSettingsUI() {
     setStatusMessage('Extracting session memories...');
     try {
       const context = getContext();
-      const count = await extractSessionMemories(context.chat.slice(-40));
+      const recentMessages = getStableExtractionWindowWithFallback(context.chat, 40);
+      const count = await extractSessionMemories(recentMessages);
       injectSessionMemories();
       updateSessionUI();
       updateTokenDisplay();
@@ -1381,7 +1398,8 @@ function bindSettingsUI() {
     setStatusMessage('Extracting story arcs...');
     try {
       const context = getContext();
-      const count = await extractArcs(context.chat.slice(-100));
+      const recentMessages = getStableExtractionWindowWithFallback(context.chat, 100);
+      const count = await extractArcs(recentMessages);
       injectArcs();
       updateArcsUI();
       setStatusMessage(
@@ -1489,9 +1507,13 @@ function bindSettingsUI() {
       const context = getContext();
       const settings = getSettings();
 
+      // Use the stable window first so an in-progress trailing swipe candidate
+      // is not ingested during catch-up.
+      const stableChat = getStableExtractionWindowWithFallback(context.chat, context.chat.length);
+
       // Filter to real messages only so system/hidden entries don't inflate
       // the chunk count or confuse the model.
-      const allMessages = context.chat.filter((m) => m.mes && !m.is_system);
+      const allMessages = stableChat.filter((m) => m.mes && !m.is_system);
       const total = allMessages.length;
 
       // Process the chat in fixed-size chunks sequentially. Each extraction
@@ -1847,9 +1869,12 @@ jQuery(async function () {
         setStatusMessage('Extracting memories...');
         try {
           const context = getContext();
-          await extractAndStoreMemories(characterName, context.chat.slice(-20));
-          await extractSessionMemories(context.chat.slice(-40));
-          await extractArcs(context.chat.slice(-100));
+          const recentLongTerm = getStableExtractionWindowWithFallback(context.chat, 20);
+          const recentSession = getStableExtractionWindowWithFallback(context.chat, 40);
+          const recentArcs = getStableExtractionWindowWithFallback(context.chat, 100);
+          await extractAndStoreMemories(characterName, recentLongTerm);
+          await extractSessionMemories(recentSession);
+          await extractArcs(recentArcs);
           injectMemories(characterName, isFreshStart());
           injectSessionMemories();
           injectArcs();
