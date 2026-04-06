@@ -52,6 +52,20 @@ import {
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
 import { reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
 
+const MAX_NEW_LONGTERM_PER_EXTRACTION = 4;
+
+function incomingPriorityScore(mem) {
+  const typeBonus =
+    mem.type === 'relationship'
+      ? 30
+      : mem.type === 'fact'
+        ? 20
+        : mem.type === 'preference'
+          ? 10
+          : 0;
+  return (mem.importance ?? 2) * 100 + typeBonus + (mem.ts ?? 0) / 1e13;
+}
+
 // ---- Storage helpers ----------------------------------------------------
 
 /**
@@ -169,6 +183,7 @@ function parseExtractionOutput(text) {
  */
 function mergeMemories(existing, incoming, maxTotal) {
   const merged = [...existing];
+  const uniqueIncoming = [];
 
   for (const mem of incoming) {
     const newWords = new Set(mem.content.toLowerCase().split(/\s+/));
@@ -180,10 +195,15 @@ function mergeMemories(existing, incoming, maxTotal) {
       return intersection / union > 0.7;
     });
 
-    if (!isDuplicate) {
-      merged.push(mem);
-    }
+    if (!isDuplicate) uniqueIncoming.push(mem);
   }
+
+  // Churn control: do not allow one extraction pass to crowd out large chunks
+  // of stable long-term history. Keep only the top-N incoming candidates.
+  uniqueIncoming
+    .sort((a, b) => incomingPriorityScore(b) - incomingPriorityScore(a))
+    .slice(0, MAX_NEW_LONGTERM_PER_EXTRACTION)
+    .forEach((mem) => merged.push(mem));
 
   // When over the cap, drop the least valuable entries first:
   // sort by importance ascending then age ascending, remove from the tail.
@@ -222,9 +242,12 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     const existingMemories = loadCharacterMemories(characterName);
     const existingText = formatMemoriesForPrompt(existingMemories);
 
-    const response = await generateMemoryExtract(buildExtractionPrompt(chatHistory, existingText), {
-      responseLength: settings.longterm_response_length || 600,
-    });
+    const response = await generateMemoryExtract(
+      buildExtractionPrompt(chatHistory, existingText, characterName),
+      {
+        responseLength: settings.longterm_response_length || 600,
+      },
+    );
 
     console.log(`[SmartMemory] Raw extraction response for "${characterName}":`, response);
 

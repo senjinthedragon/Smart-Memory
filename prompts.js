@@ -345,9 +345,13 @@ export const EXTRACTION_SYSTEM_PROMPT = `You are a memory archivist. Your only j
  * Assembles the long-term memory extraction prompt.
  * @param {string} chatHistory - Formatted recent messages (name: text pairs).
  * @param {string} existingMemories - Already-stored memories as [type] content lines (may be empty).
+ * @param {string} [characterName] - Active roleplay character for this memory store.
  * @returns {string} The complete prompt string.
  */
-export function buildExtractionPrompt(chatHistory, existingMemories) {
+export function buildExtractionPrompt(chatHistory, existingMemories, characterName = '') {
+  const activeCharacterSection = characterName
+    ? `ACTIVE CHARACTER FOR THIS MEMORY STORE: ${characterName}\n\n`
+    : '';
   const existingSection = existingMemories
     ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\n`
     : '';
@@ -356,10 +360,15 @@ export function buildExtractionPrompt(chatHistory, existingMemories) {
     NO_ACTION_PREAMBLE +
     `[MEMORY EXTRACTION TASK - Do NOT continue the roleplay. Do NOT speak as a character. Output structured data only.]
 
-${existingSection}RECENT CONVERSATION TO ANALYZE:\n${chatHistory}
+${activeCharacterSection}${existingSection}RECENT CONVERSATION TO ANALYZE:\n${chatHistory}
 
 ---
 Your task: Extract NEW facts worth remembering in future sessions with this character. Ignore filler and small talk. Focus on information that would meaningfully change how future conversations begin or flow.
+
+Prioritization rules (strict):
+- Prioritize durable memories about the ACTIVE CHARACTER and their bond with the user.
+- If temporary side characters appear, store only major lasting impact (e.g. a new ally/rival), not blow-by-blow dialogue.
+- Avoid over-capturing a single short-lived topic; keep long-term memory diverse and stable across many sessions.
 
 Use one of these memory types:
 - fact        - established truths about the character, world, or other characters
