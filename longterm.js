@@ -145,8 +145,9 @@ function parseExtractionOutput(text) {
 
   const results = [];
   // Matches lines like: [fact:2] The character is tall.
-  // The importance score (:N) is optional - defaults to 2 if omitted.
-  const linePattern = /^\[(fact|relationship|preference|event)(?::([123]))?\]\s+(.+)$/gim;
+  // Accepts optional spaces around ":" and after "]" for parser resilience.
+  // The importance score is optional - defaults to 2 if omitted.
+  const linePattern = /^\[(fact|relationship|preference|event)(?:\s*:\s*([123]))?\]\s*(.+)$/gim;
   let match;
 
   while ((match = linePattern.exec(text)) !== null) {

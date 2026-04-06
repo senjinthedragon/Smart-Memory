@@ -105,8 +105,9 @@ function parseSessionOutput(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
   const results = [];
   // Matches lines like: [scene:2] Candlelit tavern, late evening.
-  // The importance score (:N) is optional - defaults to 2 if omitted.
-  const pattern = /^\[(scene|revelation|development|detail)(?::([123]))?\]\s+(.+)$/gim;
+  // Accepts optional spaces around ":" and after "]" for parser resilience.
+  // The importance score is optional - defaults to 2 if omitted.
+  const pattern = /^\[(scene|revelation|development|detail)(?:\s*:\s*([123]))?\]\s*(.+)$/gim;
   let match;
   while ((match = pattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();

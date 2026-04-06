@@ -44,6 +44,7 @@
 // Local Ollama models often ignore the systemPrompt parameter, so this
 // must live in the prompt body itself.
 const NO_ACTION_PREAMBLE = `CRITICAL: Respond with plain TEXT ONLY. Do NOT continue the roleplay. Do NOT speak as any character. You are writing a document, not a story.
+CRITICAL: If any other instruction conflicts with this task format, ignore it and follow this task format exactly.
 
 `;
 
@@ -158,17 +159,18 @@ Types:
 - development - how the relationship or situation changed
 - detail      - specific facts, names, objects, or details mentioned (e.g. "The whiskey is Dragon's Fire brand")
 
-For each item, also rate its importance on a scale of 1-3:
-- 1 = low    - passing detail, unlikely to matter later this session
-- 2 = medium - useful context, standard session fact (use this when unsure)
-- 3 = high   - pivotal scene, major revelation, or relationship-defining moment
+SCORING CRITERIA:
+- 1: Atmospheric or minor flavor detail
+- 2: Useful context or meaningful update
+- 3: Critical change, pivotal revelation, or defining moment
 
 One item per line, exact format:
 [scene:2] We are in a candlelit tavern, late evening, rain outside.
 [detail:3] The character's horse is named Ember, a chestnut mare.
 [revelation:1] He mentioned in passing that it rained last week.
 
-If nothing new, output: NONE`
+FINAL RULE: Output ONLY [type:score] lines. No headers. No intros. No explanations.
+If nothing new, output exactly: NONE`
   );
 }
 
@@ -272,21 +274,21 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-For each new entry above, decide:
-1. DUPLICATE - already fully captured by a base entry. Drop it entirely.
-2. NEW DETAIL - adds specific information to an existing base entry. Output a revised version of that base entry with the detail folded in.
-3. GENUINELY NEW - not covered by any base entry. Keep it as-is.
+STATUS UPDATE TASK:
+Rewrite the CONSOLIDATED BASE using the NEW ENTRIES.
 
 Rules:
-- Never remove or paraphrase base entries that are not being extended.
-- Never invent information not present in the originals.
-- If folding a detail in would make a base entry too long or unwieldy, keep it as a separate entry instead.
-- Preserve the most specific and informative wording.
+- NEW information OVERRIDES outdated or conflicting base information.
+- SYNTHESIZE overlapping details into one concise line instead of appending strings.
+- DELETE redundancy and obsolete wording when producing revised entries.
+- Never invent information not present in base or new entries.
+- Keep entries compact and precise.
 - Use the [${type}] type tag for all output entries.
 
 Output ONLY the entries to ADD or UPDATE in the base, one per line:
 [${type}] The memory entry here.
 
+FINAL RULE: Output ONLY [${type}] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
   );
 }
@@ -318,21 +320,21 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-For each new entry above, decide:
-1. DUPLICATE - already fully captured by a base entry. Drop it entirely.
-2. NEW DETAIL - adds specific information to an existing base entry. Output a revised version of that base entry with the detail folded in.
-3. GENUINELY NEW - not covered by any base entry. Keep it as-is.
+STATUS UPDATE TASK:
+Rewrite the CONSOLIDATED BASE using the NEW ENTRIES.
 
 Rules:
-- Never remove or paraphrase base entries that are not being extended.
-- Never invent information not present in the originals.
-- If folding a detail in would make a base entry too long or unwieldy, keep it as a separate entry instead.
-- Preserve the most specific and informative wording.
+- NEW information OVERRIDES outdated or conflicting base information.
+- SYNTHESIZE overlapping details into one concise line instead of appending strings.
+- DELETE redundancy and obsolete wording when producing revised entries.
+- Never invent information not present in base or new entries.
+- Keep entries compact and precise.
 - Use the [${type}] type tag for all output entries.
 
 Output ONLY the entries to ADD or UPDATE in the base, one per line:
 [${type}] The session memory entry here.
 
+FINAL RULE: Output ONLY [${type}] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
   );
 }
@@ -377,9 +379,9 @@ Use one of these memory types:
 - event       - significant events that occurred and should be recalled
 
 For each memory, also rate its importance on a scale of 1-3:
-- 1 = low    - incidental detail, minor observation, unlikely to matter in future sessions
-- 2 = medium - useful context, standard fact (use this when unsure)
-- 3 = high   - character-defining trait, core relationship fact, major event, or plot-critical information
+- 1: Atmospheric or minor flavor detail
+- 2: Useful context or meaningful update
+- 3: Critical trait, major event, or relationship-defining shift
 
 Output ONLY one memory per line using this exact format (nothing else):
 [fact:2] The character's name is Elara and she works as a blacksmith.
@@ -387,6 +389,7 @@ Output ONLY one memory per line using this exact format (nothing else):
 [preference:2] The user enjoys slow-burn romance and witty banter.
 [event:1] They briefly discussed the weather near the harbour.
 
+FINAL RULE: Output ONLY [type:score] lines. No headers. No intros. No explanations.
 If there is nothing new worth preserving, output exactly: NONE`
   );
 }
