@@ -96,6 +96,10 @@ const EXPIRATION_WEIGHT = {
   scene: 1,
 };
 
+function numberOr(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
 function normalizeExpiration(value, fallback = 'session') {
   const normalized = String(value || '').toLowerCase();
   if (normalized === 'scene' || normalized === 'session' || normalized === 'permanent') {
@@ -147,22 +151,77 @@ function keywordFrequencyScore(mem, freq) {
 export function prioritizeMemories(memories) {
   const keywordFreq = buildKeywordFrequency(memories);
   return [...memories].sort((a, b) => {
-    const ia = a.importance ?? 2;
-    const ib = b.importance ?? 2;
-    const ea = EXPIRATION_WEIGHT[normalizeExpiration(a.expiration)] ?? 2;
-    const eb = EXPIRATION_WEIGHT[normalizeExpiration(b.expiration)] ?? 2;
-    if (ea !== eb) return eb - ea; // keep permanent/session before scene
-    if (ia !== ib) return ib - ia; // higher importance first
-    const ka = keywordFrequencyScore(a, keywordFreq);
-    const kb = keywordFrequencyScore(b, keywordFreq);
-    if (ka !== kb) return kb - ka; // keep memories with repeated key terms
-    return (b.ts ?? 0) - (a.ts ?? 0); // newer first within same tier
+    const sa = memoryUtilityScore(a, keywordFreq);
+    const sb = memoryUtilityScore(b, keywordFreq);
+    if (sa !== sb) return sb - sa;
+    return (numberOr(b.ts, 0) - numberOr(a.ts, 0)) || 0;
   });
+}
+
+/**
+ * Utility-decay style score used for retention and trimming.
+ * Higher score means "keep this memory longer".
+ *
+ * Signals:
+ * - durability via expiration class
+ * - explicit importance from extractor
+ * - persona and intimacy relevance (character-card continuity)
+ * - confidence (if present)
+ * - retrieval count and confirmation freshness
+ * - keyword recurrence in the current pool
+ *
+ * @param {Object} mem
+ * @param {Map<string, number>} [keywordFreq]
+ * @returns {number}
+ */
+export function memoryUtilityScore(mem, keywordFreq = null) {
+  const expiration = EXPIRATION_WEIGHT[normalizeExpiration(mem.expiration)] ?? 2;
+  const importance = numberOr(mem.importance, 2);
+  const confidence = Math.max(0, Math.min(1, numberOr(mem.confidence, 0.7)));
+  const personaRelevance = Math.max(0, Math.min(3, numberOr(mem.persona_relevance, 1)));
+  const intimacyRelevance = Math.max(0, Math.min(3, numberOr(mem.intimacy_relevance, 1)));
+  const retrievalCount = Math.max(0, numberOr(mem.retrieval_count, 0));
+  const confirmedTs = numberOr(mem.last_confirmed_ts, mem.ts ?? 0);
+  const recencyBoost = confirmedTs > 0 ? confirmedTs / 1e13 : 0;
+  const keywordScore = keywordFreq ? keywordFrequencyScore(mem, keywordFreq) : 0;
+
+  return (
+    importance * 100 +
+    expiration * 35 +
+    confidence * 25 +
+    personaRelevance * 25 +
+    intimacyRelevance * 20 +
+    Math.min(20, retrievalCount * 2) +
+    keywordScore * 2 +
+    recencyBoost
+  );
 }
 
 export function trimByPriority(memories, max) {
   if (memories.length <= max) return memories;
   return prioritizeMemories(memories).slice(0, max);
+}
+
+/**
+ * Selects protected memories that must be preserved during budget trimming.
+ * Keeps at most one per requested type, preferring highest utility.
+ *
+ * @param {Array} memories
+ * @param {Array<string>} requiredTypes
+ * @returns {Array}
+ */
+export function selectProtectedMemories(memories, requiredTypes) {
+  const prioritized = prioritizeMemories(memories);
+  const selected = [];
+  const used = new Set();
+  for (const type of requiredTypes) {
+    const pick = prioritized.find((m) => m.type === type && !used.has(m));
+    if (pick) {
+      selected.push(pick);
+      used.add(pick);
+    }
+  }
+  return selected;
 }
 
 /**

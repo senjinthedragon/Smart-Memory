@@ -13,6 +13,8 @@ It runs automatically. You don't have to do anything special to use it. Just cha
 
 ![Smart Memory settings panel](https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/main/assets/smart-memory.webp)
 
+
+
 ## ☕ Support the Developer
 
 I'm a solo developer building tools to make AI roleplay better for everyone. Smart Memory is maintained in my free time, and as I'm currently navigating some financial challenges, any support means a lot.

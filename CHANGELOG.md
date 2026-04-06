@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-06
+
+### Added
+
+- Introduced a second-stage memory candidate verifier for both long-term and
+  session extraction flows. The verifier filters malformed/low-signal lines,
+  drops uncertain wording, and suppresses highly redundant candidates before
+  persistence.
+- Added utility-decay retention scoring signals to memory prioritization:
+  confidence, persona relevance, intimacy relevance, retrieval count, and
+  last-confirmed timestamp now influence which memories survive trimming.
+- Added protected-slot trimming behavior in prompt injection:
+  - Long-term injection now reserves slots for relationship/preference/fact
+    continuity when possible.
+  - Session injection now reserves slots for development/scene continuity when
+    possible.
+- Added retrieval telemetry updates on injected memories (`retrieval_count`,
+  `last_confirmed_ts`) so frequently used memories are retained more reliably
+  in future trims.
+- Added unit tests for utility scoring and protected-slot selection behavior.
+
+### Changed
+
+- Long-term and session memory loading now auto-migrates additional metadata
+  defaults for legacy entries (`confidence`, `persona_relevance`,
+  `intimacy_relevance`, `retrieval_count`, `last_confirmed_ts`) without
+  breaking existing stores.
+- Retention ordering now uses utility-decay scoring instead of only
+  expiration/importance/keyword frequency/recency.
+
 ## [1.1.0] - 2026-04-05
 
 ### Features

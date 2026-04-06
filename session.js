@@ -52,9 +52,25 @@ import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from '.
 import {
   prioritizeMemories,
   reconcileTypeEntries,
+  selectProtectedMemories,
   sortByTimeline,
   trimByPriority,
 } from './memory-utils.js';
+
+function verifySessionCandidates(candidates, existing) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+  const seen = new Set();
+  return candidates.filter((mem) => {
+    const text = String(mem.content || '').trim();
+    if (text.length < 5 || text.length > 240) return false;
+    const key = `${mem.type}|${text.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return !existing.some(
+      (ex) => ex.type === mem.type && ex.content.toLowerCase() === text.toLowerCase(),
+    );
+  });
+}
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
@@ -74,6 +90,11 @@ export function loadSessionMemories() {
     consolidated: m.consolidated ?? true,
     importance: m.importance ?? 2,
     expiration: m.expiration ?? 'session',
+    confidence: m.confidence ?? 0.7,
+    persona_relevance: m.persona_relevance ?? (m.type === 'development' ? 2 : 1),
+    intimacy_relevance: m.intimacy_relevance ?? (m.type === 'development' ? 2 : 1),
+    retrieval_count: m.retrieval_count ?? 0,
+    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? Date.now(),
   }));
 }
 
@@ -202,7 +223,7 @@ export async function extractSessionMemories(recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const incoming = parseSessionOutput(response);
+    const incoming = verifySessionCandidates(parseSessionOutput(response), existing);
     if (incoming.length === 0) return 0;
 
     const max = settings.session_max_memories ?? 30;
@@ -346,10 +367,31 @@ export function injectSessionMemories() {
   // Trim to token budget: sort so low-importance old entries are dropped first.
   // Primary sort: importance descending (3 before 1). Secondary: age descending (newest first).
   const budget = settings.session_inject_budget ?? 400;
+  const protectedSet = new Set(selectProtectedMemories(memories, ['development', 'scene']));
   const trimmed = prioritizeMemories(memories);
   while (trimmed.length > 1 && estimateTokens(formatSessionMemories(trimmed)) > budget) {
-    trimmed.pop();
+    let idx = -1;
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      if (!protectedSet.has(trimmed[i])) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) trimmed.splice(idx, 1);
+    else break;
   }
+
+  const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
+  const updated = memories.map((m) => {
+    const key = `${m.type}|${m.content}`;
+    if (!recalled.has(key)) return m;
+    return {
+      ...m,
+      retrieval_count: (m.retrieval_count ?? 0) + 1,
+      last_confirmed_ts: Date.now(),
+    };
+  });
+  void saveSessionMemories(updated);
 
   const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
   const content = template.replace('{{session}}', formatSessionMemories(trimmed));

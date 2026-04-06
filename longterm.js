@@ -53,6 +53,7 @@ import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './promp
 import {
   prioritizeMemories,
   reconcileTypeEntries,
+  selectProtectedMemories,
   sortByTimeline,
   trimByPriority,
 } from './memory-utils.js';
@@ -69,6 +70,32 @@ function incomingPriorityScore(mem) {
           ? 10
           : 0;
   return (mem.importance ?? 2) * 100 + typeBonus + (mem.ts ?? 0) / 1e13;
+}
+
+function verifyLongtermCandidates(candidates, existing) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+
+  const bannedPhrases = ['maybe', 'might be', 'possibly', 'i think', 'perhaps', 'seems like'];
+  const seen = new Set();
+  return candidates.filter((mem) => {
+    const text = String(mem.content || '').trim();
+    if (text.length < 8 || text.length > 280) return false;
+    const lower = text.toLowerCase();
+    if (bannedPhrases.some((p) => lower.includes(p))) return false;
+    const key = `${mem.type}|${lower}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+
+    const isNearDuplicate = existing.some((ex) => {
+      if (ex.type !== mem.type) return false;
+      const a = new Set(lower.split(/\s+/));
+      const b = new Set(String(ex.content || '').toLowerCase().split(/\s+/));
+      const overlap = [...a].filter((w) => b.has(w)).length;
+      const union = new Set([...a, ...b]).size || 1;
+      return overlap / union > 0.85;
+    });
+    return !isNearDuplicate;
+  });
 }
 
 // ---- Storage helpers ----------------------------------------------------
@@ -91,6 +118,11 @@ export function loadCharacterMemories(characterName) {
     consolidated: m.consolidated ?? true,
     importance: m.importance ?? 2,
     expiration: m.expiration ?? 'permanent',
+    confidence: m.confidence ?? 0.7,
+    persona_relevance: m.persona_relevance ?? (m.type === 'relationship' ? 3 : 1),
+    intimacy_relevance: m.intimacy_relevance ?? (m.type === 'preference' ? 3 : 1),
+    retrieval_count: m.retrieval_count ?? 0,
+    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? Date.now(),
   }));
 }
 
@@ -258,7 +290,10 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const newMemories = parseExtractionOutput(response);
+    const newMemories = verifyLongtermCandidates(
+      parseExtractionOutput(response),
+      existingMemories,
+    );
     if (newMemories.length === 0) {
       console.log('[SmartMemory] No parseable memories in response. Check format above.');
       return 0;
@@ -429,10 +464,36 @@ export function injectMemories(characterName, freshStart = false) {
   // Primary sort: importance ascending (1 before 3). Secondary: age ascending (oldest first).
   // This way a low-importance old entry is always dropped before a high-importance new one.
   const budget = settings.longterm_inject_budget ?? 500;
+  const protectedSet = new Set(
+    selectProtectedMemories(memories, ['relationship', 'preference', 'fact']),
+  );
   const trimmed = prioritizeMemories(memories);
   while (trimmed.length > 1 && estimateTokens(formatMemoriesForPrompt(trimmed)) > budget) {
-    trimmed.pop();
+    let idx = -1;
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      if (!protectedSet.has(trimmed[i])) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) {
+      trimmed.splice(idx, 1);
+    } else {
+      break;
+    }
   }
+
+  const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
+  const updated = memories.map((m) => {
+    const key = `${m.type}|${m.content}`;
+    if (!recalled.has(key)) return m;
+    return {
+      ...m,
+      retrieval_count: (m.retrieval_count ?? 0) + 1,
+      last_confirmed_ts: Date.now(),
+    };
+  });
+  saveCharacterMemories(characterName, updated);
 
   const memoryText = formatMemoriesForPrompt(trimmed);
   const template =

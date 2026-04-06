@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prioritizeMemories, reconcileTypeEntries, sortByTimeline, trimByPriority } from '../memory-utils.js';
+import {
+  memoryUtilityScore,
+  prioritizeMemories,
+  reconcileTypeEntries,
+  selectProtectedMemories,
+  sortByTimeline,
+  trimByPriority,
+} from '../memory-utils.js';
 
 test('trimByPriority keeps high-importance memories over low-importance ones', () => {
   const memories = [
@@ -84,4 +91,41 @@ test('sortByTimeline returns memories in chronological order', () => {
     sorted.map((m) => m.content),
     ['early', 'middle', 'late'],
   );
+});
+
+test('memoryUtilityScore boosts persona and intimacy relevant memories', () => {
+  const base = {
+    type: 'preference',
+    content: 'The user prefers slow-burn affectionate scenes.',
+    importance: 2,
+    expiration: 'permanent',
+    ts: 1000,
+  };
+  const low = memoryUtilityScore({
+    ...base,
+    persona_relevance: 0,
+    intimacy_relevance: 0,
+    retrieval_count: 0,
+  });
+  const high = memoryUtilityScore({
+    ...base,
+    persona_relevance: 3,
+    intimacy_relevance: 3,
+    retrieval_count: 4,
+  });
+  assert.ok(high > low);
+});
+
+test('selectProtectedMemories keeps one memory per required type', () => {
+  const memories = [
+    { type: 'relationship', content: 'We trust each other deeply.', importance: 3, ts: 1000 },
+    { type: 'relationship', content: 'We had a minor disagreement.', importance: 1, ts: 1500 },
+    { type: 'preference', content: 'She likes teasing banter.', importance: 2, ts: 1200 },
+    { type: 'fact', content: 'She always wears silver rings.', importance: 2, ts: 900 },
+  ];
+  const selected = selectProtectedMemories(memories, ['relationship', 'preference', 'fact']);
+  assert.equal(selected.length, 3);
+  assert.ok(selected.some((m) => m.type === 'relationship' && m.content.includes('trust')));
+  assert.ok(selected.some((m) => m.type === 'preference'));
+  assert.ok(selected.some((m) => m.type === 'fact'));
 });
