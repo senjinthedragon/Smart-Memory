@@ -89,7 +89,11 @@ function verifyLongtermCandidates(candidates, existing) {
     const isNearDuplicate = existing.some((ex) => {
       if (ex.type !== mem.type) return false;
       const a = new Set(lower.split(/\s+/));
-      const b = new Set(String(ex.content || '').toLowerCase().split(/\s+/));
+      const b = new Set(
+        String(ex.content || '')
+          .toLowerCase()
+          .split(/\s+/),
+      );
       const overlap = [...a].filter((w) => b.has(w)).length;
       const union = new Set([...a, ...b]).size || 1;
       return overlap / union > 0.85;
@@ -290,10 +294,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const newMemories = verifyLongtermCandidates(
-      parseExtractionOutput(response),
-      existingMemories,
-    );
+    const newMemories = verifyLongtermCandidates(parseExtractionOutput(response), existingMemories);
     if (newMemories.length === 0) {
       console.log('[SmartMemory] No parseable memories in response. Check format above.');
       return 0;

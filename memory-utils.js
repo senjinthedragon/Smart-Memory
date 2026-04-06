@@ -154,7 +154,7 @@ export function prioritizeMemories(memories) {
     const sa = memoryUtilityScore(a, keywordFreq);
     const sb = memoryUtilityScore(b, keywordFreq);
     if (sa !== sb) return sb - sa;
-    return (numberOr(b.ts, 0) - numberOr(a.ts, 0)) || 0;
+    return numberOr(b.ts, 0) - numberOr(a.ts, 0) || 0;
   });
 }
 
