@@ -49,7 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
-import { reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
+import { prioritizeMemories, reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
@@ -68,6 +68,7 @@ export function loadSessionMemories() {
     ...m,
     consolidated: m.consolidated ?? true,
     importance: m.importance ?? 2,
+    expiration: m.expiration ?? 'session',
   }));
 }
 
@@ -107,16 +108,18 @@ function parseSessionOutput(text) {
   // Matches lines like: [scene:2] Candlelit tavern, late evening.
   // Accepts optional spaces around ":" and after "]" for parser resilience.
   // The importance score is optional - defaults to 2 if omitted.
-  const pattern = /^\[(scene|revelation|development|detail)(?:\s*:\s*([123]))?\]\s*(.+)$/gim;
+  const pattern =
+    /^\[(scene|revelation|development|detail)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
   let match;
   while ((match = pattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
     const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const content = match[3].trim();
+    const expiration = match[3] ? match[3].toLowerCase() : 'session';
+    const content = match[4].trim();
     if (SESSION_TYPES.includes(type) && content.length > 3) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, importance, ts: Date.now(), consolidated: false });
+      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
     }
   }
   return results;
@@ -153,14 +156,10 @@ function deduplicateSession(existing, incoming, max) {
     if (!isDuplicate) merged.push(mem);
   }
   // When over the cap, drop the least valuable entries first:
-  // sort by importance ascending then age ascending, remove from the tail.
+  // sort by expiration/importance/keyword recurrence/age, remove from the tail.
   if (merged.length > max) {
-    merged.sort((a, b) => {
-      const ia = a.importance ?? 2;
-      const ib = b.importance ?? 2;
-      if (ia !== ib) return ib - ia; // higher importance first
-      return b.ts - a.ts; // newer first within same importance
-    });
+    const prioritized = prioritizeMemories(merged);
+    merged.splice(0, merged.length, ...prioritized);
     merged.splice(max);
   }
   return merged;
@@ -342,12 +341,7 @@ export function injectSessionMemories() {
   // Trim to token budget: sort so low-importance old entries are dropped first.
   // Primary sort: importance descending (3 before 1). Secondary: age descending (newest first).
   const budget = settings.session_inject_budget ?? 400;
-  const trimmed = [...memories].sort((a, b) => {
-    const ia = a.importance ?? 2;
-    const ib = b.importance ?? 2;
-    if (ia !== ib) return ib - ia; // higher importance first
-    return b.ts - a.ts; // newer first within same importance
-  });
+  const trimmed = prioritizeMemories(memories);
   while (trimmed.length > 1 && estimateTokens(formatSessionMemories(trimmed)) > budget) {
     trimmed.pop();
   }

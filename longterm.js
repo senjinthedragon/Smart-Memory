@@ -50,7 +50,7 @@ import {
   META_KEY,
 } from './constants.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
-import { reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
+import { prioritizeMemories, reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
 
 const MAX_NEW_LONGTERM_PER_EXTRACTION = 4;
 
@@ -85,6 +85,7 @@ export function loadCharacterMemories(characterName) {
     ...m,
     consolidated: m.consolidated ?? true,
     importance: m.importance ?? 2,
+    expiration: m.expiration ?? 'permanent',
   }));
 }
 
@@ -147,17 +148,19 @@ function parseExtractionOutput(text) {
   // Matches lines like: [fact:2] The character is tall.
   // Accepts optional spaces around ":" and after "]" for parser resilience.
   // The importance score is optional - defaults to 2 if omitted.
-  const linePattern = /^\[(fact|relationship|preference|event)(?:\s*:\s*([123]))?\]\s*(.+)$/gim;
+  const linePattern =
+    /^\[(fact|relationship|preference|event)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
   let match;
 
   while ((match = linePattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
     const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const content = match[3].trim();
+    const expiration = match[3] ? match[3].toLowerCase() : 'permanent';
+    const content = match[4].trim();
     if (MEMORY_TYPES.includes(type) && content.length > 5) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, importance, ts: Date.now(), consolidated: false });
+      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
     }
   }
 
@@ -207,14 +210,10 @@ function mergeMemories(existing, incoming, maxTotal) {
     .forEach((mem) => merged.push(mem));
 
   // When over the cap, drop the least valuable entries first:
-  // sort by importance ascending then age ascending, remove from the tail.
+  // sort by expiration/importance/keyword recurrence/age, remove from the tail.
   if (merged.length > maxTotal) {
-    merged.sort((a, b) => {
-      const ia = a.importance ?? 2;
-      const ib = b.importance ?? 2;
-      if (ia !== ib) return ib - ia; // higher importance first
-      return b.ts - a.ts; // newer first within same importance
-    });
+    const prioritized = prioritizeMemories(merged);
+    merged.splice(0, merged.length, ...prioritized);
     merged.splice(maxTotal);
   }
 
@@ -425,12 +424,7 @@ export function injectMemories(characterName, freshStart = false) {
   // Primary sort: importance ascending (1 before 3). Secondary: age ascending (oldest first).
   // This way a low-importance old entry is always dropped before a high-importance new one.
   const budget = settings.longterm_inject_budget ?? 500;
-  const trimmed = [...memories].sort((a, b) => {
-    const ia = a.importance ?? 2;
-    const ib = b.importance ?? 2;
-    if (ia !== ib) return ib - ia; // higher importance first
-    return b.ts - a.ts; // newer first within same importance
-  });
+  const trimmed = prioritizeMemories(memories);
   while (trimmed.length > 1 && estimateTokens(formatMemoriesForPrompt(trimmed)) > budget) {
     trimmed.pop();
   }

@@ -20,7 +20,8 @@
 /**
  * Shared utility helpers for memory retention and consolidation.
  *
- * trimByPriority        - trims a memory array to a cap, keeping high-importance and newer entries
+ * prioritizeMemories    - sorts memories by durability/importance/keyword-recurrence/recency
+ * trimByPriority        - trims a memory array to a cap, keeping durable/high-importance/newer entries
  * reconcileTypeEntries  - merges promoted consolidation entries into a base, replacing overlapping originals
  * sortByTimeline        - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
  */
@@ -38,9 +39,104 @@ function jaccardSimilarity(a, b) {
   return union > 0 ? intersection / union : 0;
 }
 
+const STOPWORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'been',
+  'but',
+  'by',
+  'for',
+  'from',
+  'had',
+  'has',
+  'have',
+  'he',
+  'her',
+  'him',
+  'his',
+  'i',
+  'if',
+  'in',
+  'into',
+  'is',
+  'it',
+  'its',
+  'me',
+  'my',
+  'of',
+  'on',
+  'or',
+  'our',
+  'she',
+  'that',
+  'the',
+  'their',
+  'them',
+  'there',
+  'they',
+  'this',
+  'to',
+  'us',
+  'was',
+  'we',
+  'were',
+  'with',
+  'you',
+  'your',
+]);
+
+const EXPIRATION_WEIGHT = {
+  permanent: 3,
+  session: 2,
+  scene: 1,
+};
+
+function normalizeExpiration(value, fallback = 'session') {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'scene' || normalized === 'session' || normalized === 'permanent') {
+    return normalized;
+  }
+  return fallback;
+}
+
+function keywordSet(text) {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !STOPWORDS.has(w)),
+  );
+}
+
+function buildKeywordFrequency(memories) {
+  const freq = new Map();
+  for (const mem of memories) {
+    const words = keywordSet(mem.content);
+    for (const w of words) {
+      freq.set(w, (freq.get(w) ?? 0) + 1);
+    }
+  }
+  return freq;
+}
+
+function keywordFrequencyScore(mem, freq) {
+  let score = 0;
+  for (const w of keywordSet(mem.content)) {
+    score += freq.get(w) ?? 0;
+  }
+  return score;
+}
+
 /**
  * Trims a memory array to at most `max` entries, preferring to keep
- * high-importance and newer entries when dropping.
+ * durable memories, then high-importance and newer entries when dropping.
+ * Also uses keyword-frequency weighting so repeated themes are retained.
  *
  * Returns a new array; does not mutate the input.
  *
@@ -48,16 +144,26 @@ function jaccardSimilarity(a, b) {
  * @param {number} max
  * @returns {Array}
  */
-export function trimByPriority(memories, max) {
-  if (memories.length <= max) return memories;
+export function prioritizeMemories(memories) {
+  const keywordFreq = buildKeywordFrequency(memories);
   return [...memories]
     .sort((a, b) => {
       const ia = a.importance ?? 2;
       const ib = b.importance ?? 2;
+      const ea = EXPIRATION_WEIGHT[normalizeExpiration(a.expiration)] ?? 2;
+      const eb = EXPIRATION_WEIGHT[normalizeExpiration(b.expiration)] ?? 2;
+      if (ea !== eb) return eb - ea; // keep permanent/session before scene
       if (ia !== ib) return ib - ia; // higher importance first
-      return b.ts - a.ts; // newer first within same importance
-    })
-    .slice(0, max);
+      const ka = keywordFrequencyScore(a, keywordFreq);
+      const kb = keywordFrequencyScore(b, keywordFreq);
+      if (ka !== kb) return kb - ka; // keep memories with repeated key terms
+      return (b.ts ?? 0) - (a.ts ?? 0); // newer first within same tier
+    });
+}
+
+export function trimByPriority(memories, max) {
+  if (memories.length <= max) return memories;
+  return prioritizeMemories(memories).slice(0, max);
 }
 
 /**

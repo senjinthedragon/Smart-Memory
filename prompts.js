@@ -164,12 +164,17 @@ SCORING CRITERIA:
 - 2: Useful context or meaningful update
 - 3: Critical change, pivotal revelation, or defining moment
 
-One item per line, exact format:
-[scene:2] We are in a candlelit tavern, late evening, rain outside.
-[detail:3] The character's horse is named Ember, a chestnut mare.
-[revelation:1] He mentioned in passing that it rained last week.
+EXPIRATION CLASS (choose one):
+- scene      - likely irrelevant after this scene transition
+- session    - useful for this current chat/session
+- permanent  - should persist as a durable memory
 
-FINAL RULE: Output ONLY [type:score] lines. No headers. No intros. No explanations.
+One item per line, exact format:
+[scene:2:scene] We are in a candlelit tavern, late evening, rain outside.
+[detail:3:permanent] The character's horse is named Ember, a chestnut mare.
+[revelation:1:session] He mentioned in passing that it rained last week.
+
+FINAL RULE: Output ONLY [type:score:expiration] lines. No headers. No intros. No explanations.
 If nothing new, output exactly: NONE`
   );
 }
@@ -383,13 +388,18 @@ For each memory, also rate its importance on a scale of 1-3:
 - 2: Useful context or meaningful update
 - 3: Critical trait, major event, or relationship-defining shift
 
-Output ONLY one memory per line using this exact format (nothing else):
-[fact:2] The character's name is Elara and she works as a blacksmith.
-[relationship:3] We have developed a close friendship after helping each other escape the dungeon.
-[preference:2] The user enjoys slow-burn romance and witty banter.
-[event:1] They briefly discussed the weather near the harbour.
+Also classify expiration:
+- scene      - likely irrelevant after this scene transition
+- session    - useful for this current chat/session, but may fade
+- permanent  - durable fact that should persist long-term
 
-FINAL RULE: Output ONLY [type:score] lines. No headers. No intros. No explanations.
+Output ONLY one memory per line using this exact format (nothing else):
+[fact:2:permanent] The character's name is Elara and she works as a blacksmith.
+[relationship:3:permanent] We have developed a close friendship after helping each other escape the dungeon.
+[preference:2:session] The user enjoys slow-burn romance and witty banter.
+[event:1:scene] They briefly discussed the weather near the harbour.
+
+FINAL RULE: Output ONLY [type:score:expiration] lines. No headers. No intros. No explanations.
 If there is nothing new worth preserving, output exactly: NONE`
   );
 }

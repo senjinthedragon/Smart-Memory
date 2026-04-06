@@ -251,6 +251,16 @@ For the full chat backlog, use **Catch Up** instead.
 - `development` - how the relationship or situation changed
 - `detail` - specific facts, names, objects, or places mentioned
 
+Extraction also assigns:
+
+- **Importance (1-3)** - how impactful the memory is (`1` fluff, `2` context, `3` core)
+- **Expiration** - expected durability:
+  - `scene` (short-lived)
+  - `session` (current chat scope)
+  - `permanent` (durable, keep aggressively)
+
+During trimming, Smart Memory prioritizes entries by expiration + importance + recency, with a keyword-frequency boost so repeated core terms are retained.
+
 ---
 
 ## License
