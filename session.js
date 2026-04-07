@@ -50,6 +50,7 @@ import {
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import {
+  buildCurrentSceneStateBlock,
   prioritizeMemories,
   reconcileTypeEntries,
   selectProtectedMemories,
@@ -394,7 +395,9 @@ export function injectSessionMemories() {
   void saveSessionMemories(updated);
 
   const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
-  const content = template.replace('{{session}}', formatSessionMemories(trimmed));
+  const sessionBlock = template.replace('{{session}}', formatSessionMemories(trimmed));
+  const sceneStateBlock = buildCurrentSceneStateBlock(trimmed);
+  const content = sceneStateBlock ? `${sceneStateBlock}\n${sessionBlock}` : sessionBlock;
 
   setExtensionPrompt(
     PROMPT_KEY_SESSION,

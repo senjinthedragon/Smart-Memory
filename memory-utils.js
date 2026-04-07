@@ -244,6 +244,43 @@ export function sortByTimeline(memories) {
 }
 
 /**
+ * Builds a compact "current scene state" block from session memories.
+ * Prioritizes the newest memory per scene-oriented type.
+ *
+ * @param {Array<{type?: string, content?: string, ts?: number}>} memories
+ * @returns {string}
+ */
+export function buildCurrentSceneStateBlock(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) return '';
+
+  const newestByType = new Map();
+  for (const mem of memories) {
+    const type = String(mem.type || '').toLowerCase();
+    if (!['scene', 'development', 'detail', 'revelation'].includes(type)) continue;
+    const existing = newestByType.get(type);
+    const currentTs = Number.isFinite(mem.ts) ? mem.ts : 0;
+    const existingTs = Number.isFinite(existing?.ts) ? existing.ts : 0;
+    if (!existing || currentTs >= existingTs) {
+      newestByType.set(type, mem);
+    }
+  }
+
+  const lines = [];
+  const scene = newestByType.get('scene');
+  const development = newestByType.get('development');
+  const detail = newestByType.get('detail');
+  const revelation = newestByType.get('revelation');
+
+  if (scene?.content) lines.push(`- Setting/atmosphere: ${scene.content}`);
+  if (development?.content) lines.push(`- Relationship/situation shift: ${development.content}`);
+  if (detail?.content) lines.push(`- Immediate continuity detail: ${detail.content}`);
+  if (revelation?.content) lines.push(`- Newly revealed context: ${revelation.content}`);
+
+  if (lines.length === 0) return '';
+  return `[Current scene state:\n${lines.join('\n')}]`;
+}
+
+/**
  * Reconciles a set of promoted consolidation entries against an existing base.
  *
  * When the model outputs an enriched or updated version of a base entry (e.g.

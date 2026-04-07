@@ -20,7 +20,32 @@ A key goal is to keep continuity and personality stable after consolidation, so 
 
 ---
 
-## 1) Move from "memory list" to a **memory graph**
+## Implementation status snapshot (as of 2026-04-07)
+
+### Implemented
+
+- Two-stage extraction with verifier filtering for long-term + session memory candidates.
+- Utility-decay retention scoring in prioritization/trimming (importance, confidence, persona/intimacy relevance, retrieval usage, confirmation freshness, keyword recurrence).
+- Protected-slot trimming behavior to preserve core continuity types during budget pressure.
+- Retrieval telemetry updates (`retrieval_count`, `last_confirmed_ts`) whenever memories are injected.
+- Compact "current scene state" injection synthesized from recent session memories.
+
+### Partially implemented
+
+- Hybrid retrieval/diversity constraints: currently type-aware protected slots exist, but no full weighted multi-signal reranker yet.
+- Contradiction handling: manual contradiction detection exists, but auto-repair is not yet implemented.
+
+### Not implemented yet
+
+- Memory graph schema + temporal supersession links (`supersedes`, `contradicts`, `valid_from`, `valid_to`, entities, source message IDs).
+- Regenerated stateful profiles (`character_state`, `world_state`, `relationship_matrix`) sourced from graph state.
+- Three-layer summarization ladder with backlink rehydration.
+- Regression harness/CI metrics for memory quality.
+- Runtime profile policy engine (local-vs-hosted behavior modes).
+
+---
+
+## 1) Move from "memory list" to a **memory graph** (pending)
 
 Current long-term/session/scenes/arcs tiers are already strong. The next step is to model memories as connected entities.
 
@@ -53,7 +78,7 @@ This directly reduces the "lobotomized after consolidation" feel.
 
 ---
 
-## 2) Two-stage extraction to reduce hallucinated memory writes
+## 2) Two-stage extraction to reduce hallucinated memory writes ✅ implemented
 
 ### Stage A: candidate extraction (high recall)
 
@@ -68,11 +93,11 @@ Before persistence, run a lightweight verifier that enforces:
 - confidence scoring,
 - canonical formatting.
 
-Only verified candidates are committed as durable memory.
+Only verified candidates are committed as durable memory. This is now live for both long-term and session extraction paths.
 
 ---
 
-## 3) Add **stateful profiles** for characters and world
+## 3) Add **stateful profiles** for characters and world (pending)
 
 Maintain compact rolling profiles that are regenerated from the graph, not raw chat:
 
@@ -84,7 +109,7 @@ Inject these as stable anchors every turn (small token footprint). This preserve
 
 ---
 
-## 4) Retrieval pipeline: hybrid ranker (vector + symbolic + recency)
+## 4) Retrieval pipeline: hybrid ranker (vector + symbolic + recency) (partial)
 
 Do not rely on vector similarity alone.
 
@@ -105,6 +130,8 @@ Then apply **diversity constraints**:
 - at least one high-importance long-term fact.
 
 This avoids over-retrieving near-duplicate facts while missing critical story hooks.
+
+Current state: protected-slot selection provides a basic diversity floor in trimming, but full weighted hybrid reranking (vector/symbolic/arc/time/contradiction) is still pending.
 
 ---
 
@@ -134,7 +161,7 @@ Result: you can always rehydrate details when needed, which prevents "flat" char
 
 ---
 
-## 7) Contradiction handling should produce repairs, not only warnings
+## 7) Contradiction handling should produce repairs, not only warnings (partial)
 
 The continuity checker can be extended to auto-repair flow:
 
@@ -145,9 +172,11 @@ The continuity checker can be extended to auto-repair flow:
 
 Example: if the model says a dead NPC is alive, inject short correction context tied to the relevant event memory.
 
+Current state: contradiction checking exists as a manual diagnostic command/UI flow; automated repair generation/injection is still pending.
+
 ---
 
-## 8) Add forgetting policies based on **utility decay**, not age only
+## 8) Add forgetting policies based on **utility decay**, not age only ✅ implemented
 
 Instead of oldest-first trimming, compute retention score:
 
@@ -157,11 +186,11 @@ Instead of oldest-first trimming, compute retention score:
 - `last_confirmed_ts`
 - `entity centrality` (how connected this memory is)
 
-Low-utility memories are compressed first; high-utility memories are retained even if old.
+Low-utility memories are compressed first; high-utility memories are retained even if old. Utility scoring is now used in active trimming/retention paths.
 
 ---
 
-## 9) Scene memory should track intimacy/context continuity explicitly
+## 9) Scene memory should track intimacy/context continuity explicitly (partial)
 
 For character-first RP (including NSFW ERP), preserve the "what the dynamic is right now" model:
 
@@ -172,6 +201,8 @@ For character-first RP (including NSFW ERP), preserve the "what the dynamic is r
 - temporal markers (just happened, ongoing, aftercare, next-day callback).
 
 Inject a compact "current scene state" block each turn.
+
+Current state: a compact scene-state block is now synthesized from latest session memories (`scene`, `development`, `detail`, `revelation`) and injected each turn. Dedicated consent/boundary progression modeling is still pending.
 
 This improves immersion and prevents abrupt tone/persona drift across replies.
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildCurrentSceneStateBlock,
   memoryUtilityScore,
   prioritizeMemories,
   reconcileTypeEntries,
@@ -128,4 +129,20 @@ test('selectProtectedMemories keeps one memory per required type', () => {
   assert.ok(selected.some((m) => m.type === 'relationship' && m.content.includes('trust')));
   assert.ok(selected.some((m) => m.type === 'preference'));
   assert.ok(selected.some((m) => m.type === 'fact'));
+});
+
+test('buildCurrentSceneStateBlock keeps newest scene-oriented memories', () => {
+  const block = buildCurrentSceneStateBlock([
+    { type: 'scene', content: 'Old tavern room.', ts: 10 },
+    { type: 'scene', content: 'Rainy balcony at midnight.', ts: 20 },
+    { type: 'development', content: 'Trust deepened after the apology.', ts: 30 },
+    { type: 'detail', content: 'Her coat is still wet from the storm.', ts: 25 },
+    { type: 'revelation', content: 'She admits the letter was forged.', ts: 35 },
+  ]);
+
+  assert.match(block, /Rainy balcony at midnight\./);
+  assert.match(block, /Trust deepened after the apology\./);
+  assert.match(block, /coat is still wet/);
+  assert.match(block, /letter was forged/);
+  assert.doesNotMatch(block, /Old tavern room/);
 });
