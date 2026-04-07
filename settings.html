@@ -32,8 +32,90 @@
         </label>
         <select id="sm_source" class="text_pole">
           <option value="main">Main API</option>
+          <option value="ollama">Ollama</option>
+          <option value="openai_compatible">OpenAI Compatible</option>
           <option value="webllm">WebLLM Extension</option>
         </select>
+      </div>
+
+      <!-- Ollama settings (shown when source = ollama) -->
+      <div id="sm_ollama_settings" class="sm-block" style="display: none">
+        <label>
+          Ollama URL
+          <input
+            id="sm_ollama_url"
+            type="text"
+            class="text_pole"
+            placeholder="http://localhost:11434"
+          />
+        </label>
+        <label>
+          Model
+          <span
+            class="sm-info"
+            data-tooltip="Select a model from your local Ollama instance. Click the refresh button if the list is empty or outdated."
+            >ⓘ</span
+          >
+        </label>
+        <div style="display: flex; gap: 6px; align-items: center">
+          <select id="sm_ollama_model" class="text_pole" style="flex: 1">
+            <option value="">— click refresh to load models —</option>
+          </select>
+          <button
+            id="sm_ollama_refresh"
+            class="menu_button menu_button_icon"
+            title="Refresh model list from Ollama"
+            style="flex-shrink: 0"
+          >
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- OpenAI Compatible settings (shown when source = openai_compatible) -->
+      <div id="sm_openai_compat_settings" class="sm-block" style="display: none">
+        <label>
+          API URL
+          <span
+            class="sm-info"
+            data-tooltip="Base URL of the OpenAI-compatible API. Works with KoboldCpp, llama.cpp, vLLM, OpenRouter, OpenAI, and others."
+            >ⓘ</span
+          >
+          <input
+            id="sm_openai_compat_url"
+            type="text"
+            class="text_pole"
+            placeholder="http://localhost:8080"
+          />
+        </label>
+        <label>
+          API Key
+          <span
+            class="sm-info"
+            data-tooltip="Leave blank for local servers that don't require authentication."
+            >ⓘ</span
+          >
+          <input
+            id="sm_openai_compat_key"
+            type="password"
+            class="text_pole"
+            placeholder="sk-... (optional)"
+          />
+        </label>
+        <label>
+          Model
+          <span
+            class="sm-info"
+            data-tooltip="Model name to request. Leave blank to use the server's default."
+            >ⓘ</span
+          >
+          <input
+            id="sm_openai_compat_model"
+            type="text"
+            class="text_pole"
+            placeholder="model-name (optional)"
+          />
+        </label>
       </div>
 
       <!-- Catch Up / Reset buttons -->

@@ -57,7 +57,7 @@ import {
   PROMPT_KEY_ARCS,
   PROMPT_KEY_RECAP,
 } from './constants.js';
-import { memory_sources } from './generate.js';
+import { memory_sources, fetchOllamaModels } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
@@ -99,6 +99,15 @@ const defaultSettings = {
 
   // LLM source for all memory operations (extraction, summarization, recap)
   source: memory_sources.main,
+
+  // Ollama direct source settings
+  ollama_url: 'http://localhost:11434',
+  ollama_model: '',
+
+  // OpenAI Compatible source settings
+  openai_compat_url: '',
+  openai_compat_key: '',
+  openai_compat_model: '',
 
   // Short-term (compaction)
   compaction_enabled: true,
@@ -897,10 +906,108 @@ function bindSettingsUI() {
     });
 
   // ---- LLM source -----------------------------------------------------
+
+  /**
+   * Shows or hides the per-source settings sections based on the current source.
+   * @param {string} source
+   */
+  function updateSourceSections(source) {
+    $('#sm_ollama_settings').toggle(source === memory_sources.ollama);
+    $('#sm_openai_compat_settings').toggle(source === memory_sources.openai_compatible);
+  }
+
+  /**
+   * Fetches installed Ollama models and populates the model dropdown.
+   * Preserves the previously selected model if it is still available.
+   */
+  async function refreshOllamaModels() {
+    const $select = $('#sm_ollama_model');
+    const $btn = $('#sm_ollama_refresh');
+    const prevModel = getSettings().ollama_model;
+    $btn.prop('disabled', true);
+    try {
+      const models = await fetchOllamaModels();
+      $select.empty();
+      if (models.length === 0) {
+        $select.append('<option value="">No models found</option>');
+      } else {
+        models.forEach((name) => {
+          $select.append(`<option value="${name}">${name}</option>`);
+        });
+        const best = models.includes(prevModel) ? prevModel : models[0];
+        $select.val(best);
+        getSettings().ollama_model = best;
+        saveSettingsDebounced();
+      }
+    } catch (err) {
+      toastr.error(
+        `Could not reach Ollama at ${getSettings().ollama_url || 'http://localhost:11434'}. Is it running?`,
+        'Smart Memory',
+      );
+      console.error('[SmartMemory] Ollama model fetch failed:', err);
+    } finally {
+      $btn.prop('disabled', false);
+    }
+  }
+
+  const currentSource = s.source ?? memory_sources.main;
   $('#sm_source')
-    .val(s.source ?? memory_sources.main)
+    .val(currentSource)
     .on('change', function () {
-      getSettings().source = $(this).val();
+      const source = $(this).val();
+      getSettings().source = source;
+      saveSettingsDebounced();
+      updateSourceSections(source);
+      if (source === memory_sources.ollama && !getSettings().ollama_model) {
+        refreshOllamaModels();
+      }
+    });
+
+  updateSourceSections(currentSource);
+
+  // Ollama URL field
+  $('#sm_ollama_url')
+    .val(s.ollama_url ?? 'http://localhost:11434')
+    .on('change', function () {
+      getSettings().ollama_url = $(this).val().trim();
+      saveSettingsDebounced();
+      // Refresh models when the URL changes so the list reflects the new instance.
+      refreshOllamaModels();
+    });
+
+  // Ollama model dropdown
+  $('#sm_ollama_model').on('change', function () {
+    getSettings().ollama_model = $(this).val();
+    saveSettingsDebounced();
+  });
+
+  // Populate Ollama model list on load if Ollama is already selected.
+  if (currentSource === memory_sources.ollama) {
+    refreshOllamaModels();
+  }
+
+  // Ollama refresh button
+  $('#sm_ollama_refresh').on('click', () => refreshOllamaModels());
+
+  // OpenAI Compatible fields
+  $('#sm_openai_compat_url')
+    .val(s.openai_compat_url ?? '')
+    .on('change', function () {
+      getSettings().openai_compat_url = $(this).val().trim();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_openai_compat_key')
+    .val(s.openai_compat_key ?? '')
+    .on('change', function () {
+      getSettings().openai_compat_key = $(this).val();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_openai_compat_model')
+    .val(s.openai_compat_model ?? '')
+    .on('input', function () {
+      getSettings().openai_compat_model = $(this).val().trim();
       saveSettingsDebounced();
     });
 
