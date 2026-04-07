@@ -229,10 +229,11 @@ export async function extractSessionMemories(recentMessages) {
 
     const max = settings.session_max_memories ?? 30;
     const merged = deduplicateSession(existing, incoming, max);
-    const added = merged.length - Math.min(existing.length, max);
+    const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
+    const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
     await saveSessionMemories(merged);
 
-    return Math.max(0, added);
+    return added;
   } catch (err) {
     console.error('[SmartMemory] Session extraction failed:', err);
     throw err;
@@ -269,6 +270,7 @@ export async function consolidateSessionMemories() {
 
   const memories = loadSessionMemories();
   let totalRemoved = 0;
+  let dirty = false;
 
   for (const type of SESSION_TYPES) {
     const base = memories.filter((m) => m.type === type && m.consolidated);
@@ -290,6 +292,7 @@ export async function consolidateSessionMemories() {
       if (!response || response.trim().toUpperCase() === 'NONE') {
         // Nothing to add - mark unprocessed as consolidated as-is.
         unprocessed.forEach((m) => (m.consolidated = true));
+        dirty = true;
         continue;
       }
 
@@ -310,6 +313,7 @@ export async function consolidateSessionMemories() {
       const after = reconciledType.length;
       const removed = before - after;
       totalRemoved += Math.max(0, removed);
+      dirty = true;
 
       console.log(
         `[SmartMemory] Session [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
@@ -318,16 +322,13 @@ export async function consolidateSessionMemories() {
       console.error(`[SmartMemory] Session consolidation failed for type [${type}]:`, err);
       // On failure, mark unprocessed as consolidated so they don't block future passes.
       unprocessed.forEach((m) => (m.consolidated = true));
+      dirty = true;
     }
   }
 
   const max = settings.session_max_memories ?? 30;
   const finalMemories = sortByTimeline(trimByPriority(memories, max));
-  if (
-    totalRemoved > 0 ||
-    finalMemories.length !== memories.length ||
-    memories.some((m) => m.consolidated)
-  ) {
+  if (dirty || finalMemories.length !== memories.length) {
     await saveSessionMemories(finalMemories);
   }
 

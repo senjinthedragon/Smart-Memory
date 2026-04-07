@@ -77,8 +77,12 @@ export async function generateMemoryExtract(prompt, { responseLength = 600 } = {
     }
   }
 
-  // Default: main API. instruct:false keeps the extraction prompt unchanged
-  // by the instruct template, which is important for our tagged-line output format.
+  // Default: main API. instruct:false prevents the instruct template from
+  // wrapping the extraction prompt, which is important for our tagged-line
+  // output format ([type:score:expiration] lines). This is a supported
+  // generateRaw parameter in SillyTavern. The parsers are also resilient -
+  // they only match valid tagged lines and ignore everything else - so even
+  // if this were silently ignored the output would still parse correctly.
   return await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
 }
 

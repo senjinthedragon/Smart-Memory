@@ -180,6 +180,7 @@ const defaultSettings = {
 let messagesSinceLastExtraction = 0;
 let compactionRunning = false;
 let extractionRunning = false;
+let consolidationRunning = false;
 
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
@@ -430,9 +431,13 @@ async function onCharacterMessageRendered() {
             return 0;
           });
           // Run session consolidation after extraction - fires per-type when threshold is reached.
-          await consolidateSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Background session consolidation error:', err);
-          });
+          if (!consolidationRunning) {
+            consolidationRunning = true;
+            await consolidateSessionMemories().catch((err) => {
+              console.error('[SmartMemory] Background session consolidation error:', err);
+            });
+            consolidationRunning = false;
+          }
           injectSessionMemories(true);
           updateSessionUI();
           total += count;
@@ -446,11 +451,13 @@ async function onCharacterMessageRendered() {
             },
           );
           // Run consolidation after extraction if new memories were added.
-          if (count > 0 && settings.longterm_consolidate) {
+          if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
+            consolidationRunning = true;
             const removed = await consolidateMemories(characterName).catch((err) => {
               console.error('[SmartMemory] Background consolidation error:', err);
               return 0;
             });
+            consolidationRunning = false;
             if (removed > 0) {
               setStatusMessage(`Consolidated ${removed} redundant memories.`);
               toastr.info(
@@ -1115,7 +1122,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_extract_now').on('click', async function () {
-    if (extractionRunning) return;
+    if (extractionRunning || consolidationRunning) return;
     const characterName = getCurrentCharacterName();
     if (!characterName) return;
     extractionRunning = true;

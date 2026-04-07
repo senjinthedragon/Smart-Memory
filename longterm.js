@@ -302,13 +302,16 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     const maxMemories = settings.longterm_max_memories || 25;
     const merged = mergeMemories(existingMemories, newMemories, maxMemories);
-    const added = merged.length - Math.min(existingMemories.length, maxMemories);
+    // Count how many of the new candidates actually survived dedup and made it
+    // into the merged set, regardless of whether older entries were displaced.
+    const existingKeys = new Set(existingMemories.map((m) => `${m.type}|${m.content}`));
+    const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
     saveCharacterMemories(characterName, merged);
 
     console.log(
       `[SmartMemory] Saved ${added} new memories for "${characterName}". Total: ${merged.length}`,
     );
-    return Math.max(0, added);
+    return added;
   } catch (err) {
     console.error('[SmartMemory] Memory extraction failed:', err);
     throw err;
@@ -371,6 +374,7 @@ export async function consolidateMemories(characterName) {
 
   const memories = loadCharacterMemories(characterName);
   let totalRemoved = 0;
+  let dirty = false;
 
   for (const type of MEMORY_TYPES) {
     const base = memories.filter((m) => m.type === type && m.consolidated);
@@ -393,6 +397,7 @@ export async function consolidateMemories(characterName) {
       if (!response || response.trim().toUpperCase() === 'NONE') {
         // Model found nothing to add - mark unprocessed as consolidated as-is.
         unprocessed.forEach((m) => (m.consolidated = true));
+        dirty = true;
         continue;
       }
 
@@ -414,6 +419,7 @@ export async function consolidateMemories(characterName) {
       const after = reconciledType.length;
       const removed = before - after;
       totalRemoved += Math.max(0, removed);
+      dirty = true;
 
       console.log(
         `[SmartMemory] [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
@@ -422,16 +428,13 @@ export async function consolidateMemories(characterName) {
       console.error(`[SmartMemory] Consolidation failed for type [${type}]:`, err);
       // On failure, mark unprocessed as consolidated so they don't block future passes.
       unprocessed.forEach((m) => (m.consolidated = true));
+      dirty = true;
     }
   }
 
   const maxMemories = settings.longterm_max_memories || 25;
   const finalMemories = sortByTimeline(trimByPriority(memories, maxMemories));
-  if (
-    totalRemoved > 0 ||
-    finalMemories.length !== memories.length ||
-    memories.some((m) => m.consolidated)
-  ) {
+  if (dirty || finalMemories.length !== memories.length) {
     saveCharacterMemories(characterName, finalMemories);
   }
 
