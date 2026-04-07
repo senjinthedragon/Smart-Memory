@@ -55,7 +55,6 @@ import {
   PROMPT_KEY_SESSION,
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
-  PROMPT_KEY_RECAP,
 } from './constants.js';
 import { memory_sources, fetchOllamaModels } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
@@ -73,7 +72,7 @@ import {
   isFreshStart,
   setFreshStart,
 } from './longterm.js';
-import { updateLastActive, getAwayHours, generateRecap, injectRecap, clearRecap } from './recap.js';
+import { updateLastActive, getAwayHours, generateRecap, displayRecap } from './recap.js';
 import {
   extractSessionMemories,
   consolidateSessionMemories,
@@ -171,9 +170,6 @@ const defaultSettings = {
   recap_enabled: true,
   recap_threshold_hours: 4,
   recap_response_length: 300,
-  recap_position: extension_prompt_types.IN_CHAT,
-  recap_depth: 0,
-  recap_role: extension_prompt_roles.SYSTEM,
 
   // Continuity
   continuity_response_length: 300,
@@ -193,9 +189,6 @@ let consolidationRunning = false;
 
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
-
-// True while a recap is injected; cleared after the first AI response.
-let recapActive = false;
 
 // Tracks whether the group chat warning toast has already been shown this
 // session so it doesn't fire on every message in a group.
@@ -272,7 +265,6 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_SESSION, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_SCENES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_ARCS, '', none, 0);
-  setExtensionPrompt(PROMPT_KEY_RECAP, '', none, 0);
   updateTokenDisplay();
 }
 
@@ -284,10 +276,10 @@ function clearAllInjections() {
  *
  * Orchestration order:
  *   1. Clear recap if one was active (it served its purpose after one response).
- *   2. Check for compaction threshold and run if needed (async, non-blocking).
- *   3. Check for scene break in the latest message (async, non-blocking).
- *   4. Every N messages: batch extraction for session + long-term + arcs.
- *   5. Update lastActive timestamp for the away recap system.
+ *   1. Check for compaction threshold and run if needed (async, non-blocking).
+ *   2. Check for scene break in the latest message (async, non-blocking).
+ *   3. Every N messages: batch extraction for session + long-term + arcs.
+ *   4. Update lastActive timestamp for the away recap system.
  *
  * Compaction and extraction both pass a responseLength to ST's generateRaw /
  * generateQuietPrompt, which temporarily modifies the global amount_gen via
@@ -348,14 +340,7 @@ async function onCharacterMessageRendered() {
     sceneBufferLastIndex = context.chat.length - 1;
   }
 
-  // Step 1: clear the recap after the first AI response.
-  if (recapActive) {
-    clearRecap();
-    recapActive = false;
-    updateTokenDisplay();
-  }
-
-  // Step 2: compaction - awaited before extraction to prevent concurrent use
+  // Step 1: compaction - awaited before extraction to prevent concurrent use
   // of ST's TempResponseLength singleton, which would corrupt amount_gen.
   if (settings.compaction_enabled && !compactionRunning) {
     compactionRunning = true;
@@ -380,7 +365,7 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 3: scene break detection - awaited before extraction for the same
+  // Step 2: scene break detection - awaited before extraction for the same
   // reason as compaction: the AI detection path uses responseLength: 5 which
   // would corrupt amount_gen if it raced with extraction.
   // Check both the AI response and the preceding user message - transitions
@@ -402,7 +387,7 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 4: batched extraction every N messages.
+  // Step 3: batched extraction every N messages.
   // extractEvery uses the smaller of the two intervals so neither tier
   // falls behind if one is configured more frequently than the other.
   if (!extractionRunning) {
@@ -510,7 +495,7 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 5: update lastActive so the away recap threshold stays accurate.
+  // Step 4: update lastActive so the away recap threshold stays accurate.
   updateLastActive();
 }
 
@@ -523,7 +508,6 @@ async function onChatChanged() {
   messagesSinceLastExtraction = 0;
   compactionRunning = false;
   extractionRunning = false;
-  recapActive = false;
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
   groupChatWarningShown = false;
@@ -561,7 +545,7 @@ async function onChatChanged() {
   updateArcsUI();
   updateTokenDisplay();
 
-  // Generate a recap if the user has been away long enough.
+  // Show a recap popup if the user has been away long enough.
   if (settings.recap_enabled) {
     const hoursAway = getAwayHours();
     if (hoursAway > 0) {
@@ -570,15 +554,9 @@ async function onChatChanged() {
         .then((recap) => {
           if (recap) {
             // Pass hoursAway explicitly - updateLastActive() runs after this
-            // async block starts, so getAwayHours() inside injectRecap would
+            // async block starts, so getAwayHours() inside displayRecap would
             // return 0 and always show "short break" regardless of actual gap.
-            injectRecap(recap, hoursAway);
-            recapActive = true;
-            updateTokenDisplay();
-            toastr.info('A recap of your last session has been added to context.', 'Smart Memory', {
-              timeOut: 5000,
-              positionClass: 'toast-bottom-right',
-            });
+            displayRecap(recap, hoursAway);
           }
           setStatusMessage('');
         })
@@ -604,7 +582,6 @@ const TOKEN_TIERS = [
   { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
   { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#5a8e7a' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
-  { key: PROMPT_KEY_RECAP, label: 'Recap', color: '#8e6e3a' },
 ];
 
 /**
@@ -1565,35 +1542,14 @@ function bindSettingsUI() {
     });
   $('#sm_recap_threshold_value').text(s.recap_threshold_hours + 'h');
 
-  $(`input[name="sm_recap_position"][value="${s.recap_position}"]`).prop('checked', true);
-  $('input[name="sm_recap_position"]').on('change', function () {
-    getSettings().recap_position = parseInt($(this).val(), 10);
-    saveSettingsDebounced();
-  });
-
-  $('#sm_recap_depth')
-    .val(s.recap_depth)
-    .on('input', function () {
-      getSettings().recap_depth = parseInt($(this).val(), 10);
-      saveSettingsDebounced();
-    });
-
-  $('#sm_recap_role')
-    .val(s.recap_role)
-    .on('change', function () {
-      getSettings().recap_role = parseInt($(this).val(), 10);
-      saveSettingsDebounced();
-    });
-
   $('#sm_recap_now').on('click', async function () {
     $(this).prop('disabled', true);
     setStatusMessage('Generating recap...');
     try {
       const recap = await generateRecap();
       if (recap) {
-        injectRecap(recap);
-        recapActive = true;
-        setStatusMessage('Recap injected.');
+        displayRecap(recap);
+        setStatusMessage('Recap displayed.');
       } else {
         setStatusMessage('Recap failed.');
       }
@@ -1837,8 +1793,8 @@ function bindSettingsUI() {
     await clearSessionMemories();
     await clearSceneHistory();
     await clearArcs();
-    clearRecap();
-    recapActive = false;
+    // Dismiss any open recap modal.
+    $('#sm_recap_overlay').remove();
 
     // Enable the fresh-start flag so long-term injection stays suppressed.
     await setFreshStart(true);
@@ -2039,18 +1995,12 @@ jQuery(async function () {
           });
           return 'Recap generation failed.';
         }
-        injectRecap(recap);
-        recapActive = true;
-        updateTokenDisplay();
-        setStatusMessage('Recap injected.');
-        toastr.info('Recap injected into context.', 'Smart Memory', {
-          timeOut: 4000,
-          positionClass: 'toast-bottom-right',
-        });
+        displayRecap(recap);
+        setStatusMessage('Recap displayed.');
         return recap;
       },
       helpString:
-        'Generates a "Previously on..." recap of the current chat and injects it into context.',
+        'Generates a "Previously on..." recap of the current chat and displays it as a popup.',
       returns: ARGUMENT_TYPE.STRING,
     }),
   );

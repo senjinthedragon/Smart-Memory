@@ -915,7 +915,7 @@
           Away Recap
           <span
             class="sm-info"
-            data-tooltip="When you return to a chat after being away for longer than the threshold, Smart Memory generates a short &quot;Previously on...&quot; summary and injects it at the top of context. It's automatically cleared after the first AI response so it doesn't linger."
+            data-tooltip="When you return to a chat after being away for longer than the threshold, Smart Memory generates a short &quot;Previously on...&quot; summary and displays it as a popup so you can catch up before diving back in."
             >ⓘ</span
           >
         </summary>
@@ -940,39 +940,6 @@
               step="1"
               value="{{defaultSettings.recap_threshold_hours}}"
             />
-          </div>
-
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
-            <label>Injection position</label>
-            <div class="radio_group">
-              <label>
-                <input type="radio" name="sm_recap_position" value="2" />
-                <span>Before Main Prompt</span>
-              </label>
-              <label>
-                <input type="radio" name="sm_recap_position" value="0" />
-                <span>After Main Prompt</span>
-              </label>
-              <label class="flex-container alignItemsCenter">
-                <input type="radio" name="sm_recap_position" value="1" />
-                <span>In-chat @ Depth</span>
-                <input
-                  id="sm_recap_depth"
-                  class="text_pole widthUnset"
-                  type="number"
-                  min="0"
-                  max="999"
-                  style="width: 4em; margin: 0 4px"
-                />
-                <span>as</span>
-                <select id="sm_recap_role" class="text_pole widthNatural">
-                  <option value="0">System</option>
-                  <option value="1">User</option>
-                  <option value="2">Assistant</option>
-                </select>
-              </label>
-            </div>
           </div>
 
           <div class="sm-block" style="margin-top: 4px">

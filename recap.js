@@ -19,26 +19,18 @@
 
 /**
  * Away recap: generates a "Previously on..." summary when the user returns
- * to a chat after being away longer than the configured threshold.
- *
- * The recap is injected once at the top of context and automatically cleared
- * after the first AI response so it doesn't linger into subsequent turns.
+ * to a chat after being away longer than the configured threshold, and
+ * displays it as a dismissible modal popup for the user.
  *
  * updateLastActive - records the current time as lastActive in chatMetadata
  * getAwayHours    - returns hours since last active (0 if below threshold)
  * generateRecap   - generates the recap text via the model
- * injectRecap     - pushes the recap into the prompt with an appropriate header
- * clearRecap      - removes the recap injection (called after first AI response)
+ * displayRecap    - shows the recap in a dismissible modal popup
  */
 
-import {
-  setExtensionPrompt,
-  extension_prompt_types,
-  extension_prompt_roles,
-} from '../../../../script.js';
 import { generateMemorySummarize } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY, PROMPT_KEY_RECAP } from './constants.js';
+import { MODULE_NAME, META_KEY } from './constants.js';
 import { RECAP_PROMPT } from './prompts.js';
 
 /**
@@ -91,45 +83,74 @@ export async function generateRecap() {
 }
 
 /**
- * Injects the recap into the prompt with a context-appropriate header.
- * The header distinguishes short gaps from long ones ("N days").
- * @param {string|null} recap - The recap text to inject, or null to clear.
+ * Displays the recap as a dismissible modal popup for the user.
+ * The modal shows how long the user was away and the recap text.
+ * Clicking Dismiss or clicking outside the card closes it.
+ * @param {string|null} recap - The recap text to display.
  * @param {number} [hoursAway] - Pre-computed away hours. If omitted, computed
  *   fresh via getAwayHours(). Callers that already have the value should pass
- *   it in - by the time injectRecap runs, updateLastActive() may have already
+ *   it in - by the time displayRecap runs, updateLastActive() may have already
  *   reset the clock and getAwayHours() would return 0.
  */
-export function injectRecap(recap, hoursAway) {
-  if (!recap) {
-    setExtensionPrompt(PROMPT_KEY_RECAP, '', extension_prompt_types.NONE, 0);
-    return;
-  }
+export function displayRecap(recap, hoursAway) {
+  if (!recap) return;
+
+  // Remove any existing recap modal before showing a new one.
+  $('#sm_recap_overlay').remove();
+
   const hours = hoursAway !== undefined ? hoursAway : getAwayHours();
-  const hoursAwayClamped = Math.round(hours * 10) / 10;
+  const hoursRounded = Math.round(hours * 10) / 10;
   const timeNote =
-    hoursAwayClamped > 24
-      ? `The user has been away for ${Math.round(hoursAwayClamped / 24)} day(s).`
-      : `The user is returning after a short break.`;
+    hoursRounded > 24
+      ? `You've been away for ${Math.round(hoursRounded / 24)} day(s).`
+      : `You're returning after a short break (${hoursRounded}h).`;
 
-  // The header explicitly tells the model these events are already in the past
-  // and that it should continue from the present moment rather than re-enact them.
-  const header = `[CONTEXT: ${timeNote} The following events have ALREADY occurred - do NOT re-enact them. Continue the story from the current moment.]`;
+  const overlay = $('<div id="sm_recap_overlay">').css({
+    position: 'fixed',
+    inset: '0',
+    background: 'rgba(0,0,0,0.65)',
+    zIndex: 10000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  });
 
-  const settings = extension_settings[MODULE_NAME];
-  setExtensionPrompt(
-    PROMPT_KEY_RECAP,
-    `${header}\n[Previously: ${recap}]`,
-    settings.recap_position ?? extension_prompt_types.IN_PROMPT,
-    settings.recap_depth ?? 0,
-    false,
-    settings.recap_role ?? extension_prompt_roles.SYSTEM,
-  );
-}
+  const card = $('<div>').css({
+    background: 'var(--black-2, #1a1a2e)',
+    border: '1px solid var(--border-color, #444)',
+    borderRadius: '8px',
+    padding: '24px',
+    maxWidth: '580px',
+    width: '90%',
+    maxHeight: '75vh',
+    overflowY: 'auto',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+  });
 
-/**
- * Clears the recap injection slot. Called after the first AI response
- * so the recap doesn't persist into subsequent turns.
- */
-export function clearRecap() {
-  setExtensionPrompt(PROMPT_KEY_RECAP, '', extension_prompt_types.NONE, 0);
+  const title = $('<h3>Previously on...</h3>').css({
+    marginTop: 0,
+    fontSize: '1.1em',
+  });
+
+  const timeLabel = $('<p>').text(timeNote).css({
+    fontSize: '0.8em',
+    opacity: 0.6,
+    margin: '0 0 14px 0',
+  });
+
+  const content = $('<p>').text(recap).css({ lineHeight: 1.65, margin: 0 });
+
+  const footer = $('<div>').css({ marginTop: '18px', textAlign: 'right' });
+  const dismissBtn = $('<button>Dismiss</button>').addClass('menu_button');
+
+  dismissBtn.on('click', () => overlay.remove());
+  // Also dismiss when clicking the backdrop outside the card.
+  overlay.on('click', (e) => {
+    if (e.target === overlay[0]) overlay.remove();
+  });
+
+  footer.append(dismissBtn);
+  card.append(title, timeLabel, content, footer);
+  overlay.append(card);
+  $('body').append(overlay);
 }
