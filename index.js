@@ -1837,6 +1837,8 @@ function bindSettingsUI() {
     await clearSessionMemories();
     await clearSceneHistory();
     await clearArcs();
+    clearRecap();
+    recapActive = false;
 
     // Enable the fresh-start flag so long-term injection stays suppressed.
     await setFreshStart(true);
