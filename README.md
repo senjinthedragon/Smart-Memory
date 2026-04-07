@@ -200,7 +200,9 @@ Clears Smart Memory's state for the current chat - summary, session memories, sc
 
 ### Fresh Start
 
-Clears everything, including long-term memories for the current character, and suppresses future memory injection for this chat. Use this after test or throwaway sessions to make sure nothing bleeds into future chats. Asks for confirmation before proceeding - this cannot be undone.
+Clears everything for a clean slate - long-term memories for the current character plus all chat-scoped tiers (summary, session memories, scene history, arcs). Does not suppress future memory generation; the AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
+
+To prevent a specific chat from contributing to long-term memory at all, use the **Exclude this chat from long-term memory** checkbox in the Long-term Memory section instead.
 
 ### Per-tier Extract Buttons
 

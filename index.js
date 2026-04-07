@@ -1772,7 +1772,7 @@ function bindSettingsUI() {
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
       !confirm(
-        `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nMemory injection will also be suppressed for this chat.\n\nThis cannot be undone. Continue?`,
+        `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nThis cannot be undone. Continue?`,
       )
     )
       return;
@@ -1796,20 +1796,18 @@ function bindSettingsUI() {
     // Dismiss any open recap modal.
     $('#sm_recap_overlay').remove();
 
-    // Enable the fresh-start flag so long-term injection stays suppressed.
-    await setFreshStart(true);
     await context.saveMetadata();
 
     // Clear all injection slots.
     loadAndInjectSummary();
-    injectMemories(characterName, true);
+    injectMemories(characterName, isFreshStart());
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);
-    updateFreshStartUI(true);
+    updateFreshStartUI(isFreshStart());
     updateSessionUI();
     updateScenesUI();
     updateArcsUI();
