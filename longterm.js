@@ -446,8 +446,11 @@ export async function consolidateMemories(characterName) {
  * or the character has no memories yet.
  * @param {string} characterName
  * @param {boolean} [freshStart=false] - If true, suppress injection for this chat.
+ * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
+ *   Only pass true from the post-extraction path (one real AI response turn). All other callers
+ *   (chat load, settings change, etc.) leave telemetry unchanged to avoid inflating the signal.
  */
-export function injectMemories(characterName, freshStart = false) {
+export function injectMemories(characterName, freshStart = false, updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.longterm_enabled || freshStart || !characterName) {
@@ -484,17 +487,22 @@ export function injectMemories(characterName, freshStart = false) {
     }
   }
 
-  const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
-  const updated = memories.map((m) => {
-    const key = `${m.type}|${m.content}`;
-    if (!recalled.has(key)) return m;
-    return {
-      ...m,
-      retrieval_count: (m.retrieval_count ?? 0) + 1,
-      last_confirmed_ts: Date.now(),
-    };
-  });
-  saveCharacterMemories(characterName, updated);
+  // Only update retrieval telemetry when called from a real AI response turn.
+  // Skipping on chat load, settings changes etc. prevents the signal from
+  // saturating too quickly and becoming meaningless.
+  if (updateTelemetry) {
+    const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
+    const updated = memories.map((m) => {
+      const key = `${m.type}|${m.content}`;
+      if (!recalled.has(key)) return m;
+      return {
+        ...m,
+        retrieval_count: (m.retrieval_count ?? 0) + 1,
+        last_confirmed_ts: Date.now(),
+      };
+    });
+    saveCharacterMemories(characterName, updated);
+  }
 
   const memoryText = formatMemoriesForPrompt(trimmed);
   const template =

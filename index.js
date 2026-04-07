@@ -233,6 +233,10 @@ function getStableExtractionWindowWithFallback(chat, windowSize) {
 // Accumulates messages since the last detected scene break. Reset to []
 // when a break is detected so the next scene starts from a clean buffer.
 let sceneMessageBuffer = [];
+// Index of the last chat message already pushed into sceneMessageBuffer.
+// Prevents duplicate pushes when CHARACTER_MESSAGE_RENDERED fires more than
+// once for the same message (e.g. during swipes or re-renders).
+let sceneBufferLastIndex = -1;
 
 // ---- Helpers ------------------------------------------------------------
 
@@ -325,11 +329,14 @@ async function onCharacterMessageRendered() {
     .find((m) => m.is_user && !m.is_system && m.mes);
   const lastUserMsgText = lastUserMsg?.mes ?? '';
 
-  // Push the last two messages (user turn + AI response) so scene summaries
-  // include both sides of each exchange, not just the AI response.
-  // CHARACTER_MESSAGE_RENDERED fires once per new AI message, so the preceding
-  // user message is always new to the buffer at this point.
-  sceneMessageBuffer.push(...context.chat.slice(-2));
+  // Push only messages not yet in the buffer. Using the chat index as a
+  // cursor prevents duplicate pushes when the event fires more than once
+  // for the same message (swipes, re-renders).
+  const newMessages = context.chat.slice(sceneBufferLastIndex + 1);
+  if (newMessages.length > 0) {
+    sceneMessageBuffer.push(...newMessages);
+    sceneBufferLastIndex = context.chat.length - 1;
+  }
 
   // Step 1: clear the recap after the first AI response.
   if (recapActive) {
@@ -377,6 +384,7 @@ async function onCharacterMessageRendered() {
         updateScenesUI();
         updateTokenDisplay();
         sceneMessageBuffer = [];
+        sceneBufferLastIndex = -1;
         setStatusMessage('Scene break detected.');
       }
     } catch (err) {
@@ -425,7 +433,7 @@ async function onCharacterMessageRendered() {
           await consolidateSessionMemories().catch((err) => {
             console.error('[SmartMemory] Background session consolidation error:', err);
           });
-          injectSessionMemories();
+          injectSessionMemories(true);
           updateSessionUI();
           total += count;
         }
@@ -444,7 +452,6 @@ async function onCharacterMessageRendered() {
               return 0;
             });
             if (removed > 0) {
-              injectMemories(characterName, isFreshStart());
               setStatusMessage(`Consolidated ${removed} redundant memories.`);
               toastr.info(
                 `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
@@ -453,6 +460,9 @@ async function onCharacterMessageRendered() {
               );
             }
           }
+          // Inject once after extraction (and any consolidation) - this is the
+          // one call per AI response turn where telemetry should be updated.
+          injectMemories(characterName, isFreshStart(), true);
           updateLongTermUI(characterName);
           saveSettingsDebounced();
           total += count;
@@ -499,6 +509,7 @@ async function onChatChanged() {
   extractionRunning = false;
   recapActive = false;
   sceneMessageBuffer = [];
+  sceneBufferLastIndex = -1;
   groupChatWarningShown = false;
 
   const settings = getSettings();
@@ -1321,6 +1332,7 @@ function bindSettingsUI() {
         await saveSceneHistory(history);
         // Reset the buffer - we just archived what was in it.
         sceneMessageBuffer = [];
+        sceneBufferLastIndex = -1;
         injectSceneHistory();
         updateScenesUI();
         updateTokenDisplay();
@@ -1564,6 +1576,7 @@ function bindSettingsUI() {
               if (history.length > max) history.splice(0, history.length - max);
               await saveSceneHistory(history);
               sceneMessageBuffer = [];
+              sceneBufferLastIndex = -1;
             })
             .catch((err) => {
               console.error('[SmartMemory] Catch-up scene summary failed:', err);
@@ -1679,6 +1692,7 @@ function bindSettingsUI() {
     updateArcsUI();
     updateTokenDisplay();
     sceneMessageBuffer = [];
+    sceneBufferLastIndex = -1;
     setStatusMessage('Chat context cleared.');
   });
 
@@ -1729,6 +1743,7 @@ function bindSettingsUI() {
     updateArcsUI();
     updateTokenDisplay();
     sceneMessageBuffer = [];
+    sceneBufferLastIndex = -1;
     setStatusMessage('Fresh start complete.');
     toastr.success(`All memories cleared for ${nameLabel}.`, 'Smart Memory', {
       timeOut: 4000,

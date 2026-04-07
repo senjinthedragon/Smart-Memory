@@ -351,8 +351,10 @@ export function formatSessionMemories(memories) {
 /**
  * Injects session memories into the prompt via setExtensionPrompt.
  * Clears the slot if session memory is disabled or no memories exist.
+ * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
+ *   Only pass true from the post-extraction path (one real AI response turn).
  */
-export function injectSessionMemories() {
+export function injectSessionMemories(updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
@@ -382,17 +384,20 @@ export function injectSessionMemories() {
     else break;
   }
 
-  const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
-  const updated = memories.map((m) => {
-    const key = `${m.type}|${m.content}`;
-    if (!recalled.has(key)) return m;
-    return {
-      ...m,
-      retrieval_count: (m.retrieval_count ?? 0) + 1,
-      last_confirmed_ts: Date.now(),
-    };
-  });
-  void saveSessionMemories(updated);
+  // Only update retrieval telemetry when called from a real AI response turn.
+  if (updateTelemetry) {
+    const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
+    const updated = memories.map((m) => {
+      const key = `${m.type}|${m.content}`;
+      if (!recalled.has(key)) return m;
+      return {
+        ...m,
+        retrieval_count: (m.retrieval_count ?? 0) + 1,
+        last_confirmed_ts: Date.now(),
+      };
+    });
+    void saveSessionMemories(updated);
+  }
 
   const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
   const sessionBlock = template.replace('{{session}}', formatSessionMemories(trimmed));

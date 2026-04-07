@@ -307,10 +307,13 @@ export function reconcileTypeEntries(base, promoted, threshold, timelinePool = [
 
     let inferredTs = mem.ts;
     let bestScore = 0;
+    // Require a minimum similarity before accepting an inferred timestamp - a
+    // near-random match (score ~0.05) is not a meaningful source for the timeline.
+    const MIN_TS_INFERENCE_SCORE = 0.3;
     for (const src of sourcePool) {
       if (src.type !== mem.type) continue;
       const score = jaccardSimilarity(mem.content, src.content);
-      if (score > bestScore && Number.isFinite(src.ts)) {
+      if (score > bestScore && score >= MIN_TS_INFERENCE_SCORE && Number.isFinite(src.ts)) {
         bestScore = score;
         inferredTs = src.ts;
       }

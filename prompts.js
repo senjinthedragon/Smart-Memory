@@ -182,7 +182,9 @@ If nothing new, output exactly: NONE`
 // ---- Scene break detection ----------------------------------------------
 
 /** Simple yes/no prompt - expects "YES" or "NO" as the entire response. */
-export const SCENE_DETECT_PROMPT = `Did the following story text contain a scene break - meaning a time skip, location change, or clear transition to a new scene? Answer with YES or NO only, nothing else.
+export const SCENE_DETECT_PROMPT =
+  NO_ACTION_PREAMBLE +
+  `Did the following story text contain a scene break - meaning a time skip, location change, or clear transition to a new scene? Answer with YES or NO only, nothing else.
 
 TEXT:
 {{text}}`;
@@ -268,8 +270,8 @@ Does the latest response contradict or conflict with any established fact? List 
  */
 export function buildLongtermConsolidationPrompt(type, baseText, batchText) {
   const baseSection = baseText
-    ? `CONSOLIDATED BASE (read-only - do NOT modify or reproduce these):\n${baseText}\n\n`
-    : `CONSOLIDATED BASE: (empty - no existing entries for this type)\n\n`;
+    ? `EXISTING BASE ENTRIES (context only - do not output these unless updating one):\n${baseText}\n\n`
+    : `EXISTING BASE ENTRIES: (none yet for this type)\n\n`;
 
   return (
     NO_ACTION_PREAMBLE +
@@ -279,21 +281,25 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-STATUS UPDATE TASK:
-Rewrite the CONSOLIDATED BASE using the NEW ENTRIES.
+For each new entry, decide:
+1. DUPLICATE - already fully captured by an existing base entry. Drop it entirely.
+2. UPDATE - adds detail to an existing base entry. Output the improved version of that base entry.
+3. NEW - not covered by any base entry. Keep it as-is.
 
 Rules:
 - NEW information OVERRIDES outdated or conflicting base information.
 - SYNTHESIZE overlapping details into one concise line instead of appending strings.
-- DELETE redundancy and obsolete wording when producing revised entries.
-- Never invent information not present in base or new entries.
+- Never invent information not present in the base or new entries.
 - Keep entries compact and precise.
-- Use the [${type}] type tag for all output entries.
+
+For each output entry, include an importance score (1-3) and expiration:
+- importance 1: minor flavor detail, 2: useful context, 3: critical trait or major event
+- expiration: scene (fades after scene), session (fades after chat), permanent (durable fact)
 
 Output ONLY the entries to ADD or UPDATE in the base, one per line:
-[${type}] The memory entry here.
+[${type}:2:permanent] The memory entry here.
 
-FINAL RULE: Output ONLY [${type}] lines. No headers. No intros. No explanations.
+FINAL RULE: Output ONLY [${type}:score:expiration] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
   );
 }
@@ -314,8 +320,8 @@ If all new entries are duplicates and nothing needs to be added, output exactly:
  */
 export function buildSessionConsolidationPrompt(type, baseText, batchText) {
   const baseSection = baseText
-    ? `CONSOLIDATED BASE (read-only - do NOT modify or reproduce these):\n${baseText}\n\n`
-    : `CONSOLIDATED BASE: (empty - no existing entries for this type)\n\n`;
+    ? `EXISTING BASE ENTRIES (context only - do not output these unless updating one):\n${baseText}\n\n`
+    : `EXISTING BASE ENTRIES: (none yet for this type)\n\n`;
 
   return (
     NO_ACTION_PREAMBLE +
@@ -325,21 +331,25 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-STATUS UPDATE TASK:
-Rewrite the CONSOLIDATED BASE using the NEW ENTRIES.
+For each new entry, decide:
+1. DUPLICATE - already fully captured by an existing base entry. Drop it entirely.
+2. UPDATE - adds detail to an existing base entry. Output the improved version of that base entry.
+3. NEW - not covered by any base entry. Keep it as-is.
 
 Rules:
 - NEW information OVERRIDES outdated or conflicting base information.
 - SYNTHESIZE overlapping details into one concise line instead of appending strings.
-- DELETE redundancy and obsolete wording when producing revised entries.
-- Never invent information not present in base or new entries.
+- Never invent information not present in the base or new entries.
 - Keep entries compact and precise.
-- Use the [${type}] type tag for all output entries.
+
+For each output entry, include an importance score (1-3) and expiration:
+- importance 1: passing detail, 2: useful session context, 3: pivotal moment or key revelation
+- expiration: scene (fades after scene transition), session (relevant for this chat only), permanent (durable across sessions)
 
 Output ONLY the entries to ADD or UPDATE in the base, one per line:
-[${type}] The session memory entry here.
+[${type}:2:session] The session memory entry here.
 
-FINAL RULE: Output ONLY [${type}] lines. No headers. No intros. No explanations.
+FINAL RULE: Output ONLY [${type}:score:expiration] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
   );
 }
