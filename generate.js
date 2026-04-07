@@ -100,7 +100,12 @@ async function generateOllama(prompt, priorMessages = [], responseLength = 600) 
       model,
       messages,
       stream: false,
-      options: { num_predict: responseLength > 0 ? responseLength : -1 },
+      options: {
+        num_predict: responseLength > 0 ? responseLength : -1,
+        // Cover both Llama-3.1 (<|eot_id|>) and ChatML (<|im_end|>) end-of-turn
+        // tokens explicitly. Listing both is harmless for models that only use one.
+        stop: ['<|eot_id|>', '<|im_end|>'],
+      },
     }),
   });
   if (!response.ok) throw new Error(`Ollama responded with ${response.status}`);
