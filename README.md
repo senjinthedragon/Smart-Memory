@@ -186,17 +186,17 @@ Options: **Main API** or **WebLLM Extension**.
 
 All manual operations are in the **Configuration** section at the top of the panel, or inside their respective tier sections.
 
-### Catch Up - Process the Full Chat
+### Memorize Chat
 
-Processes the entire chat history in chunks, running every enabled extraction tier across the backlog. Use this when you load an older chat that Smart Memory hasn't seen yet, or when you want to build up a character's long-term memory from previous sessions.
+Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, and summary. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
 
 A **Cancel** button appears during processing. Cancelling stops the loop cleanly between chunks - partial results are saved.
 
-To build long-term memory from multiple older chats, simply open each one and run Catch Up. Memories accumulate and deduplicate automatically. Skip any chats you'd rather not include.
+To build long-term memory from multiple older chats, simply open each one and run Memorize Chat. Memories accumulate and deduplicate automatically. Skip any chats you'd rather not include.
 
-### Clear Chat Context
+### Forget This Chat
 
-Clears Smart Memory's state for the current chat - summary, session memories, scene history, and story arcs. Long-term memories are not touched. Useful before a Catch Up run to re-derive everything cleanly from scratch.
+Clears all Smart Memory context for the current chat - summary, session memories, scene history, and story arcs. Long-term memories are not touched. Useful before a Memorize Chat run to re-derive everything cleanly from scratch.
 
 ### Fresh Start
 
