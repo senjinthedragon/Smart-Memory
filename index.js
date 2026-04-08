@@ -193,6 +193,10 @@ let catchUpCancelled = false;
 // session so it doesn't fire on every message in a group.
 let groupChatWarningShown = false;
 
+// Last observed chat length, used to distinguish new messages from swipes.
+// CHARACTER_MESSAGE_RENDERED fires on both; swipes do not grow the chat array.
+let lastKnownChatLength = 0;
+
 /**
  * Returns a stable extraction window that excludes the currently swipable
  * assistant reply (the trailing non-user message in 1:1 chats). This prevents
@@ -273,8 +277,15 @@ function clearAllInjections() {
  * Fires after each AI message is rendered (registered with makeLast so Smart
  * Memory runs after all other extensions have processed the message).
  *
- * Orchestration order:
- *   1. Clear recap if one was active (it served its purpose after one response).
+ * Swipe detection: CHARACTER_MESSAGE_RENDERED fires on swipes (alternative
+ * generations) as well as on new messages. A swipe replaces the last message
+ * in-place without growing the chat array, so we compare the current chat
+ * length against lastKnownChatLength to detect and skip swipes entirely.
+ * Only new messages (chat grew) trigger compaction, scene detection, and
+ * extraction. lastActive is updated on swipes so the recap threshold stays
+ * accurate during long swipe sessions.
+ *
+ * Orchestration order (new messages only):
  *   1. Check for compaction threshold and run if needed (async, non-blocking).
  *   2. Check for scene break in the latest message (async, non-blocking).
  *   3. Every N messages: batch extraction for session + long-term + arcs.
@@ -310,6 +321,19 @@ async function onCharacterMessageRendered() {
         { timeOut: 6000, positionClass: 'toast-bottom-right' },
       );
     }
+    return;
+  }
+
+  // Swipe detection: CHARACTER_MESSAGE_RENDERED fires on swipes too, but a swipe
+  // replaces the last message in-place - the chat array does not grow. Only
+  // process when the chat actually advanced (new message added by a real turn).
+  const currentLength = context.chat.length;
+  const isSwipe = currentLength <= lastKnownChatLength;
+  lastKnownChatLength = currentLength;
+  if (isSwipe) {
+    // Still update lastActive so the recap threshold stays accurate during
+    // a long swipe session where the user is clearly present.
+    updateLastActive();
     return;
   }
 
@@ -510,6 +534,7 @@ async function onChatChanged() {
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
   groupChatWarningShown = false;
+  lastKnownChatLength = 0;
 
   const settings = getSettings();
   if (!settings.enabled) return;
