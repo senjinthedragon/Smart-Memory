@@ -1680,9 +1680,10 @@ function bindSettingsUI() {
           });
         }
 
-        // Update progress after the chunk completes so the percentage reflects
-        // work actually done, not work about to start.
+        // Update progress and token display after each chunk so the user can
+        // see memories accumulating in real time rather than only at the end.
         setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
+        updateTokenDisplay();
       }
 
       if (!catchUpCancelled) {
