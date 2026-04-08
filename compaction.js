@@ -84,9 +84,17 @@ export async function shouldCompact() {
  */
 function formatSummary(raw) {
   let result = raw.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim();
-  const match = result.match(/<summary>([\s\S]*?)<\/summary>/i);
-  if (match) {
-    result = match[1].trim();
+  // Try a complete <summary>...</summary> block first.
+  const fullMatch = result.match(/<summary>([\s\S]*?)<\/summary>/i);
+  if (fullMatch) {
+    return fullMatch[1].trim();
+  }
+  // If the closing tag is missing the model was cut off mid-response.
+  // Extract whatever content appeared after the opening tag rather than
+  // falling back to the raw string which still contains the opening tag.
+  const partialMatch = result.match(/<summary>([\s\S]*)/i);
+  if (partialMatch) {
+    return partialMatch[1].trim();
   }
   return result;
 }

@@ -112,7 +112,7 @@ const defaultSettings = {
   compaction_enabled: true,
   compaction_threshold: 80,
   compaction_keep_recent: 10,
-  compaction_response_length: 1500,
+  compaction_response_length: 2000,
   compaction_position: extension_prompt_types.IN_PROMPT,
   compaction_depth: 0,
   compaction_role: extension_prompt_roles.SYSTEM,
@@ -885,6 +885,12 @@ function loadSettings() {
     if (extension_settings[MODULE_NAME][key] === migration.from) {
       extension_settings[MODULE_NAME][key] = migration.to;
     }
+  }
+
+  // Migration: raise compaction response length from 1500 to 2000.
+  // 1500 tokens was too tight for a 9-section summary, causing truncated output.
+  if (extension_settings[MODULE_NAME].compaction_response_length === 1500) {
+    extension_settings[MODULE_NAME].compaction_response_length = 2000;
   }
 }
 
