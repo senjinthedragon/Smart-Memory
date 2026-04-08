@@ -1680,6 +1680,18 @@ function bindSettingsUI() {
           });
         }
 
+        // Re-inject after each chunk so the token display reflects what is
+        // actually stored, not just what was injected before catch-up started.
+        if (settings.longterm_enabled && characterName) {
+          injectMemories(characterName, isFreshStart());
+        }
+        if (settings.session_enabled) {
+          injectSessionMemories();
+        }
+        if (settings.arcs_enabled) {
+          injectArcs();
+        }
+
         // Update progress and token display after each chunk so the user can
         // see memories accumulating in real time rather than only at the end.
         setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
