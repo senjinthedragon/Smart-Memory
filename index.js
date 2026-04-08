@@ -1648,6 +1648,7 @@ function bindSettingsUI() {
         );
 
         if (settings.longterm_enabled && characterName) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - extracting long-term)`);
           await extractAndStoreMemories(characterName, chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
           });
@@ -1656,20 +1657,24 @@ function bindSettingsUI() {
           // with many thematically similar exchanges floods the unprocessed queue
           // with variants that all slip under the per-entry Jaccard threshold.
           if (settings.longterm_consolidate) {
+            setStatusMessage(`Catching up... (${i}/${total} messages - consolidating long-term)`);
             await consolidateMemories(characterName).catch((err) => {
               console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
             });
           }
         }
         if (settings.session_enabled) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - extracting session)`);
           await extractSessionMemories(chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up session extraction error (chunk):', err);
           });
+          setStatusMessage(`Catching up... (${i}/${total} messages - consolidating session)`);
           await consolidateSessionMemories().catch((err) => {
             console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
           });
         }
         if (settings.arcs_enabled) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - extracting arcs)`);
           await extractArcs(chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
