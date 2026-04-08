@@ -96,7 +96,10 @@ function verifyLongtermCandidates(candidates, existing) {
       );
       const overlap = [...a].filter((w) => b.has(w)).length;
       const union = new Set([...a, ...b]).size || 1;
-      return overlap / union > 0.85;
+      // Lowered from 0.85 to 0.65 - catches more semantic near-duplicates that
+      // share the same topic but vary in phrasing. False positives (dropping a
+      // genuinely new entry) are less harmful than letting 10 variants accumulate.
+      return overlap / union > 0.65;
     });
     return !isNearDuplicate;
   });

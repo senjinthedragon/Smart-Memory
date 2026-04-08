@@ -291,15 +291,16 @@ ${batchText}
 
 ---
 For each new entry, decide:
-1. DUPLICATE - already fully captured by an existing base entry. Drop it entirely.
-2. UPDATE - adds detail to an existing base entry. Output the improved version of that base entry.
-3. NEW - not covered by any base entry. Keep it as-is.
+1. DUPLICATE - already fully captured by an existing base entry, or describes the same subject from a different angle with no net new information. Drop it entirely.
+2. UPDATE - describes the same subject as an existing base entry but adds genuinely new detail. Output one merged entry that combines both into a single concise line - do NOT keep the old version alongside the new one.
+3. NEW - describes a subject not covered by any base entry at all. Keep it as-is.
 
 Rules:
+- SAME SUBJECT = same person, relationship, or fact, even if the wording differs. Two entries about "Finn and Senjin's bond" are the same subject regardless of which aspect they emphasize.
+- When merging, fold all unique details from both entries into one compact line. Do not append - rewrite as a single unified statement.
 - NEW information OVERRIDES outdated or conflicting base information.
-- SYNTHESIZE overlapping details into one concise line instead of appending strings.
 - Never invent information not present in the base or new entries.
-- Keep entries compact and precise.
+- Keep entries compact and precise - one line per distinct subject.
 
 For each output entry, include an importance score (1-3) and expiration:
 - importance 1: minor flavor detail, 2: useful context, 3: critical trait or major event
@@ -341,15 +342,16 @@ ${batchText}
 
 ---
 For each new entry, decide:
-1. DUPLICATE - already fully captured by an existing base entry. Drop it entirely.
-2. UPDATE - adds detail to an existing base entry. Output the improved version of that base entry.
-3. NEW - not covered by any base entry. Keep it as-is.
+1. DUPLICATE - already fully captured by an existing base entry, or describes the same subject from a different angle with no net new information. Drop it entirely.
+2. UPDATE - describes the same subject as an existing base entry but adds genuinely new detail. Output one merged entry that combines both into a single concise line - do NOT keep the old version alongside the new one.
+3. NEW - describes a subject not covered by any base entry at all. Keep it as-is.
 
 Rules:
+- SAME SUBJECT = same scene, event, or detail, even if the wording differs.
+- When merging, fold all unique details from both entries into one compact line. Do not append - rewrite as a single unified statement.
 - NEW information OVERRIDES outdated or conflicting base information.
-- SYNTHESIZE overlapping details into one concise line instead of appending strings.
 - Never invent information not present in the base or new entries.
-- Keep entries compact and precise.
+- Keep entries compact and precise - one line per distinct subject.
 
 For each output entry, include an importance score (1-3) and expiration:
 - importance 1: passing detail, 2: useful session context, 3: pivotal moment or key revelation
