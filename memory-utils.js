@@ -277,7 +277,7 @@ export function buildCurrentSceneStateBlock(memories) {
   if (revelation?.content) lines.push(`- Newly revealed context: ${revelation.content}`);
 
   if (lines.length === 0) return '';
-  return `[Current scene state:\n${lines.join('\n')}]`;
+  return `Current scene state:\n${lines.join('\n')}`;
 }
 
 /**

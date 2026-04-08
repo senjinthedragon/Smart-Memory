@@ -116,7 +116,7 @@ const defaultSettings = {
   compaction_position: extension_prompt_types.IN_PROMPT,
   compaction_depth: 0,
   compaction_role: extension_prompt_roles.SYSTEM,
-  compaction_template: '[Story so far:\n{{summary}}]',
+  compaction_template: 'Story so far:\n{{summary}}',
 
   // Long-term
   longterm_enabled: true,
@@ -132,7 +132,7 @@ const defaultSettings = {
   longterm_position: extension_prompt_types.IN_PROMPT,
   longterm_depth: 2,
   longterm_role: extension_prompt_roles.SYSTEM,
-  longterm_template: '[Memories from previous conversations:\n{{memories}}]',
+  longterm_template: 'Memories from previous conversations:\n{{memories}}',
 
   // Session memory
   session_enabled: true,
@@ -144,7 +144,7 @@ const defaultSettings = {
   session_position: extension_prompt_types.IN_CHAT,
   session_depth: 3,
   session_role: extension_prompt_roles.SYSTEM,
-  session_template: '[Details from this session:\n{{session}}]',
+  session_template: 'Details from this session:\n{{session}}',
 
   // Scene detection
   scene_enabled: true,
@@ -836,6 +836,29 @@ function loadSettings() {
   for (const [key, value] of Object.entries(defaultSettings)) {
     if (extension_settings[MODULE_NAME][key] === undefined) {
       extension_settings[MODULE_NAME][key] = value;
+    }
+  }
+
+  // Migration: replace old bracket-wrapped template defaults with plain-text equivalents.
+  // Only affects users who never customized these fields (exact match on the old default).
+  // Bracket notation in injections bleeds into RP output - the model mimics it.
+  const TEMPLATE_MIGRATIONS = {
+    compaction_template: {
+      from: '[Story so far:\n{{summary}}]',
+      to: 'Story so far:\n{{summary}}',
+    },
+    longterm_template: {
+      from: '[Memories from previous conversations:\n{{memories}}]',
+      to: 'Memories from previous conversations:\n{{memories}}',
+    },
+    session_template: {
+      from: '[Details from this session:\n{{session}}]',
+      to: 'Details from this session:\n{{session}}',
+    },
+  };
+  for (const [key, migration] of Object.entries(TEMPLATE_MIGRATIONS)) {
+    if (extension_settings[MODULE_NAME][key] === migration.from) {
+      extension_settings[MODULE_NAME][key] = migration.to;
     }
   }
 }

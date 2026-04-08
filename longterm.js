@@ -475,7 +475,11 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
     selectProtectedMemories(memories, ['relationship', 'preference', 'fact']),
   );
   const trimmed = prioritizeMemories(memories);
-  while (trimmed.length > 1 && estimateTokens(formatMemoriesForPrompt(trimmed)) > budget) {
+  // Use the injection format for budget estimation so the check matches what is actually injected.
+  while (
+    trimmed.length > 1 &&
+    estimateTokens(trimmed.map((m) => `- ${m.content}`).join('\n')) > budget
+  ) {
     let idx = -1;
     for (let i = trimmed.length - 1; i >= 0; i--) {
       if (!protectedSet.has(trimmed[i])) {
@@ -507,9 +511,13 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
     saveCharacterMemories(characterName, updated);
   }
 
-  const memoryText = formatMemoriesForPrompt(trimmed);
+  // Format for injection: plain bullet list without [type] tags.
+  // The [type] format is kept in formatMemoriesForPrompt for the extraction/consolidation
+  // pipeline - those prompts need it. The RP model does not, and bracket notation
+  // bleeds into story output when the model sees it repeatedly in context.
+  const memoryText = trimmed.map((m) => `- ${m.content}`).join('\n');
   const template =
-    settings.longterm_template || '[Memories from previous conversations:\n{{memories}}]';
+    settings.longterm_template || 'Memories from previous conversations:\n{{memories}}';
   const content = template.replace('{{memories}}', memoryText);
 
   setExtensionPrompt(

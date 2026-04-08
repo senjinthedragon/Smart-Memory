@@ -338,14 +338,17 @@ export async function consolidateSessionMemories() {
 // ---- Injection ----------------------------------------------------------
 
 /**
- * Formats the session memory array as [type] content lines.
+ * Formats the session memory array as plain bullet lines for RP prompt injection.
+ * The [type] format is kept internally for the extraction/consolidation pipeline
+ * (see the inline formatters in extractSessionMemories and consolidateSessionMemories).
+ * Using plain bullets here prevents bracket notation from bleeding into story output.
  * @param {Array<{type: string, content: string}>} memories
  * @returns {string}
  */
 export function formatSessionMemories(memories) {
   if (!memories || memories.length === 0) return '';
   return sortByTimeline(memories)
-    .map((m) => `[${m.type}] ${m.content}`)
+    .map((m) => `- ${m.content}`)
     .join('\n');
 }
 
@@ -400,7 +403,7 @@ export function injectSessionMemories(updateTelemetry = false) {
     void saveSessionMemories(updated);
   }
 
-  const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
+  const template = settings.session_template ?? 'Details from this session:\n{{session}}';
   const sessionBlock = template.replace('{{session}}', formatSessionMemories(trimmed));
   const sceneStateBlock = buildCurrentSceneStateBlock(trimmed);
   const content = sceneStateBlock ? `${sceneStateBlock}\n${sessionBlock}` : sessionBlock;

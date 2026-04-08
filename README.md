@@ -125,7 +125,7 @@ Options: **Main API** or **WebLLM Extension**.
 | Enable auto-summarization | On | Summarize automatically at threshold |
 | Context threshold | 80% | Summarize when context reaches this % of the model's limit |
 | Summary response length | 1500 tokens | Length budget for the summary - also acts as the injection cap |
-| Injection template | `[Story so far:\n{{summary}}]` | Wrapper text around the summary |
+| Injection template | `Story so far:\n{{summary}}` | Wrapper text around the summary |
 | Injection position | In-prompt | Where in the prompt the summary appears |
 
 ### Long-term Memory
@@ -133,13 +133,12 @@ Options: **Main API** or **WebLLM Extension**.
 | Setting | Default | Description |
 | --- | --- | --- |
 | Enable long-term memory | On | Extract and inject persistent character facts |
-| Carry over to new chats | On | Inject memories when starting a new chat with the same character |
 | Auto-consolidate | On | Periodically merge near-duplicate entries |
 | Fresh start (per-chat) | Off | Suppress memory injection for this specific chat |
 | Extract every N messages | 3 | How often automatic extraction runs |
 | Max memories per character | 25 | Hard cap - oldest entries dropped when exceeded |
 | Injection token budget | 500 | Oldest memories dropped first if total would exceed this |
-| Injection template | `[Memories from previous conversations:\n{{memories}}]` | Wrapper text |
+| Injection template | `Memories from previous conversations:\n{{memories}}` | Wrapper text |
 | Injection position | In-prompt | Where in the prompt memories appear |
 
 ### Session Memory
@@ -150,7 +149,7 @@ Options: **Main API** or **WebLLM Extension**.
 | Extract every N messages | 3 | How often automatic extraction runs |
 | Max session memories | 30 | Consider lowering to ~15 on limited VRAM |
 | Injection token budget | 400 | Oldest memories dropped first if exceeded |
-| Injection template | `[Details from this session:\n{{session}}]` | Wrapper text |
+| Injection template | `Details from this session:\n{{session}}` | Wrapper text |
 | Injection position | In-chat @ depth 3 | Sits just above ST's default vector depth |
 
 ### Scene Detection
