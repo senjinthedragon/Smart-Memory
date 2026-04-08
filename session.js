@@ -258,9 +258,12 @@ const DEFAULT_SESSION_CONSOLIDATION_THRESHOLD = 3;
  * Fires per-type independently - a burst of new [scene] entries does not
  * trigger [detail] consolidation.
  *
+ * @param {boolean} [force=false] - If true, consolidate all types regardless of threshold.
+ *   Used by the catch-up final pass to flush any entries that never accumulated enough
+ *   to hit the threshold during per-chunk consolidation.
  * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
  */
-export async function consolidateSessionMemories() {
+export async function consolidateSessionMemories(force = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) return 0;
   const threshold = Math.max(
@@ -276,7 +279,8 @@ export async function consolidateSessionMemories() {
     const base = memories.filter((m) => m.type === type && m.consolidated);
     const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
-    if (unprocessed.length < threshold) continue;
+    if (!force && unprocessed.length < threshold) continue;
+    if (unprocessed.length === 0) continue;
 
     try {
       const baseText = base.map((m) => `[${m.type}] ${m.content}`).join('\n');

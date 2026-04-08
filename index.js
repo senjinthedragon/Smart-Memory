@@ -1651,10 +1651,22 @@ function bindSettingsUI() {
           await extractAndStoreMemories(characterName, chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
           });
+          // Consolidate after each chunk so near-duplicates are collapsed before
+          // the next chunk can add more similar entries. Without this, a full chat
+          // with many thematically similar exchanges floods the unprocessed queue
+          // with variants that all slip under the per-entry Jaccard threshold.
+          if (settings.longterm_consolidate) {
+            await consolidateMemories(characterName).catch((err) => {
+              console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
+            });
+          }
         }
         if (settings.session_enabled) {
           await extractSessionMemories(chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up session extraction error (chunk):', err);
+          });
+          await consolidateSessionMemories().catch((err) => {
+            console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
           });
         }
         if (settings.arcs_enabled) {
@@ -1689,17 +1701,19 @@ function bindSettingsUI() {
             });
         }
 
-        // Consolidate after all chunks so the model sees the full merged set.
+        // Final consolidation pass for any entries that didn't accumulate enough
+        // to hit the per-chunk threshold (e.g. a type that only got 1-2 new entries
+        // across the whole chat). Forces consolidation regardless of threshold.
         if (settings.longterm_enabled && settings.longterm_consolidate && characterName) {
           setStatusMessage('Consolidating long-term memories...');
-          await consolidateMemories(characterName).catch((err) => {
-            console.error('[SmartMemory] Catch-up consolidation failed:', err);
+          await consolidateMemories(characterName, true).catch((err) => {
+            console.error('[SmartMemory] Catch-up final consolidation failed:', err);
           });
         }
         if (settings.session_enabled) {
           setStatusMessage('Consolidating session memories...');
-          await consolidateSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Catch-up session consolidation failed:', err);
+          await consolidateSessionMemories(true).catch((err) => {
+            console.error('[SmartMemory] Catch-up final session consolidation failed:', err);
           });
         }
 

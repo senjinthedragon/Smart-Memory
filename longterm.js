@@ -365,9 +365,12 @@ function getConsolidationThresholds(settings) {
  * does not trigger [relationship] consolidation.
  *
  * @param {string} characterName
+ * @param {boolean} [force=false] - If true, consolidate all types regardless of threshold.
+ *   Used by the catch-up final pass to flush any entries that never accumulated enough
+ *   to hit the threshold during per-chunk consolidation.
  * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
  */
-export async function consolidateMemories(characterName) {
+export async function consolidateMemories(characterName, force = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.longterm_consolidate || !characterName) return 0;
   const thresholds = getConsolidationThresholds(settings);
@@ -381,7 +384,8 @@ export async function consolidateMemories(characterName) {
     const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
     const threshold = thresholds[type] ?? DEFAULT_CONSOLIDATION_THRESHOLDS.fact;
-    if (unprocessed.length < threshold) continue;
+    if (!force && unprocessed.length < threshold) continue;
+    if (unprocessed.length === 0) continue;
 
     try {
       const baseText = formatMemoriesForPrompt(base);
