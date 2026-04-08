@@ -1705,6 +1705,7 @@ function bindSettingsUI() {
             .catch((err) => {
               console.error('[SmartMemory] Catch-up scene summary failed:', err);
             });
+          updateTokenDisplay();
         }
 
         // Final consolidation pass for any entries that didn't accumulate enough
@@ -1715,12 +1716,14 @@ function bindSettingsUI() {
           await consolidateMemories(characterName, true).catch((err) => {
             console.error('[SmartMemory] Catch-up final consolidation failed:', err);
           });
+          updateTokenDisplay();
         }
         if (settings.session_enabled) {
           setStatusMessage('Consolidating session memories...');
           await consolidateSessionMemories(true).catch((err) => {
             console.error('[SmartMemory] Catch-up final session consolidation failed:', err);
           });
+          updateTokenDisplay();
         }
 
         // Short-term compaction runs once at the end - it uses the real token
@@ -1737,6 +1740,7 @@ function bindSettingsUI() {
             .catch((err) => {
               console.error('[SmartMemory] Catch-up compaction failed:', err);
             });
+          updateTokenDisplay();
         }
       }
 
