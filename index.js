@@ -120,7 +120,6 @@ const defaultSettings = {
 
   // Long-term
   longterm_enabled: true,
-  longterm_carry_over: true,
   longterm_consolidate: true,
   longterm_consolidation_threshold_fact: 4,
   longterm_consolidation_threshold_relationship: 3,
@@ -528,11 +527,7 @@ async function onChatChanged() {
   const summary = loadAndInjectSummary();
   updateShortTermUI(summary);
 
-  if (settings.longterm_carry_over) {
-    injectMemories(characterName, freshStart);
-  } else {
-    injectMemories(null, true);
-  }
+  injectMemories(characterName, freshStart);
 
   injectSessionMemories();
   injectSceneHistory();
@@ -1082,13 +1077,6 @@ function bindSettingsUI() {
       getSettings().longterm_enabled = $(this).prop('checked');
       saveSettingsDebounced();
       injectMemories(getCurrentCharacterName(), isFreshStart());
-    });
-
-  $('#sm_longterm_carry_over')
-    .prop('checked', s.longterm_carry_over)
-    .on('change', function () {
-      getSettings().longterm_carry_over = $(this).prop('checked');
-      saveSettingsDebounced();
     });
 
   $('#sm_longterm_consolidate')
