@@ -87,6 +87,7 @@ import {
   loadSceneHistory,
   saveSceneHistory,
   clearSceneHistory,
+  detectSceneBreakHeuristic,
 } from './scenes.js';
 import { extractArcs, injectArcs, loadArcs, clearArcs, deleteArc } from './arcs.js';
 import { checkContinuity } from './continuity.js';
@@ -1711,24 +1712,51 @@ function bindSettingsUI() {
       }
 
       if (!catchUpCancelled) {
-        // Scene: summarize the last chunk of the chat as a single scene entry.
-        // Capped to the last 40 messages - same as the manual Extract Scene button.
+        // Scene: walk through the full chat using heuristic break detection,
+        // summarizing each detected scene. AI detection is skipped here - it
+        // would cost one model call per message across potentially hundreds of
+        // messages. The heuristic is free and good enough for bulk processing.
         if (settings.scene_enabled) {
-          setStatusMessage('Summarizing scene history...');
-          await summarizeScene(context.chat.slice(-40))
-            .then(async (sceneSummary) => {
-              if (!sceneSummary) return;
-              const history = loadSceneHistory();
-              const max = settings.scene_max_history ?? 5;
-              history.push({ summary: sceneSummary, ts: Date.now() });
-              if (history.length > max) history.splice(0, history.length - max);
-              await saveSceneHistory(history);
-              sceneMessageBuffer = [];
-              sceneBufferLastIndex = -1;
-            })
-            .catch((err) => {
-              console.error('[SmartMemory] Catch-up scene summary failed:', err);
+          setStatusMessage('Detecting and summarizing scenes...');
+          const sceneHistory = loadSceneHistory();
+          const max = settings.scene_max_history ?? 5;
+          let sceneBuffer = [];
+
+          for (const msg of allMessages) {
+            if (catchUpCancelled) break;
+            sceneBuffer.push(msg);
+
+            const msgText = msg.mes ?? '';
+            if (detectSceneBreakHeuristic(msgText) && sceneBuffer.length > 1) {
+              const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
+                console.error('[SmartMemory] Catch-up scene summary failed:', err);
+                return null;
+              });
+              if (sceneSummary) {
+                sceneHistory.push({ summary: sceneSummary, ts: Date.now() });
+                if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
+              }
+              sceneBuffer = [];
+            }
+          }
+
+          // Summarize any remaining messages after the last break as the current scene.
+          if (!catchUpCancelled && sceneBuffer.length > 1) {
+            const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
+              console.error('[SmartMemory] Catch-up final scene summary failed:', err);
+              return null;
             });
+            if (sceneSummary) {
+              sceneHistory.push({ summary: sceneSummary, ts: Date.now() });
+              if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
+            }
+          }
+
+          await saveSceneHistory(sceneHistory).catch((err) => {
+            console.error('[SmartMemory] Catch-up scene history save failed:', err);
+          });
+          sceneMessageBuffer = [];
+          sceneBufferLastIndex = -1;
           updateTokenDisplay();
         }
 
