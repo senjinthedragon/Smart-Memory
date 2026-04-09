@@ -58,8 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a burst of similar events from flooding one type in a single pass.
 - Arc injection budget raised from 200 to 400 tokens so all tracked arcs fit
   without truncation.
-- All injection templates changed from bracket-wrapped (`[Story so far: ...]`)
-  to plain text to prevent bracket notation bleeding into RP output.
 - Long-term and session memory loading now auto-migrates additional metadata
   defaults for legacy entries without breaking existing stores.
 
