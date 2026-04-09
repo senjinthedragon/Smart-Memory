@@ -146,7 +146,7 @@ ollama pull nomic-embed-text
 | --- | --- | --- |
 | Enable auto-summarization | On | Summarize automatically at threshold |
 | Context threshold | 80% | Summarize when context reaches this % of the model's limit |
-| Summary response length | 1500 tokens | Length budget for the summary - also acts as the injection cap |
+| Summary response length | 2000 tokens | Length budget for the summary - also acts as the injection cap |
 | Injection template | `Story so far:\n{{summary}}` | Wrapper text around the summary |
 | Injection position | In-prompt | Where in the prompt the summary appears |
 
