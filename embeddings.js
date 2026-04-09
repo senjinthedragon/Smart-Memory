@@ -30,9 +30,10 @@
  * is not available, or the API call fails - so the system degrades gracefully
  * for users who have not installed an embedding model.
  *
- * getEmbedding        - fetches a vector for a text string, with in-session cache
+ * getEmbeddingBatch   - fetches vectors for multiple texts in one API call
+ * getEmbedding        - single-text wrapper around getEmbeddingBatch
  * cosineSimilarity    - computes cosine similarity between two vectors
- * semanticSimilarity  - high-level: returns scored similarity with Jaccard fallback
+ * batchVerify         - compares a list of candidates against existing vectors
  * clearEmbeddingCache - clears the in-session cache (call on chat change)
  */
 
@@ -41,25 +42,37 @@ import { MODULE_NAME } from './constants.js';
 
 // In-session embedding cache: normalized text -> vector.
 // Embeddings are deterministic for a given text + model, so caching within a
-// session avoids redundant API calls during the consolidation loop in catch-up
-// mode. The cache is cleared on chat change to keep memory usage bounded.
+// session avoids redundant API calls during catch-up mode. Cleared on chat change.
 const embeddingCache = new Map();
 
 /**
- * Fetches a normalized embedding vector for the given text from Ollama's
- * /api/embed endpoint. Returns null if embeddings are disabled, the API is
- * unreachable, or the response is malformed - callers must handle null.
- * @param {string} text
- * @returns {Promise<number[]|null>}
+ * Fetches embedding vectors for a list of texts in a single API call.
+ * Texts already in the cache are not re-fetched. Returns a Map from
+ * normalized text to vector. Any text that fails (bad response, network
+ * error) will be absent from the returned Map - callers fall back to Jaccard.
+ * @param {string[]} texts
+ * @returns {Promise<Map<string, number[]>>}
  */
-export async function getEmbedding(text) {
+export async function getEmbeddingBatch(texts) {
   const settings = extension_settings[MODULE_NAME];
-  if (!settings.embedding_enabled) return null;
+  const result = new Map();
 
-  const normalized = String(text || '').trim();
-  if (!normalized) return null;
+  if (!settings.embedding_enabled || !Array.isArray(texts) || texts.length === 0) return result;
 
-  if (embeddingCache.has(normalized)) return embeddingCache.get(normalized);
+  const normalized = texts.map((t) => String(t || '').trim()).filter(Boolean);
+  if (normalized.length === 0) return result;
+
+  // Populate from cache first - only fetch what is missing.
+  const uncached = [];
+  for (const text of normalized) {
+    if (embeddingCache.has(text)) {
+      result.set(text, embeddingCache.get(text));
+    } else {
+      uncached.push(text);
+    }
+  }
+
+  if (uncached.length === 0) return result;
 
   const baseUrl = (settings.embedding_url || 'http://localhost:11434').replace(/\/$/, '');
   const model = settings.embedding_model || 'nomic-embed-text';
@@ -70,25 +83,45 @@ export async function getEmbedding(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        input: [normalized],
+        input: uncached,
         model,
         keep_alive: keep ? -1 : undefined,
         truncate: true,
       }),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) return result;
 
     const data = await response.json();
-    const vector = data?.embeddings?.[0];
-    if (!Array.isArray(vector) || vector.length === 0) return null;
+    const embeddings = data?.embeddings;
+    if (!Array.isArray(embeddings)) return result;
 
-    embeddingCache.set(normalized, vector);
-    return vector;
+    for (let i = 0; i < uncached.length; i++) {
+      const vector = embeddings[i];
+      if (Array.isArray(vector) && vector.length > 0) {
+        embeddingCache.set(uncached[i], vector);
+        result.set(uncached[i], vector);
+      }
+    }
   } catch {
-    // Network error, model not found, Ollama not running - all silently fall back.
-    return null;
+    // Network error, model not found, Ollama not running - callers fall back to Jaccard.
   }
+
+  return result;
+}
+
+/**
+ * Fetches a normalized embedding vector for a single text.
+ * Convenience wrapper around getEmbeddingBatch for single-text callers.
+ * Returns null if embeddings are disabled or the API call fails.
+ * @param {string} text
+ * @returns {Promise<number[]|null>}
+ */
+export async function getEmbedding(text) {
+  const normalized = String(text || '').trim();
+  if (!normalized) return null;
+  const result = await getEmbeddingBatch([normalized]);
+  return result.get(normalized) ?? null;
 }
 
 /**
@@ -128,29 +161,78 @@ function jaccardSimilarity(a, b) {
 }
 
 /**
- * Returns a similarity score and a flag indicating which method was used.
+ * Batch-verifies a list of candidate memory texts against existing memory texts.
  *
- * When embeddings are available, uses cosine similarity on Ollama vectors.
- * Falls back to Jaccard if embeddings are disabled or the API call fails.
+ * All unique texts (candidates + existing) are embedded in a single API call,
+ * then cosine similarity is computed locally - one nomic call per verification
+ * pass instead of one call per candidate. Falls back to Jaccard per-pair when
+ * embeddings are unavailable.
  *
- * Callers use the `semantic` flag to pick the right threshold:
+ * Returns a Set of candidate texts that are NOT near-duplicates of any existing
+ * entry. Callers use this set to filter their candidate arrays.
+ *
+ * Thresholds:
  *   semantic=true  -> same-type: 0.82, cross-type: 0.88
  *   semantic=false -> same-type: 0.65, cross-type: 0.75
  *
- * The two calls are made sequentially (not in parallel) to avoid queuing
- * concurrent requests against Ollama on resource-constrained hardware.
- *
- * @param {string} textA
- * @param {string} textB
- * @returns {Promise<{score: number, semantic: boolean}>}
+ * @param {Array<{content: string, type: string}>} candidates
+ * @param {Array<{content: string, type: string}>} existing
+ * @returns {Promise<{passed: Set<string>, semantic: boolean}>}
+ *   passed  - Set of candidate content strings that are not near-duplicates
+ *   semantic - true if cosine was used, false if Jaccard fallback was used
  */
-export async function semanticSimilarity(textA, textB) {
-  const vecA = await getEmbedding(textA);
-  const vecB = await getEmbedding(textB);
-  if (vecA && vecB) {
-    return { score: cosineSimilarity(vecA, vecB), semantic: true };
+export async function batchVerify(candidates, existing) {
+  const passed = new Set();
+  if (!candidates || candidates.length === 0) return { passed, semantic: false };
+
+  // Collect all unique texts needed and embed them in one call.
+  const allTexts = [
+    ...candidates.map((m) =>
+      String(m.content || '')
+        .toLowerCase()
+        .trim(),
+    ),
+    ...existing.map((m) =>
+      String(m.content || '')
+        .toLowerCase()
+        .trim(),
+    ),
+  ];
+  const vectorMap = await getEmbeddingBatch(allTexts);
+  const useSemantic = vectorMap.size > 0;
+
+  const sameTypeThreshold = useSemantic ? 0.82 : 0.65;
+  const crossTypeThreshold = useSemantic ? 0.88 : 0.75;
+
+  for (const cand of candidates) {
+    const candText = String(cand.content || '')
+      .toLowerCase()
+      .trim();
+    const candVec = vectorMap.get(candText) ?? null;
+
+    let isDuplicate = false;
+    for (const ex of existing) {
+      const exText = String(ex.content || '')
+        .toLowerCase()
+        .trim();
+      let score;
+      if (useSemantic && candVec) {
+        const exVec = vectorMap.get(exText) ?? null;
+        score = cosineSimilarity(candVec, exVec);
+      } else {
+        score = jaccardSimilarity(candText, exText);
+      }
+      const threshold = ex.type === cand.type ? sameTypeThreshold : crossTypeThreshold;
+      if (score > threshold) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) passed.add(candText);
   }
-  return { score: jaccardSimilarity(textA, textB), semantic: false };
+
+  return { passed, semantic: useSemantic };
 }
 
 /**

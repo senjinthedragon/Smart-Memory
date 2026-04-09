@@ -57,9 +57,12 @@ import {
   sortByTimeline,
   trimByPriority,
 } from './memory-utils.js';
-import { semanticSimilarity } from './embeddings.js';
+import { batchVerify } from './embeddings.js';
 
-const MAX_NEW_LONGTERM_PER_EXTRACTION = 4;
+// Maximum new entries accepted per type per extraction pass.
+// Prevents one burst of similar events flooding a single type while still
+// allowing genuinely diverse new facts through.
+const MAX_NEW_PER_TYPE_PER_EXTRACTION = 2;
 
 function incomingPriorityScore(mem) {
   const typeBonus =
@@ -77,11 +80,9 @@ function incomingPriorityScore(mem) {
  * Filters a list of candidate memories against existing ones, removing
  * near-duplicates and entries that fail basic quality checks.
  *
- * Uses semantic (cosine) similarity when an embedding model is available,
- * falling back to Jaccard word-overlap when it is not. The `semantic` flag
- * returned by semanticSimilarity selects the appropriate threshold:
- *   semantic=true  -> same-type 0.82, cross-type 0.88
- *   semantic=false -> same-type 0.65, cross-type 0.75
+ * All texts are embedded in a single batch API call so nomic-embed-text only
+ * needs to load once per verification pass rather than once per candidate.
+ * Falls back to Jaccard word-overlap when embeddings are unavailable.
  *
  * @param {Array} candidates - Newly extracted memory objects to evaluate.
  * @param {Array} existing   - Currently stored memories to compare against.
@@ -92,35 +93,30 @@ async function verifyLongtermCandidates(candidates, existing) {
 
   const bannedPhrases = ['maybe', 'might be', 'possibly', 'i think', 'perhaps', 'seems like'];
   const seen = new Set();
-  const results = [];
 
-  for (const mem of candidates) {
+  // Apply quality filters before embedding - no point embedding entries we'll discard.
+  const filtered = candidates.filter((mem) => {
     const text = String(mem.content || '').trim();
-    if (text.length < 8 || text.length > 280) continue;
+    if (text.length < 8 || text.length > 280) return false;
     const lower = text.toLowerCase();
-    if (bannedPhrases.some((p) => lower.includes(p))) continue;
+    if (bannedPhrases.some((p) => lower.includes(p))) return false;
     const key = `${mem.type}|${lower}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) return false;
     seen.add(key);
+    return true;
+  });
 
-    let isNearDuplicate = false;
-    for (const ex of existing) {
-      const exText = String(ex.content || '');
-      // semanticSimilarity is sequential by design - see embeddings.js.
-      const { score, semantic } = await semanticSimilarity(lower, exText.toLowerCase());
-      const sameTypeThreshold = semantic ? 0.82 : 0.65;
-      const crossTypeThreshold = semantic ? 0.88 : 0.75;
-      const threshold = ex.type === mem.type ? sameTypeThreshold : crossTypeThreshold;
-      if (score > threshold) {
-        isNearDuplicate = true;
-        break;
-      }
-    }
+  if (filtered.length === 0) return [];
 
-    if (!isNearDuplicate) results.push(mem);
-  }
-
-  return results;
+  // Batch-embed all candidates and existing memories in one API call.
+  const { passed } = await batchVerify(filtered, existing);
+  return filtered.filter((m) =>
+    passed.has(
+      String(m.content || '')
+        .toLowerCase()
+        .trim(),
+    ),
+  );
 }
 
 // ---- Storage helpers ----------------------------------------------------
@@ -247,32 +243,59 @@ function parseExtractionOutput(text) {
  * @param {number} maxTotal - Hard cap on the total number of memories to keep.
  * @returns {Array} The merged memory array.
  */
+/**
+ * Merges new memories into the existing set with two layers of churn control:
+ *
+ * 1. Per-type extraction cap: at most MAX_NEW_PER_TYPE_PER_EXTRACTION entries
+ *    per type are accepted per pass. Prevents a burst of similar events from
+ *    flooding one type while the rest accumulate normally.
+ *
+ * 2. Per-type storage cap: derived from maxTotal / number of types (rounded up).
+ *    When a new entry would push a type over its cap, the lowest-priority entry
+ *    of that type is evicted first so the total stays balanced. Cloud users who
+ *    raise maxTotal get proportionally larger per-type budgets automatically.
+ *
+ * @param {Array} existing - Currently stored memories.
+ * @param {Array} incoming - Newly extracted memories (already deduped by verifyLongtermCandidates).
+ * @param {number} maxTotal - Hard cap on total stored memories (from settings).
+ * @returns {Array} The merged memory array.
+ */
 function mergeMemories(existing, incoming, maxTotal) {
   const merged = [...existing];
-  const uniqueIncoming = [];
 
-  for (const mem of incoming) {
-    const newWords = new Set(mem.content.toLowerCase().split(/\s+/));
-    const isDuplicate = merged.some((ex) => {
-      if (ex.type !== mem.type) return false;
-      const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
-      const intersection = [...newWords].filter((w) => exWords.has(w)).length;
-      const union = new Set([...newWords, ...exWords]).size;
-      return intersection / union > 0.7;
-    });
+  // Per-type cap derived from the overall max - equal split across all types.
+  // At 25 total -> 7 per type (ceil(25/4)), at 50 -> 13, at 100 -> 25.
+  const perTypeCap = Math.ceil(maxTotal / MEMORY_TYPES.length);
 
-    if (!isDuplicate) uniqueIncoming.push(mem);
+  // Track how many new entries we've accepted per type this pass.
+  const addedPerType = new Map();
+
+  // Sort incoming by priority so when we hit the per-type cap we keep the best.
+  const sorted = [...incoming].sort((a, b) => incomingPriorityScore(b) - incomingPriorityScore(a));
+
+  for (const mem of sorted) {
+    const typeAdded = addedPerType.get(mem.type) ?? 0;
+    if (typeAdded >= MAX_NEW_PER_TYPE_PER_EXTRACTION) continue;
+
+    // If this type is already at the per-type storage cap, evict the
+    // lowest-priority existing entry of this type before adding the new one.
+    const typeEntries = merged.filter((m) => m.type === mem.type);
+    if (typeEntries.length >= perTypeCap) {
+      const prioritized = prioritizeMemories(typeEntries);
+      // Last entry in prioritized is lowest priority - remove it from merged.
+      const toEvict = prioritized[prioritized.length - 1];
+      const evictIdx = merged.findIndex(
+        (m) => m.type === toEvict.type && m.content === toEvict.content,
+      );
+      if (evictIdx >= 0) merged.splice(evictIdx, 1);
+    }
+
+    merged.push(mem);
+    addedPerType.set(mem.type, typeAdded + 1);
   }
 
-  // Churn control: do not allow one extraction pass to crowd out large chunks
-  // of stable long-term history. Keep only the top-N incoming candidates.
-  uniqueIncoming
-    .sort((a, b) => incomingPriorityScore(b) - incomingPriorityScore(a))
-    .slice(0, MAX_NEW_LONGTERM_PER_EXTRACTION)
-    .forEach((mem) => merged.push(mem));
-
-  // When over the cap, drop the least valuable entries first:
-  // sort by expiration/importance/keyword recurrence/age, remove from the tail.
+  // Final safety trim to maxTotal in case types were already over cap before
+  // this pass (e.g. migrating from an older version without the cap).
   if (merged.length > maxTotal) {
     const prioritized = prioritizeMemories(merged);
     merged.splice(0, merged.length, ...prioritized);

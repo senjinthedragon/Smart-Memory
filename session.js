@@ -49,7 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
-import { semanticSimilarity } from './embeddings.js';
+import { batchVerify } from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
@@ -64,10 +64,9 @@ import {
  * Filters session memory candidates against existing entries, removing
  * near-duplicates and entries that fail basic quality checks.
  *
- * Uses semantic (cosine) similarity when an embedding model is available,
- * falling back to Jaccard word-overlap when it is not.
- *   semantic=true  -> same-type 0.82, cross-type 0.88
- *   semantic=false -> same-type 0.65, cross-type 0.75
+ * All texts are embedded in a single batch API call so nomic-embed-text only
+ * needs to load once per verification pass rather than once per candidate.
+ * Falls back to Jaccard word-overlap when embeddings are unavailable.
  *
  * @param {Array} candidates - Newly extracted session memory objects.
  * @param {Array} existing   - Currently stored session memories.
@@ -75,35 +74,27 @@ import {
  */
 async function verifySessionCandidates(candidates, existing) {
   if (!Array.isArray(candidates) || candidates.length === 0) return [];
+
   const seen = new Set();
-  const results = [];
-
-  for (const mem of candidates) {
+  const filtered = candidates.filter((mem) => {
     const text = String(mem.content || '').trim();
-    if (text.length < 5 || text.length > 240) continue;
+    if (text.length < 5 || text.length > 240) return false;
     const key = `${mem.type}|${text.toLowerCase()}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) return false;
     seen.add(key);
+    return true;
+  });
 
-    const lower = text.toLowerCase();
-    let isNearDuplicate = false;
+  if (filtered.length === 0) return [];
 
-    for (const ex of existing) {
-      const exText = String(ex.content || '');
-      const { score, semantic } = await semanticSimilarity(lower, exText.toLowerCase());
-      const sameTypeThreshold = semantic ? 0.82 : 0.65;
-      const crossTypeThreshold = semantic ? 0.88 : 0.75;
-      const threshold = ex.type === mem.type ? sameTypeThreshold : crossTypeThreshold;
-      if (score > threshold) {
-        isNearDuplicate = true;
-        break;
-      }
-    }
-
-    if (!isNearDuplicate) results.push(mem);
-  }
-
-  return results;
+  const { passed } = await batchVerify(filtered, existing);
+  return filtered.filter((m) =>
+    passed.has(
+      String(m.content || '')
+        .toLowerCase()
+        .trim(),
+    ),
+  );
 }
 
 // ---- Storage (chatMetadata) ---------------------------------------------
