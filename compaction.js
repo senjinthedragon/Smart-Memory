@@ -226,12 +226,21 @@ export function injectSummary(summary) {
     return;
   }
 
-  // Truncate to response length - the LLM shouldn't generate more than we inject,
-  // so response_length doubles as the injection cap for short-term memory.
+  // Truncate to token budget - response_length doubles as the injection cap.
+  // Use a proportional char slice based on the actual token estimate rather
+  // than the fixed budget*4 approximation, which breaks on multibyte content.
   const budget = settings.compaction_response_length ?? 2000;
   let summaryText = summary;
-  if (estimateTokens(summaryText) > budget) {
-    summaryText = summaryText.slice(0, budget * 4) + '... [truncated]';
+  const tokenCount = estimateTokens(summaryText);
+  if (tokenCount > budget) {
+    const ratio = budget / tokenCount;
+    const sliceAt = Math.floor(summaryText.length * ratio);
+    // Try to break at the last sentence boundary within the sliced region
+    // so we don't cut mid-word or mid-thought.
+    const boundary = summaryText.lastIndexOf('.', sliceAt);
+    summaryText =
+      boundary > sliceAt * 0.8 ? summaryText.slice(0, boundary + 1) : summaryText.slice(0, sliceAt);
+    summaryText += ' ... [truncated]';
   }
 
   const template = settings.compaction_template || 'Story so far:\n{{summary}}';

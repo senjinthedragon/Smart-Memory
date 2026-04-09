@@ -117,64 +117,25 @@ function parseArcOutput(text, existingArcs) {
     if (content.length > 5) toAdd.push({ content, ts: Date.now() });
   }
 
-  // Common English stop words that appear in almost any sentence and would
-  // produce false matches if included in the word-overlap calculation.
-  const STOP_WORDS = new Set([
-    'a',
-    'an',
-    'the',
-    'and',
-    'or',
-    'but',
-    'in',
-    'on',
-    'at',
-    'to',
-    'for',
-    'of',
-    'with',
-    'by',
-    'from',
-    'is',
-    'was',
-    'are',
-    'were',
-    'be',
-    'been',
-    'has',
-    'had',
-    'have',
-    'that',
-    'this',
-    'it',
-    'he',
-    'she',
-    'they',
-    'we',
-    'his',
-    'her',
-    'their',
-    'its',
-    'my',
-    'your',
-    'not',
-    'no',
-    'so',
-    'as',
-  ]);
-
   while ((match = resolvedPattern.exec(text)) !== null) {
     const resolvedText = match[1].trim().toLowerCase();
-    // Match against existing arcs by meaningful word overlap - stop words are
-    // excluded so common filler words don't cause false resolution matches.
+    // Match against existing arcs using Jaccard word-overlap similarity.
+    // A flat "overlap >= 2" count was brittle: short arcs with two shared
+    // non-stop words would falsely co-resolve unrelated arcs, while word-form
+    // differences (meet/met, promise/promised) caused genuine resolutions to
+    // miss. A proportional similarity threshold handles both problems better.
     existingArcs.forEach((arc, idx) => {
-      const arcWords = arc.content
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((w) => !STOP_WORDS.has(w));
-      const resolvedWords = resolvedText.split(/\s+/).filter((w) => !STOP_WORDS.has(w));
-      const overlap = arcWords.filter((w) => resolvedWords.includes(w)).length;
-      if (overlap >= 2) toResolve.push(idx);
+      const arcWords = new Set(arc.content.toLowerCase().split(/\s+/).filter(Boolean));
+      const resolvedWords = new Set(resolvedText.split(/\s+/).filter(Boolean));
+      if (arcWords.size === 0 || resolvedWords.size === 0) return;
+      const intersection = [...arcWords].filter((w) => resolvedWords.has(w)).length;
+      const union = new Set([...arcWords, ...resolvedWords]).size;
+      const similarity = intersection / union;
+      // Threshold: require at least 25% Jaccard overlap. This is intentionally
+      // permissive - the model already paraphrases the arc in the [resolved]
+      // line so exact word matches are rare, but 25% rules out coincidental
+      // two-word matches between completely unrelated arcs.
+      if (similarity >= 0.25) toResolve.push(idx);
     });
   }
 

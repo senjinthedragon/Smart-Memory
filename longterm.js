@@ -144,7 +144,9 @@ export function loadCharacterMemories(characterName) {
     persona_relevance: m.persona_relevance ?? (m.type === 'relationship' ? 3 : 1),
     intimacy_relevance: m.intimacy_relevance ?? (m.type === 'preference' ? 3 : 1),
     retrieval_count: m.retrieval_count ?? 0,
-    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? Date.now(),
+    // Fall back to 0 (not Date.now()) when both fields are absent so legacy
+    // entries don't receive an artificial recency boost in memoryUtilityScore.
+    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? 0,
   }));
 }
 

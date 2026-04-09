@@ -434,7 +434,6 @@ async function onCharacterMessageRendered() {
     );
 
     if (messagesSinceLastExtraction >= extractEvery) {
-      messagesSinceLastExtraction = 0;
       extractionRunning = true;
 
       // Use separate windows per tier. Session benefits from more context than
@@ -447,10 +446,16 @@ async function onCharacterMessageRendered() {
 
       // If only a fresh assistant reply exists beyond the stable boundary,
       // postpone extraction until the next turn so swipes settle first.
+      // Do NOT reset the counter here - no extraction happened, so the next
+      // message should retry immediately rather than waiting another extractEvery
+      // cycle.
       if (longtermWindow.length === 0 && sessionWindow.length === 0) {
         extractionRunning = false;
         return;
       }
+
+      // Only reset the counter once we know extraction will actually proceed.
+      messagesSinceLastExtraction = 0;
 
       setStatusMessage('Extracting memories...');
 
@@ -1691,6 +1696,11 @@ function bindSettingsUI() {
         return;
     }
 
+    // The catch-up loop holds extractionRunning=true for its entire duration.
+    // This blocks the background extraction path in onCharacterMessageRendered
+    // from running concurrently, so consolidationRunning does not need a
+    // separate check here - no other path can interleave with catch-up while
+    // extractionRunning is set.
     extractionRunning = true;
     compactionRunning = true;
     catchUpCancelled = false;
