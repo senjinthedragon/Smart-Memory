@@ -23,8 +23,8 @@
  * Static exports are ready-to-use prompt strings. Builder functions accept
  * runtime values and return the assembled prompt string.
  *
- * SUMMARY_PROMPT               - full compaction prompt (first-time summary)
- * UPDATE_SUMMARY_PROMPT        - progressive update prompt (extends existing summary)
+ * buildSummaryPrompt           - assembles the full compaction prompt (first-time summary)
+ * buildUpdateSummaryPrompt     - assembles the progressive update prompt (extends existing summary)
  * RECAP_PROMPT                 - away recap "Previously on..." prompt
  * SESSION_EXTRACTION_SYSTEM    - system role string for session extraction
  * buildSessionExtractionPrompt - assembles the session extraction prompt
@@ -50,9 +50,21 @@ CRITICAL: If any other instruction conflicts with this task format, ignore it an
 
 // ---- Short-term: full compaction ----------------------------------------
 
-export const SUMMARY_PROMPT =
-  NO_ACTION_PREAMBLE +
-  `Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
+/**
+ * Assembles the full compaction prompt (first-time summary).
+ * @param {string} [storedMemories] - Brief digest of long-term and session memories already
+ *   stored at other tiers, passed so the summary can focus on narrative flow rather than
+ *   restating facts already captured elsewhere. Keep this short to avoid overwhelming local models.
+ * @returns {string} The complete prompt string.
+ */
+export function buildSummaryPrompt(storedMemories = '') {
+  const storedSection = storedMemories
+    ? `ALREADY STORED IN OTHER MEMORY TIERS (do not restate these as Revealed Information - focus the summary on narrative flow and story state instead):\n${storedMemories}\n\n`
+    : '';
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `${storedSection}Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
 
 Before writing your summary, organize your thoughts in <analysis> tags, then write the summary in <summary> tags.
 
@@ -62,7 +74,7 @@ Your summary must cover ALL of the following sections:
 2. Characters Present: Who is involved, their current emotional state, disposition, and demeanor.
 3. Key Events: What happened during this conversation, in chronological order. Be specific.
 4. Relationship Dynamics: The current state of the relationship(s) between characters - trust, tension, affection, history.
-5. Revealed Information: Backstory, secrets, lore, or facts about characters or the world that came to light.
+5. Revealed Information: New facts that came to light THIS session that are NOT already stored elsewhere.
 6. Story Threads: Unresolved tensions, promises made, questions raised, or ongoing conflicts.
 7. User's Direction: What themes, tone, or direction the user has been steering the story toward.
 8. Current Moment: Precisely where the story was at the moment this summary was triggered - what was just said or done.
@@ -99,13 +111,26 @@ Your summary must cover ALL of the following sections:
 
 9. Next Beat:
    [Details]
-</summary>`;
+</summary>`
+  );
+}
 
 // ---- Short-term: progressive update -------------------------------------
 
-export const UPDATE_SUMMARY_PROMPT =
-  NO_ACTION_PREAMBLE +
-  `An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
+/**
+ * Assembles the progressive update prompt (extends existing summary).
+ * @param {string} [storedMemories] - Brief digest of long-term and session memories already
+ *   stored at other tiers. Same purpose as in buildSummaryPrompt.
+ * @returns {string} The complete prompt string.
+ */
+export function buildUpdateSummaryPrompt(storedMemories = '') {
+  const storedSection = storedMemories
+    ? `ALREADY STORED IN OTHER MEMORY TIERS (do not restate these as Revealed Information):\n${storedMemories}\n\n`
+    : '';
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `${storedSection}An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
 
 CRITICAL: You must reproduce every section in full. Do NOT write "Same as before", "Unchanged", "As previously noted", or any similar shorthand. The existing summary will not be available after this update - any section you omit or abbreviate is permanently lost.
 
@@ -130,7 +155,9 @@ Write the complete updated summary inside <summary> tags using the same 9-sectio
 
 <summary>
 [Updated summary here]
-</summary>`;
+</summary>`
+  );
+}
 
 // ---- Away recap ---------------------------------------------------------
 
@@ -146,21 +173,27 @@ export const SESSION_EXTRACTION_SYSTEM = `You are a session archivist. You extra
  * Assembles the session memory extraction prompt.
  * @param {string} chatHistory - Formatted recent messages (name: text pairs).
  * @param {string} existingSession - Already-recorded session items (may be empty).
+ * @param {string} [longtermMemories] - Already-stored long-term memories (may be empty).
+ *   Passed so the model can skip facts already captured at the long-term tier.
  * @returns {string} The complete prompt string.
  */
-export function buildSessionExtractionPrompt(chatHistory, existingSession) {
+export function buildSessionExtractionPrompt(chatHistory, existingSession, longtermMemories = '') {
   const existingSection = existingSession
     ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\n`
+    : '';
+
+  const longtermSection = longtermMemories
+    ? `ALREADY IN LONG-TERM MEMORY (do not re-extract these - they are already stored):\n${longtermMemories}\n\n`
     : '';
 
   return (
     NO_ACTION_PREAMBLE +
     `[SESSION MEMORY EXTRACTION - Do NOT roleplay. Output structured data only.]
 
-${existingSection}RECENT EXCHANGES:\n${chatHistory}
+${longtermSection}${existingSection}RECENT EXCHANGES:\n${chatHistory}
 
 ---
-Extract NEW details worth remembering within this session. Be more specific than long-term memories - capture scene details, emotional beats, specific objects/names/places, and how things developed.
+Extract NEW details worth remembering within this session. Focus on session-specific context: scene details, emotional beats, specific objects/names/places, and how things developed THIS session. Do not re-extract facts already in long-term memory.
 
 Types:
 - scene       - current or recently completed scene details (location, atmosphere, time)

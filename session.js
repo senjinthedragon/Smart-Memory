@@ -49,6 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
+import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
   prioritizeMemories,
@@ -215,8 +216,15 @@ export async function extractSessionMemories(recentMessages) {
     const existing = loadSessionMemories();
     const existingText = existing.map((m) => `[${m.type}] ${m.content}`).join('\n');
 
+    // Pass long-term memories so the model skips facts already stored there.
+    // Cap to 15 entries to avoid inflating the prompt on local hardware.
+    const characterName = getContext().name2 || getContext().characterName || null;
+    const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
+    const longtermText =
+      longtermMemories.length > 0 ? formatMemoriesForPrompt(longtermMemories.slice(0, 15)) : '';
+
     const response = await generateMemoryExtract(
-      buildSessionExtractionPrompt(chatHistory, existingText),
+      buildSessionExtractionPrompt(chatHistory, existingText, longtermText),
       { responseLength: settings.session_response_length ?? 500 },
     );
 

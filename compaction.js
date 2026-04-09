@@ -39,7 +39,9 @@ import { generateMemorySummarize } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
-import { SUMMARY_PROMPT, UPDATE_SUMMARY_PROMPT } from './prompts.js';
+import { buildSummaryPrompt, buildUpdateSummaryPrompt } from './prompts.js';
+import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
+import { loadSessionMemories } from './session.js';
 
 /**
  * Counts tokens across all non-system chat messages.
@@ -117,6 +119,27 @@ export async function runCompaction() {
     // in the existing summary. Messages after this index are "new" for the update.
     const summaryEnd = meta?.summaryEnd ?? 0;
 
+    // Build a brief digest of what is already stored at other tiers so the
+    // summary can focus on narrative flow rather than restating known facts.
+    // Capped to avoid overwhelming local model context windows.
+    const characterName = context.name2 || context.characterName || null;
+    const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
+    const sessionMemories = loadSessionMemories();
+    const storedDigestParts = [];
+    if (longtermMemories.length > 0) {
+      storedDigestParts.push(
+        `Long-term memories:\n${formatMemoriesForPrompt(longtermMemories.slice(0, 10))}`,
+      );
+    }
+    if (sessionMemories.length > 0) {
+      const sessionLines = sessionMemories
+        .slice(0, 10)
+        .map((m) => `[${m.type}] ${m.content}`)
+        .join('\n');
+      storedDigestParts.push(`Session memories:\n${sessionLines}`);
+    }
+    const storedMemories = storedDigestParts.join('\n\n');
+
     let raw;
 
     if (existingSummary && summaryEnd > 0 && summaryEnd < context.chat.length) {
@@ -129,18 +152,17 @@ export async function runCompaction() {
 
       if (!newEvents.trim()) return existingSummary;
 
-      const updatePrompt = UPDATE_SUMMARY_PROMPT.replace(
-        '{{existing_summary}}',
-        existingSummary,
-      ).replace('{{new_events}}', newEvents);
+      const updatePrompt = buildUpdateSummaryPrompt(storedMemories)
+        .replace('{{existing_summary}}', existingSummary)
+        .replace('{{new_events}}', newEvents);
 
       raw = await generateMemorySummarize(updatePrompt, {
-        responseLength: settings.compaction_response_length || 1500,
+        responseLength: settings.compaction_response_length || 2000,
       });
     } else {
       // Full compaction: first time or fresh chat with no existing summary.
-      raw = await generateMemorySummarize(SUMMARY_PROMPT, {
-        responseLength: settings.compaction_response_length || 1500,
+      raw = await generateMemorySummarize(buildSummaryPrompt(storedMemories), {
+        responseLength: settings.compaction_response_length || 2000,
       });
     }
 
