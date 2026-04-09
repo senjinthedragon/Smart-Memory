@@ -68,9 +68,27 @@ function verifySessionCandidates(candidates, existing) {
     const key = `${mem.type}|${text.toLowerCase()}`;
     if (seen.has(key)) return false;
     seen.add(key);
-    return !existing.some(
-      (ex) => ex.type === mem.type && ex.content.toLowerCase() === text.toLowerCase(),
-    );
+
+    const lower = text.toLowerCase();
+    const aWords = new Set(lower.split(/\s+/));
+
+    return !existing.some((ex) => {
+      const bWords = new Set(
+        String(ex.content || '')
+          .toLowerCase()
+          .split(/\s+/),
+      );
+      const overlap = [...aWords].filter((w) => bWords.has(w)).length;
+      const union = new Set([...aWords, ...bWords]).size || 1;
+      const similarity = overlap / union;
+
+      // Same type: flag as near-duplicate at 0.65 threshold.
+      if (ex.type === mem.type) return similarity > 0.65;
+
+      // Cross-type: stricter 0.75 threshold - same content filed under a
+      // different type (e.g. a detail and a revelation about the same moment).
+      return similarity > 0.75;
+    });
   });
 }
 

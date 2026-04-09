@@ -195,6 +195,11 @@ ${longtermSection}${existingSection}RECENT EXCHANGES:\n${chatHistory}
 ---
 Extract NEW details worth remembering within this session. Focus on session-specific context: scene details, emotional beats, specific objects/names/places, and how things developed THIS session. Do not re-extract facts already in long-term memory.
 
+SKIP these - they do not belong in session memory:
+- Transient physical details that only matter for this exact moment (stained clothes, spilled food, current body positions)
+- Generic atmosphere descriptions without story significance
+- Anything already captured in long-term memory above
+
 Types:
 - scene       - current or recently completed scene details (location, atmosphere, time)
 - revelation  - something revealed or discovered in this exchange
