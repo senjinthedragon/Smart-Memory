@@ -129,7 +129,7 @@ When an embedding model is not available, the system falls back to word-overlap 
 | Use semantic embeddings | On | Compare memories by meaning rather than word overlap |
 | Ollama URL | *(blank, uses localhost:11434)* | Only change if your embedding model is on a different port |
 | Embedding model | `nomic-embed-text` | Ollama model tag for embedding generation |
-| Keep model in memory | Off | Keeps the embedding model loaded between calls - faster but uses VRAM |
+| Keep model in memory | Off | Keeps the embedding model loaded in Ollama between calls rather than unloading after each use - faster for repeated deduplication passes |
 
 **Requirements:** The embedding model must be installed in Ollama before enabling this. If you already use SillyTavern's built-in Vector Storage extension with Ollama, you likely have `nomic-embed-text` installed already. If not:
 
