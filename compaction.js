@@ -85,7 +85,12 @@ export async function shouldCompact() {
  * @returns {string} Cleaned summary text.
  */
 function formatSummary(raw) {
+  // Strip analysis block - handle both closed and unclosed tags.
+  // If the model didn't write </analysis>, strip everything from <analysis>
+  // up to the first <summary> tag so it doesn't bleed into the summary content.
   let result = raw.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim();
+  // Fallback: unclosed <analysis> - strip from tag to start of <summary>
+  result = result.replace(/<analysis>[\s\S]*?(?=<summary>)/i, '').trim();
   // Try a complete <summary>...</summary> block first.
   const fullMatch = result.match(/<summary>([\s\S]*?)<\/summary>/i);
   if (fullMatch) {
