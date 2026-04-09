@@ -392,12 +392,69 @@
 #smart_memory_settings .sm_add_memory_type {
   flex-shrink: 0;
   max-width: 8em;
-  background: var(--greyCAl, rgba(255, 255, 255, 0.07));
   border: 1px solid var(--border-color, #555);
   border-radius: 3px;
   color: inherit;
   font-size: 0.8em;
   padding: 2px 4px;
+}
+
+/* Color each option in the open dropdown to match its type badge. */
+#smart_memory_settings .sm_add_memory_type option[value='fact'] {
+  background: #4a6fa5;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='fact']:hover {
+  background: #6b8fc0;
+}
+#smart_memory_settings .sm_add_memory_type option[value='relationship'] {
+  background: #8e5a8e;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='relationship']:hover {
+  background: #aa78aa;
+}
+#smart_memory_settings .sm_add_memory_type option[value='preference'] {
+  background: #5a8e5a;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='preference']:hover {
+  background: #78aa78;
+}
+#smart_memory_settings .sm_add_memory_type option[value='event'] {
+  background: #8e6e3a;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='event']:hover {
+  background: #aa8e58;
+}
+#smart_memory_settings .sm_add_memory_type option[value='scene'] {
+  background: #5a8e7a;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='scene']:hover {
+  background: #78aaaa;
+}
+#smart_memory_settings .sm_add_memory_type option[value='revelation'] {
+  background: #8e5a5a;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='revelation']:hover {
+  background: #aa7878;
+}
+#smart_memory_settings .sm_add_memory_type option[value='development'] {
+  background: #7a7a3a;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='development']:hover {
+  background: #9a9a58;
+}
+#smart_memory_settings .sm_add_memory_type option[value='detail'] {
+  background: #3a7a8e;
+  color: #fff;
+}
+#smart_memory_settings .sm_add_memory_type option[value='detail']:hover {
+  background: #589aaa;
 }
 
 #smart_memory_settings .sm_add_memory_input {

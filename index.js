@@ -767,6 +767,36 @@ function updateLongTermUI(characterName) {
   renderMemoriesList(memories, characterName);
 }
 
+/**
+ * Badge colors for each memory/session type - kept in sync with style.css.
+ * Used to tint the type <select> closed-state background to match the
+ * selected option, since CSS alone cannot style a select based on its value.
+ */
+const TYPE_BADGE_COLORS = {
+  fact: '#4a6fa5',
+  relationship: '#8e5a8e',
+  preference: '#5a8e5a',
+  event: '#8e6e3a',
+  scene: '#5a8e7a',
+  revelation: '#8e5a5a',
+  development: '#7a7a3a',
+  detail: '#3a7a8e',
+};
+
+/**
+ * Applies the badge color for the currently selected type to a type <select>
+ * element. Call once on creation and again on every change event.
+ * @param {jQuery} $select
+ */
+function applyTypeSelectColor($select) {
+  const color = TYPE_BADGE_COLORS[$select.val()];
+  if (color) {
+    $select.css({ background: color, color: '#fff' });
+  } else {
+    $select.css({ background: '', color: '' });
+  }
+}
+
 /** Syncs the Fresh Start checkbox state. */
 function updateFreshStartUI(freshStart) {
   $('#sm_fresh_start').prop('checked', !!freshStart);
@@ -861,6 +891,10 @@ function updateSessionUI() {
     </div>
   `);
   $list.after($addForm);
+
+  const $sessionTypeSelect = $addForm.find('.sm_add_memory_type');
+  applyTypeSelectColor($sessionTypeSelect);
+  $sessionTypeSelect.on('change', () => applyTypeSelectColor($sessionTypeSelect));
 
   $addForm.find('.sm_add_memory_btn').on('click', async () => {
     const type = $addForm.find('.sm_add_memory_type').val();
@@ -1080,6 +1114,10 @@ function renderMemoriesList(memories, characterName) {
     </div>
   `);
   $list.after($addForm);
+
+  const $ltTypeSelect = $addForm.find('.sm_add_memory_type');
+  applyTypeSelectColor($ltTypeSelect);
+  $ltTypeSelect.on('change', () => applyTypeSelectColor($ltTypeSelect));
 
   $addForm.find('.sm_add_memory_btn').on('click', () => {
     const type = $addForm.find('.sm_add_memory_type').val();
