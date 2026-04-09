@@ -26,16 +26,39 @@
  * roleplay - for example, a dedicated local model via Ollama while the main
  * chat uses a larger roleplay-tuned model.
  *
- * memory_sources          - enum of supported sources: 'main' | 'webllm' | 'ollama' | 'openai_compatible'
- * generateMemoryExtract   - for extraction tasks (self-contained prompt, no chat context needed)
- * generateMemorySummarize - for summarization tasks (needs the full chat context)
- * fetchOllamaModels       - returns the list of models installed in a local Ollama instance
+ * memory_sources                - enum of supported sources: 'main' | 'webllm' | 'ollama' | 'openai_compatible'
+ * generateMemoryExtract         - for extraction tasks (self-contained prompt, no chat context needed)
+ * generateMemorySummarize       - for summarization tasks (needs the full chat context)
+ * fetchOllamaModels             - returns the list of models installed in a local Ollama instance
+ * abortCurrentMemoryGeneration  - cancels any in-flight Ollama or OpenAI-compat fetch immediately
  */
 
 import { generateRaw, generateQuietPrompt } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { isWebLlmSupported, generateWebLlmChatPrompt } from '../../shared.js';
 import { MODULE_NAME } from './constants.js';
+
+/**
+ * Holds the AbortController for the currently running Ollama or OpenAI-compat
+ * fetch, or null when no external generation is in progress. This is module-level
+ * rather than per-call so index.js can cancel it from outside the call stack via
+ * abortCurrentMemoryGeneration() when a swipe is requested.
+ */
+let memoryAbortController = null;
+
+/**
+ * Cancels any in-flight Ollama or OpenAI-compat memory generation immediately.
+ * The aborted fetch returns an empty string to its caller, which the existing
+ * empty-response guards in compaction.js and the extraction functions treat as
+ * "nothing to do" - the operation is silently skipped rather than erroring.
+ * Has no effect if no external generation is currently running.
+ */
+export function abortCurrentMemoryGeneration() {
+  if (memoryAbortController) {
+    memoryAbortController.abort();
+    memoryAbortController = null;
+  }
+}
 
 /** Available LLM sources for memory operations. */
 export const memory_sources = {
@@ -96,24 +119,34 @@ async function generateOllama(prompt, priorMessages = [], responseLength = 600) 
   if (!model) throw new Error('No Ollama model selected. Choose a model in Smart Memory settings.');
 
   const messages = [...priorMessages, { role: 'user', content: prompt }];
-  const response = await fetch(`${url}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      options: {
-        num_predict: responseLength > 0 ? responseLength : -1,
-        // Cover both Llama-3.1 (<|eot_id|>) and ChatML (<|im_end|>) end-of-turn
-        // tokens explicitly. Listing both is harmless for models that only use one.
-        stop: ['<|eot_id|>', '<|im_end|>'],
-      },
-    }),
-  });
-  if (!response.ok) throw new Error(`Ollama responded with ${response.status}`);
-  const data = await response.json();
-  return data.message?.content ?? '';
+
+  memoryAbortController = new AbortController();
+  try {
+    const response = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        options: {
+          num_predict: responseLength > 0 ? responseLength : -1,
+          // Cover both Llama-3.1 (<|eot_id|>) and ChatML (<|im_end|>) end-of-turn
+          // tokens explicitly. Listing both is harmless for models that only use one.
+          stop: ['<|eot_id|>', '<|im_end|>'],
+        },
+      }),
+      signal: memoryAbortController.signal,
+    });
+    if (!response.ok) throw new Error(`Ollama responded with ${response.status}`);
+    const data = await response.json();
+    return data.message?.content ?? '';
+  } catch (err) {
+    if (err.name === 'AbortError') return '';
+    throw err;
+  } finally {
+    memoryAbortController = null;
+  }
 }
 
 /**
@@ -134,19 +167,29 @@ async function generateOpenAICompat(prompt, priorMessages = [], responseLength =
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
   const messages = [...priorMessages, { role: 'user', content: prompt }];
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: model || undefined,
-      messages,
-      max_tokens: responseLength > 0 ? responseLength : undefined,
-      stream: false,
-    }),
-  });
-  if (!response.ok) throw new Error(`OpenAI Compatible API responded with ${response.status}`);
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content ?? '';
+
+  memoryAbortController = new AbortController();
+  try {
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: model || undefined,
+        messages,
+        max_tokens: responseLength > 0 ? responseLength : undefined,
+        stream: false,
+      }),
+      signal: memoryAbortController.signal,
+    });
+    if (!response.ok) throw new Error(`OpenAI Compatible API responded with ${response.status}`);
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content ?? '';
+  } catch (err) {
+    if (err.name === 'AbortError') return '';
+    throw err;
+  } finally {
+    memoryAbortController = null;
+  }
 }
 
 /**

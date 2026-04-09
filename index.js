@@ -56,7 +56,7 @@ import {
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
 } from './constants.js';
-import { memory_sources, fetchOllamaModels } from './generate.js';
+import { memory_sources, fetchOllamaModels, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
@@ -388,7 +388,19 @@ async function onCharacterMessageRendered() {
       const needed = await shouldCompact();
       if (needed) {
         setStatusMessage('Updating story summary...');
+        // Only toast for external sources - with the main API, ST's own pipeline
+        // blocks swipes with its own message so a second toast would be redundant.
+        const source = extension_settings[MODULE_NAME]?.source ?? memory_sources.main;
+        let compactionToast = null;
+        if (source !== memory_sources.main) {
+          compactionToast = toastr.info('Updating story summary...', 'Smart Memory', {
+            timeOut: 0,
+            extendedTimeOut: 0,
+            positionClass: 'toast-bottom-right',
+          });
+        }
         const summary = await runCompaction();
+        if (compactionToast) toastr.clear(compactionToast);
         if (summary) {
           injectSummary(summary);
           updateShortTermUI(summary);
@@ -2114,6 +2126,16 @@ jQuery(async function () {
   eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
   eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
+
+  // When the user swipes, immediately abort any in-flight Ollama or
+  // OpenAI-compat memory generation. Without this, the swipe generation request
+  // queues behind the memory model on the same Ollama instance and ST aborts it
+  // before the memory model finishes, reverting the swipe counter. The aborted
+  // memory operation returns an empty response and is skipped cleanly - it will
+  // retry on the next accepted message.
+  eventSource.on(event_types.MESSAGE_SWIPED, () => {
+    abortCurrentMemoryGeneration();
+  });
 
   // When a message is deleted, trim the scene buffer to only messages that
   // still exist in the chat. Without this, a deleted message would remain in
