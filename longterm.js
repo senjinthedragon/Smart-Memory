@@ -157,7 +157,7 @@ export function loadCharacterMemories(characterName) {
  * @param {Array<{type: string, content: string, ts: number}>} memories
  */
 export function saveCharacterMemories(characterName, memories) {
-  if (!characterName) return;
+  if (!characterName || !Array.isArray(memories)) return;
   if (!extension_settings[MODULE_NAME].characters) {
     extension_settings[MODULE_NAME].characters = {};
   }

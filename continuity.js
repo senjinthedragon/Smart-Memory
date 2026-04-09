@@ -121,7 +121,7 @@ function parseContradictions(text) {
   return text
     .split('\n')
     .map((line) => line.replace(/^[-•*\d.]+\s*/, '').trim())
-    .filter((line) => line.length > 5);
+    .filter((line) => line.length > 0);
 }
 
 /**
