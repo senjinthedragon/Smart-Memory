@@ -41,7 +41,7 @@ Smart Memory runs several memory tiers in the background, each focused on a diff
 
 When your conversation grows long enough to approach your AI's context limit, Smart Memory automatically summarizes everything so far and keeps that summary injected at the top of context. Older messages can fall out of the window without the AI losing the thread of the story.
 
-After the first summary exists, only new messages are processed and folded in - the summary grows with your story rather than being rewritten from scratch every time.
+After the first summary exists, only new messages are processed and folded in - the summary grows with your story rather than being rewritten from scratch every time. The summary is also aware of what is stored in long-term and session memory, so it focuses on narrative flow rather than restating facts already captured elsewhere.
 
 ### Long-term Memory - Persistent Facts
 
@@ -53,6 +53,8 @@ Over time, memories are automatically consolidated so the same information doesn
 
 Granular details from the current session - scene descriptions, things that were revealed, how the relationship shifted, specific objects or places that were mentioned. More detailed than long-term memory, and scoped to this chat only. It doesn't carry over to future sessions, but it keeps the AI grounded in the specifics of what's happening *right now*.
 
+Session extraction is aware of what is already stored in long-term memory and skips facts that are already captured there, so the two tiers complement rather than duplicate each other.
+
 ### Scene Detection and History
 
 Smart Memory watches for scene transitions - time skips, location changes, those little `---` dividers authors use between scenes. When one is detected, a short summary of the completed scene is saved. The last few scene summaries are kept in context so the AI always knows where the story has been, not just where it is.
@@ -63,7 +65,7 @@ Unresolved narrative threads - promises made, character goals, mysteries introdu
 
 ### Away Recap
 
-Come back after a long break and not quite remember where you left off? Smart Memory generates a short "Previously on..." recap and quietly injects it so you and the AI pick up in the right place. It disappears after the first response - just a gentle reminder, not a permanent fixture.
+Come back after a long break and not quite remember where you left off? Smart Memory generates a short "Previously on..." recap and shows it as a dismissible popup so you can read it before the AI responds. It disappears after the first response - just a gentle reminder, not a permanent fixture.
 
 ### Continuity Checker
 
@@ -116,7 +118,7 @@ All settings are saved automatically per profile.
 
 Selects which LLM handles all Smart Memory work - summarization, extraction, and recap generation. Setting this to a lighter model leaves your main roleplay LLM free for the actual story.
 
-Options: **Main API** or **WebLLM Extension**.
+Options: **Main API**, **Ollama**, **OpenAI Compatible**, or **WebLLM Extension**.
 
 ### Memory Deduplication
 
@@ -155,7 +157,7 @@ ollama pull nomic-embed-text
 | Auto-consolidate | On | Periodically merge near-duplicate entries |
 | Fresh start (per-chat) | Off | Suppress memory injection for this specific chat |
 | Extract every N messages | 3 | How often automatic extraction runs |
-| Max memories per character | 25 | Hard cap - oldest entries dropped when exceeded |
+| Max memories per character | 25 | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
 | Injection token budget | 500 | Oldest memories dropped first if total would exceed this |
 | Injection template | `Memories from previous conversations:\n{{memories}}` | Wrapper text |
 | Injection position | In-prompt | Where in the prompt memories appear |
@@ -187,7 +189,7 @@ ollama pull nomic-embed-text
 | --- | --- | --- |
 | Enable arc tracking | On | Extract and inject open narrative threads |
 | Max tracked arcs | 10 | Oldest arcs dropped when limit is exceeded |
-| Injection token budget | 200 | Oldest arcs dropped first if exceeded |
+| Injection token budget | 400 | Oldest arcs dropped first if exceeded |
 | Injection position | In-chat @ depth 2 | Near current action, alongside chat vectors |
 
 ### Away Recap Settings
@@ -209,6 +211,10 @@ All manual operations are in the **Configuration** section at the top of the pan
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, and summary. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
 
 A **Cancel** button appears during processing. Cancelling stops the loop cleanly between chunks - partial results are saved.
+
+If memories already exist for the character, a confirmation prompt will appear before processing begins - running Memorize Chat repeatedly on the same chat can introduce near-duplicate entries on top of existing ones. Use **Forget This Chat** first if you want a clean re-run.
+
+Only accepted messages are processed - swiped alternatives are ignored.
 
 To build long-term memory from multiple older chats, simply open each one and run Memorize Chat. Memories accumulate and deduplicate automatically. Skip any chats you'd rather not include.
 
@@ -233,7 +239,7 @@ Each memory tier has its own **Extract Now** or **Extract** button that processe
 | Extract Arcs Now | Last 100 messages |
 | Extract Scene | Scene buffer or last 40 messages |
 
-For the full chat backlog, use **Catch Up** instead.
+For the full chat backlog, use **Memorize Chat** instead.
 
 ### Other Per-tier Buttons
 
