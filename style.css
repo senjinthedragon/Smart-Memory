@@ -249,6 +249,32 @@
   font-size: 0.875em;
 }
 
+/* Per-type tinted backgrounds - match the badge hue at low opacity. */
+#smart_memory_settings .sm_memory_item:has(.sm_type_fact) {
+  background: rgba(74, 111, 165, 0.13);
+}
+#smart_memory_settings .sm_memory_item:has(.sm_type_relationship) {
+  background: rgba(142, 90, 142, 0.13);
+}
+#smart_memory_settings .sm_memory_item:has(.sm_type_preference) {
+  background: rgba(90, 142, 90, 0.13);
+}
+#smart_memory_settings .sm_memory_item:has(.sm_type_event) {
+  background: rgba(142, 110, 58, 0.13);
+}
+#smart_memory_settings .sm_memory_item:has(.sm_type_scene) {
+  background: rgba(90, 142, 122, 0.13);
+}
+#smart_memory_settings .sm_memory_item:has(.sm_type_revelation) {
+  background: rgba(142, 90, 90, 0.13);
+}
+#smart_memory_settings .sm_memory_item:has(.sm_type_development) {
+  background: rgba(122, 122, 58, 0.13);
+}
+#smart_memory_settings .sm_memory_item:has(.sm_type_detail) {
+  background: rgba(58, 122, 142, 0.13);
+}
+
 #smart_memory_settings .sm_memory_type {
   flex-shrink: 0;
   padding: 1px 6px;
