@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- "Catch Up - Extract All from Full Chat" button renamed to **Memorize Chat**.
+- "Clear Chat Context" button renamed to **Forget This Chat**.
 - Per-extraction limit changed from 4 total new entries to 2 per type - prevents
   a burst of similar events from flooding one type in a single pass.
 - Arc injection budget raised from 200 to 400 tokens so all tracked arcs fit
