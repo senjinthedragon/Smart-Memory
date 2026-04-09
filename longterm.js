@@ -39,6 +39,7 @@ import {
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
+  saveSettingsDebounced,
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
@@ -579,6 +580,7 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
       };
     });
     saveCharacterMemories(characterName, updated);
+    saveSettingsDebounced();
   }
 
   // Format for injection: plain bullet list without [type] tags.
