@@ -918,6 +918,27 @@ function showError(operation, err) {
 }
 
 /**
+ * Returns true and shows a warning toast if a catch-up or compaction is
+ * currently running. Use this to block manual extract/clear buttons that
+ * would conflict with an in-progress background job.
+ * @returns {boolean}
+ */
+function isCatchUpRunning() {
+  if (extractionRunning || compactionRunning) {
+    toastr.warning(
+      'Cannot do this while Memorize Chat is running. Cancel it first.',
+      'Smart Memory',
+      {
+        timeOut: 4000,
+        positionClass: 'toast-bottom-right',
+      },
+    );
+    return true;
+  }
+  return false;
+}
+
+/**
  * Binds all settings panel controls to their corresponding settings values.
  * Each control reads from getSettings() on mount and writes back on change,
  * calling saveSettingsDebounced() to persist.
@@ -1102,6 +1123,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_summarize_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (compactionRunning) return;
     compactionRunning = true;
     setStatusMessage('Generating summary...');
@@ -1257,6 +1279,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_extract_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (extractionRunning || consolidationRunning) return;
     const characterName = getCurrentCharacterName();
     if (!characterName) return;
@@ -1284,6 +1307,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_memories').on('click', function () {
+    if (isCatchUpRunning()) return;
     const characterName = getCurrentCharacterName();
     if (!characterName) return;
     if (!confirm(`Clear all memories for "${characterName}"?`)) return;
@@ -1371,6 +1395,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_extract_session_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     $(this).prop('disabled', true);
     setStatusMessage('Extracting session memories...');
     try {
@@ -1394,6 +1419,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_session').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (!confirm('Clear all session memories for this chat?')) return;
     await clearSessionMemories();
     injectSessionMemories();
@@ -1458,6 +1484,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_extract_scenes_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     $(this).prop('disabled', true);
     setStatusMessage('Summarizing current scene...');
     try {
@@ -1491,6 +1518,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_scenes').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (!confirm('Clear all scene history for this chat?')) return;
     await clearSceneHistory();
     injectSceneHistory();
@@ -1548,6 +1576,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_extract_arcs_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     $(this).prop('disabled', true);
     setStatusMessage('Extracting story arcs...');
     try {
@@ -1568,6 +1597,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_arcs').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (!confirm('Clear all story arcs for this chat?')) return;
     await clearArcs();
     injectArcs();
@@ -1855,14 +1885,7 @@ function bindSettingsUI() {
 
   // ---- Clear Chat Context ---------------------------------------------
   $('#sm_clear_chat_context').on('click', async function () {
-    if (extractionRunning || compactionRunning) {
-      toastr.warning(
-        'Cannot clear while Memorize Chat is running. Cancel it first.',
-        'Smart Memory',
-        { timeOut: 4000, positionClass: 'toast-bottom-right' },
-      );
-      return;
-    }
+    if (isCatchUpRunning()) return;
     if (
       !confirm(
         'Clear all Smart Memory context for this chat?\n\nThis will erase the summary, session memories, scene history, and story arcs. Long-term memories are not affected.',
@@ -1901,14 +1924,7 @@ function bindSettingsUI() {
 
   // ---- Fresh Start ----------------------------------------------------
   $('#sm_fresh_start_button').on('click', async function () {
-    if (extractionRunning || compactionRunning) {
-      toastr.warning(
-        'Cannot run Fresh Start while Memorize Chat is running. Cancel it first.',
-        'Smart Memory',
-        { timeOut: 4000, positionClass: 'toast-bottom-right' },
-      );
-      return;
-    }
+    if (isCatchUpRunning()) return;
     const characterName = getCurrentCharacterName();
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
