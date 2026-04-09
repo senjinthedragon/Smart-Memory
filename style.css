@@ -389,71 +389,130 @@
   margin-top: 4px;
 }
 
-#smart_memory_settings .sm_add_memory_type {
+/* ── Custom type picker (replaces native <select> for full color control) ── */
+
+/*
+ * A lightweight div-based dropdown. The closed state shows the selected type
+ * in its badge color. The open list shows every option in its own badge color
+ * with a lighter hover tint. Colors match the sm_type_* badge definitions.
+ */
+#smart_memory_settings .sm-type-picker {
+  position: relative;
   flex-shrink: 0;
   max-width: 8em;
-  border: 1px solid var(--border-color, #555);
-  border-radius: 3px;
-  color: inherit;
   font-size: 0.8em;
-  padding: 2px 4px;
+  cursor: pointer;
+  user-select: none;
 }
 
-/* Color each option in the open dropdown to match its type badge. */
-#smart_memory_settings .sm_add_memory_type option[value='fact'] {
-  background: #4a6fa5;
+#smart_memory_settings .sm-type-picker-current {
+  padding: 2px 18px 2px 6px;
+  border: 1px solid var(--border-color, #555);
+  border-radius: 3px;
   color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
 }
-#smart_memory_settings .sm_add_memory_type option[value='fact']:hover {
+
+/* Down-arrow indicator. */
+#smart_memory_settings .sm-type-picker-current::after {
+  content: '▾';
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+#smart_memory_settings .sm-type-picker-list {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 100%;
+  z-index: 9999;
+  border: 1px solid var(--border-color, #555);
+  border-radius: 0 0 3px 3px;
+  overflow: hidden;
+  margin-top: 1px;
+}
+
+#smart_memory_settings .sm-type-picker.open .sm-type-picker-list {
+  display: block;
+}
+
+#smart_memory_settings .sm-type-option {
+  padding: 3px 8px;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Closed-state and open-list colors per type. */
+#smart_memory_settings .sm-type-picker-current[data-value='fact'],
+#smart_memory_settings .sm-type-option[data-value='fact'] {
+  background: #4a6fa5;
+}
+#smart_memory_settings .sm-type-option[data-value='fact']:hover {
   background: #6b8fc0;
 }
-#smart_memory_settings .sm_add_memory_type option[value='relationship'] {
+
+#smart_memory_settings .sm-type-picker-current[data-value='relationship'],
+#smart_memory_settings .sm-type-option[data-value='relationship'] {
   background: #8e5a8e;
-  color: #fff;
 }
-#smart_memory_settings .sm_add_memory_type option[value='relationship']:hover {
+#smart_memory_settings .sm-type-option[data-value='relationship']:hover {
   background: #aa78aa;
 }
-#smart_memory_settings .sm_add_memory_type option[value='preference'] {
+
+#smart_memory_settings .sm-type-picker-current[data-value='preference'],
+#smart_memory_settings .sm-type-option[data-value='preference'] {
   background: #5a8e5a;
-  color: #fff;
 }
-#smart_memory_settings .sm_add_memory_type option[value='preference']:hover {
+#smart_memory_settings .sm-type-option[data-value='preference']:hover {
   background: #78aa78;
 }
-#smart_memory_settings .sm_add_memory_type option[value='event'] {
+
+#smart_memory_settings .sm-type-picker-current[data-value='event'],
+#smart_memory_settings .sm-type-option[data-value='event'] {
   background: #8e6e3a;
-  color: #fff;
 }
-#smart_memory_settings .sm_add_memory_type option[value='event']:hover {
+#smart_memory_settings .sm-type-option[data-value='event']:hover {
   background: #aa8e58;
 }
-#smart_memory_settings .sm_add_memory_type option[value='scene'] {
+
+#smart_memory_settings .sm-type-picker-current[data-value='scene'],
+#smart_memory_settings .sm-type-option[data-value='scene'] {
   background: #5a8e7a;
-  color: #fff;
 }
-#smart_memory_settings .sm_add_memory_type option[value='scene']:hover {
+#smart_memory_settings .sm-type-option[data-value='scene']:hover {
   background: #78aaaa;
 }
-#smart_memory_settings .sm_add_memory_type option[value='revelation'] {
+
+#smart_memory_settings .sm-type-picker-current[data-value='revelation'],
+#smart_memory_settings .sm-type-option[data-value='revelation'] {
   background: #8e5a5a;
-  color: #fff;
 }
-#smart_memory_settings .sm_add_memory_type option[value='revelation']:hover {
+#smart_memory_settings .sm-type-option[data-value='revelation']:hover {
   background: #aa7878;
 }
-#smart_memory_settings .sm_add_memory_type option[value='development'] {
+
+#smart_memory_settings .sm-type-picker-current[data-value='development'],
+#smart_memory_settings .sm-type-option[data-value='development'] {
   background: #7a7a3a;
-  color: #fff;
 }
-#smart_memory_settings .sm_add_memory_type option[value='development']:hover {
+#smart_memory_settings .sm-type-option[data-value='development']:hover {
   background: #9a9a58;
 }
-#smart_memory_settings .sm_add_memory_type option[value='detail'] {
+
+#smart_memory_settings .sm-type-picker-current[data-value='detail'],
+#smart_memory_settings .sm-type-option[data-value='detail'] {
   background: #3a7a8e;
-  color: #fff;
 }
-#smart_memory_settings .sm_add_memory_type option[value='detail']:hover {
+#smart_memory_settings .sm-type-option[data-value='detail']:hover {
   background: #589aaa;
 }
 

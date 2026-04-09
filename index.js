@@ -768,33 +768,58 @@ function updateLongTermUI(characterName) {
 }
 
 /**
- * Badge colors for each memory/session type - kept in sync with style.css.
- * Used to tint the type <select> closed-state background to match the
- * selected option, since CSS alone cannot style a select based on its value.
+ * Builds a custom type-picker widget to replace the native <select>.
+ * Native selects don't allow reliable per-option background styling in
+ * Chromium/Electron because the select's own background bleeds into the
+ * open dropdown, overriding option colors inconsistently.
+ *
+ * The returned element exposes its current value via $(el).data('value').
+ * Clicking outside any open picker collapses it - register the document
+ * handler once at init via initTypePickers().
+ *
+ * @param {string[]} types - ordered list of type values
+ * @returns {jQuery} div.sm-type-picker
  */
-const TYPE_BADGE_COLORS = {
-  fact: '#4a6fa5',
-  relationship: '#8e5a8e',
-  preference: '#5a8e5a',
-  event: '#8e6e3a',
-  scene: '#5a8e7a',
-  revelation: '#8e5a5a',
-  development: '#7a7a3a',
-  detail: '#3a7a8e',
-};
+function buildTypePicker(types) {
+  const initial = types[0];
+  const $picker = $('<div class="sm-type-picker">').attr('data-value', initial);
+  const $current = $('<div class="sm-type-picker-current">')
+    .attr('data-value', initial)
+    .text(initial);
+  const $list = $('<div class="sm-type-picker-list">');
+
+  types.forEach((t) => {
+    $list.append($('<div class="sm-type-option">').attr('data-value', t).text(t));
+  });
+
+  $picker.append($current, $list);
+
+  $current.on('click', (e) => {
+    e.stopPropagation();
+    // Close any other open pickers first.
+    $('.sm-type-picker').not($picker).removeClass('open');
+    $picker.toggleClass('open');
+  });
+
+  $list.on('click', '.sm-type-option', function () {
+    const val = $(this).data('value');
+    $picker.attr('data-value', val).removeClass('open');
+    $current.attr('data-value', val).text(val);
+  });
+
+  return $picker;
+}
 
 /**
- * Applies the badge color for the currently selected type to a type <select>
- * element. Call once on creation and again on every change event.
- * @param {jQuery} $select
+ * Registers a single document-level click handler that closes all open
+ * type pickers when the user clicks outside them. Called once at init.
  */
-function applyTypeSelectColor($select) {
-  const color = TYPE_BADGE_COLORS[$select.val()];
-  if (color) {
-    $select.css({ background: color, color: '#fff' });
-  } else {
-    $select.css({ background: '', color: '' });
-  }
+function initTypePickers() {
+  $(document).on('click.smTypePicker', (e) => {
+    if (!$(e.target).closest('.sm-type-picker').length) {
+      $('.sm-type-picker').removeClass('open');
+    }
+  });
 }
 
 /** Syncs the Fresh Start checkbox state. */
@@ -881,23 +906,18 @@ function updateSessionUI() {
   });
 
   // Add memory form at the bottom of the list.
-  const typeOptions = SESSION_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
   $list.next('.sm_add_memory_form').remove();
   const $addForm = $(`
     <div class="sm_add_memory_form">
-      <select class="sm_add_memory_type">${typeOptions}</select>
       <input type="text" class="sm_add_memory_input" placeholder="New session memory...">
       <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
     </div>
   `);
+  $addForm.prepend(buildTypePicker(SESSION_TYPES));
   $list.after($addForm);
 
-  const $sessionTypeSelect = $addForm.find('.sm_add_memory_type');
-  applyTypeSelectColor($sessionTypeSelect);
-  $sessionTypeSelect.on('change', () => applyTypeSelectColor($sessionTypeSelect));
-
   $addForm.find('.sm_add_memory_btn').on('click', async () => {
-    const type = $addForm.find('.sm_add_memory_type').val();
+    const type = $addForm.find('.sm-type-picker').data('value');
     const content = $addForm.find('.sm_add_memory_input').val().trim();
     if (!content) return;
     const memories = loadSessionMemories();
@@ -1104,23 +1124,18 @@ function renderMemoriesList(memories, characterName) {
   });
 
   // Add memory form at the bottom of the list.
-  const typeOptions = MEMORY_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
   $list.next('.sm_add_memory_form').remove();
   const $addForm = $(`
     <div class="sm_add_memory_form">
-      <select class="sm_add_memory_type">${typeOptions}</select>
       <input type="text" class="sm_add_memory_input" placeholder="New memory...">
       <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
     </div>
   `);
+  $addForm.prepend(buildTypePicker(MEMORY_TYPES));
   $list.after($addForm);
 
-  const $ltTypeSelect = $addForm.find('.sm_add_memory_type');
-  applyTypeSelectColor($ltTypeSelect);
-  $ltTypeSelect.on('change', () => applyTypeSelectColor($ltTypeSelect));
-
   $addForm.find('.sm_add_memory_btn').on('click', () => {
-    const type = $addForm.find('.sm_add_memory_type').val();
+    const type = $addForm.find('.sm-type-picker').data('value');
     const content = $addForm.find('.sm_add_memory_input').val().trim();
     if (!content) return;
     const memories = loadCharacterMemories(characterName);
@@ -2365,6 +2380,7 @@ jQuery(async function () {
 
   bindSettingsUI();
   initTooltips();
+  initTypePickers();
   updateTokenDisplay();
 
   // makeLast ensures Smart Memory processes the message after all other
