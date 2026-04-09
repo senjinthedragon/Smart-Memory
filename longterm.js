@@ -39,6 +39,7 @@ import {
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
+  saveSettingsDebounced,
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
@@ -50,6 +51,7 @@ import {
   META_KEY,
 } from './constants.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
+import { parseExtractionOutput } from './parsers.js';
 import {
   prioritizeMemories,
   reconcileTypeEntries,
@@ -143,7 +145,9 @@ export function loadCharacterMemories(characterName) {
     persona_relevance: m.persona_relevance ?? (m.type === 'relationship' ? 3 : 1),
     intimacy_relevance: m.intimacy_relevance ?? (m.type === 'preference' ? 3 : 1),
     retrieval_count: m.retrieval_count ?? 0,
-    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? Date.now(),
+    // Fall back to 0 (not Date.now()) when both fields are absent so legacy
+    // entries don't receive an artificial recency boost in memoryUtilityScore.
+    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? 0,
   }));
 }
 
@@ -154,7 +158,7 @@ export function loadCharacterMemories(characterName) {
  * @param {Array<{type: string, content: string, ts: number}>} memories
  */
 export function saveCharacterMemories(characterName, memories) {
-  if (!characterName) return;
+  if (!characterName || !Array.isArray(memories)) return;
   if (!extension_settings[MODULE_NAME].characters) {
     extension_settings[MODULE_NAME].characters = {};
   }
@@ -192,38 +196,6 @@ export function formatMemoriesForPrompt(memories) {
 }
 
 // ---- Extraction ---------------------------------------------------------
-
-/**
- * Parses "[type] content" tagged lines from the model's extraction output.
- * Lines that don't match the expected format or have unrecognised types are skipped.
- * @param {string} text - Raw model response.
- * @returns {Array<{type: string, content: string, ts: number}>}
- */
-function parseExtractionOutput(text) {
-  if (!text || text.trim().toUpperCase() === 'NONE') return [];
-
-  const results = [];
-  // Matches lines like: [fact:2] The character is tall.
-  // Accepts optional spaces around ":" and after "]" for parser resilience.
-  // The importance score is optional - defaults to 2 if omitted.
-  const linePattern =
-    /^\[(fact|relationship|preference|event)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
-  let match;
-
-  while ((match = linePattern.exec(text)) !== null) {
-    const type = match[1].toLowerCase();
-    const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const expiration = match[3] ? match[3].toLowerCase() : 'permanent';
-    const content = match[4].trim();
-    if (MEMORY_TYPES.includes(type) && content.length > 5) {
-      // New entries start as unprocessed - they will be evaluated against the
-      // consolidated base before being promoted.
-      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
-    }
-  }
-
-  return results;
-}
 
 /**
  * Merges new memories into the existing set, skipping near-duplicates and
@@ -278,12 +250,16 @@ function mergeMemories(existing, incoming, maxTotal) {
     if (typeAdded >= MAX_NEW_PER_TYPE_PER_EXTRACTION) continue;
 
     // If this type is already at the per-type storage cap, evict the
-    // lowest-priority existing entry of this type before adding the new one.
+    // lowest-priority existing entry of this type before adding the new one -
+    // but only if the new entry actually outscores the one we'd displace.
+    // Without this guard a burst of low-priority new entries could displace
+    // high-priority existing ones that are far more valuable to keep.
     const typeEntries = merged.filter((m) => m.type === mem.type);
     if (typeEntries.length >= perTypeCap) {
       const prioritized = prioritizeMemories(typeEntries);
-      // Last entry in prioritized is lowest priority - remove it from merged.
+      // Last entry in prioritized is lowest priority.
       const toEvict = prioritized[prioritized.length - 1];
+      if (incomingPriorityScore(mem) <= incomingPriorityScore(toEvict)) continue;
       const evictIdx = merged.findIndex(
         (m) => m.type === toEvict.type && m.content === toEvict.content,
       );
@@ -478,8 +454,9 @@ export async function consolidateMemories(characterName, force = false) {
     } catch (err) {
       console.error(`[SmartMemory] Consolidation failed for type [${type}]:`, err);
       // On failure, mark unprocessed as consolidated so they don't block future passes.
-      unprocessed.forEach((m) => (m.consolidated = true));
+      // Set dirty before the forEach so a mid-loop error still triggers the save.
       dirty = true;
+      unprocessed.forEach((m) => (m.consolidated = true));
     }
   }
 
@@ -575,6 +552,7 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
       };
     });
     saveCharacterMemories(characterName, updated);
+    saveSettingsDebounced();
   }
 
   // Format for injection: plain bullet list without [type] tags.
@@ -614,6 +592,7 @@ export function isFreshStart() {
  */
 export async function setFreshStart(value) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].freshStart = value;
   await context.saveMetadata();

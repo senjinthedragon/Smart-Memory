@@ -197,9 +197,11 @@ let consolidationRunning = false;
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
 
-// Tracks whether the group chat warning toast has already been shown this
-// session so it doesn't fire on every message in a group.
-let groupChatWarningShown = false;
+// Tracks the last group ID for which the group chat warning was shown.
+// Stored as the actual groupId rather than a plain boolean so switching
+// between two different group chats shows the toast once per group, while
+// switching back to a group that was already warned stays silent.
+let lastWarnedGroupId = null;
 
 // Last observed chat length, used to distinguish new messages from swipes.
 // CHARACTER_MESSAGE_RENDERED fires on both; swipes do not grow the chat array.
@@ -268,6 +270,8 @@ function getCurrentCharacterName() {
 /**
  * Clears all active injection slots. Called when the master toggle is turned
  * off so that no Smart Memory content lingers in the current prompt.
+ * This only removes the live prompt injections - stored memories and metadata
+ * are not touched. Re-enabling the extension restores them from storage.
  */
 function clearAllInjections() {
   const none = extension_prompt_types.NONE;
@@ -321,8 +325,8 @@ async function onCharacterMessageRendered() {
   // Group chats are not yet supported - character name resolution is unreliable
   // in that context and memories could be attributed to the wrong character.
   if (context.groupId) {
-    if (!groupChatWarningShown) {
-      groupChatWarningShown = true;
+    if (lastWarnedGroupId !== context.groupId) {
+      lastWarnedGroupId = context.groupId;
       toastr.warning(
         'Smart Memory is not active in group chats. 1:1 chats only for now.',
         'Smart Memory',
@@ -344,6 +348,11 @@ async function onCharacterMessageRendered() {
     updateLastActive();
     return;
   }
+
+  // A new AI message has arrived - dismiss any open recap modal so it doesn't
+  // linger while the user reads the response. Recap was only meant as a
+  // pre-response reminder; once the story is moving again it should be gone.
+  $('#sm_recap_overlay').remove();
 
   const characterName = getCurrentCharacterName();
 
@@ -429,49 +438,62 @@ async function onCharacterMessageRendered() {
     );
 
     if (messagesSinceLastExtraction >= extractEvery) {
-      messagesSinceLastExtraction = 0;
       extractionRunning = true;
 
-      const recentCount = Math.min(extractEvery * 2, context.chat.length);
-      const recentMessages = getStableExtractionWindow(context.chat, recentCount);
+      // Use separate windows per tier. Session benefits from more context than
+      // long-term (scene/detail extraction needs the surrounding messages);
+      // long-term extraction targets distilled facts that are visible in a
+      // narrower window. Arc extraction uses a wide window to catch threads
+      // that were introduced earlier in the session.
+      const sessionWindow = getStableExtractionWindow(context.chat, 40);
+      const longtermWindow = getStableExtractionWindow(context.chat, 20);
 
       // If only a fresh assistant reply exists beyond the stable boundary,
       // postpone extraction until the next turn so swipes settle first.
-      if (recentMessages.length === 0) {
+      // Do NOT reset the counter here - no extraction happened, so the next
+      // message should retry immediately rather than waiting another extractEvery
+      // cycle.
+      if (longtermWindow.length === 0 && sessionWindow.length === 0) {
         extractionRunning = false;
         return;
       }
+
+      // Only reset the counter once we know extraction will actually proceed.
+      messagesSinceLastExtraction = 0;
 
       setStatusMessage('Extracting memories...');
 
       // Run extraction tiers sequentially rather than in parallel.
       // Parallel model calls overwhelm local hardware (RTX 2080 / 8GB VRAM)
       // and gain nothing on Ollama which serializes requests anyway.
-      (async () => {
+      // Awaiting here also prevents compaction/scene detection on the next
+      // message from racing against an ongoing extraction and corrupting
+      // ST's TempResponseLength singleton (the same hazard fixed in 1.0.1).
+      try {
         let total = 0;
 
-        if (settings.session_enabled) {
-          const count = await extractSessionMemories(recentMessages).catch((err) => {
-            console.error('[SmartMemory] Background session extraction error:', err);
+        if (settings.session_enabled && sessionWindow.length > 0) {
+          const count = await extractSessionMemories(sessionWindow).catch((err) => {
+            console.error('[SmartMemory] Session extraction error:', err);
             return 0;
           });
           // Run session consolidation after extraction - fires per-type when threshold is reached.
           if (!consolidationRunning) {
             consolidationRunning = true;
             await consolidateSessionMemories().catch((err) => {
-              console.error('[SmartMemory] Background session consolidation error:', err);
+              console.error('[SmartMemory] Session consolidation error:', err);
             });
             consolidationRunning = false;
           }
-          injectSessionMemories(true);
+          await injectSessionMemories(true);
           updateSessionUI();
           total += count;
         }
 
-        if (settings.longterm_enabled && characterName) {
-          const count = await extractAndStoreMemories(characterName, recentMessages).catch(
+        if (settings.longterm_enabled && characterName && longtermWindow.length > 0) {
+          const count = await extractAndStoreMemories(characterName, longtermWindow).catch(
             (err) => {
-              console.error('[SmartMemory] Background long-term extraction error:', err);
+              console.error('[SmartMemory] Long-term extraction error:', err);
               return 0;
             },
           );
@@ -479,7 +501,7 @@ async function onCharacterMessageRendered() {
           if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
             consolidationRunning = true;
             const removed = await consolidateMemories(characterName).catch((err) => {
-              console.error('[SmartMemory] Background consolidation error:', err);
+              console.error('[SmartMemory] Consolidation error:', err);
               return 0;
             });
             consolidationRunning = false;
@@ -507,7 +529,7 @@ async function onCharacterMessageRendered() {
           // prompt so resolution still works even outside this window.
           const arcWindow = getStableExtractionWindow(context.chat, 100);
           const count = await extractArcs(arcWindow).catch((err) => {
-            console.error('[SmartMemory] Background arc extraction error:', err);
+            console.error('[SmartMemory] Arc extraction error:', err);
             return 0;
           });
           injectArcs();
@@ -517,12 +539,12 @@ async function onCharacterMessageRendered() {
 
         updateTokenDisplay();
         setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
-        extractionRunning = false;
-      })().catch((err) => {
+      } catch (err) {
         console.error('[SmartMemory] Extraction error:', err);
         setStatusMessage('');
+      } finally {
         extractionRunning = false;
-      });
+      }
     }
   }
 
@@ -541,7 +563,7 @@ async function onChatChanged() {
   extractionRunning = false;
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
-  groupChatWarningShown = false;
+  lastWarnedGroupId = null;
   lastKnownChatLength = 0;
   clearEmbeddingCache();
 
@@ -686,6 +708,10 @@ function setStatusMessage(msg) {
  * overflow:hidden extensions panel and is never clipped at the edge.
  */
 function initTooltips() {
+  // Remove any previous tooltip element before creating a new one.
+  // Guards against the settings panel being re-rendered (e.g. on extension
+  // reload) which would otherwise append a second tooltip div to the body.
+  document.getElementById('sm-tooltip')?.remove();
   const tooltip = document.createElement('div');
   tooltip.id = 'sm-tooltip';
   document.body.appendChild(tooltip);
@@ -700,7 +726,10 @@ function initTooltips() {
     const rect = target.getBoundingClientRect();
     // Prefer showing below the icon; flip above if too close to the bottom.
     const spaceBelow = window.innerHeight - rect.bottom;
-    tooltip.style.left = `${Math.min(rect.left, window.innerWidth - 260)}px`;
+    // Use the tooltip's actual rendered width to clamp the left position,
+    // falling back to 260 before the first render when offsetWidth is 0.
+    const tooltipWidth = tooltip.offsetWidth || 260;
+    tooltip.style.left = `${Math.min(rect.left, window.innerWidth - tooltipWidth - 8)}px`;
     tooltip.style.top =
       spaceBelow > 80 ? `${rect.bottom + 6}px` : `${rect.top - tooltip.offsetHeight - 6}px`;
     tooltip.classList.add('sm-tooltip-visible');
@@ -1154,6 +1183,7 @@ function bindSettingsUI() {
   // Allow manual edits to the summary textarea to take effect immediately.
   $('#sm_current_summary').on('input', function () {
     const context = getContext();
+    if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
     const val = $(this).val();
     context.chatMetadata[META_KEY].summary = val;
@@ -1678,6 +1708,11 @@ function bindSettingsUI() {
         return;
     }
 
+    // The catch-up loop holds extractionRunning=true for its entire duration.
+    // This blocks the background extraction path in onCharacterMessageRendered
+    // from running concurrently, so consolidationRunning does not need a
+    // separate check here - no other path can interleave with catch-up while
+    // extractionRunning is set.
     extractionRunning = true;
     compactionRunning = true;
     catchUpCancelled = false;
@@ -1702,6 +1737,11 @@ function bindSettingsUI() {
       // model, so each chunk naturally builds on what the previous one found.
       for (let i = 0; i < total; i += CATCH_UP_CHUNK_SIZE) {
         if (catchUpCancelled) break;
+
+        // Yield to the browser event loop at the start of each chunk so the
+        // UI remains responsive and the cancel button stays clickable even
+        // when individual model calls complete quickly (e.g. cached responses).
+        await new Promise((resolve) => setTimeout(resolve, 0));
 
         const chunk = allMessages.slice(i, i + CATCH_UP_CHUNK_SIZE);
         const processed = Math.min(i + CATCH_UP_CHUNK_SIZE, total);
@@ -1901,6 +1941,7 @@ function bindSettingsUI() {
       return;
 
     const context = getContext();
+    if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
     // Wipe short-term summary state.
     delete context.chatMetadata[META_KEY].summary;
@@ -1949,6 +1990,7 @@ function bindSettingsUI() {
 
     // Clear all chat-scoped tiers.
     const context = getContext();
+    if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
     delete context.chatMetadata[META_KEY].summary;
     delete context.chatMetadata[META_KEY].summaryEnd;
@@ -2073,6 +2115,16 @@ jQuery(async function () {
   eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
 
+  // When a message is deleted, trim the scene buffer to only messages that
+  // still exist in the chat. Without this, a deleted message would remain in
+  // the buffer and be included in the next scene summary.
+  eventSource.on(event_types.MESSAGE_DELETED, () => {
+    const context = getContext();
+    const chatSet = new Set(context.chat);
+    sceneMessageBuffer = sceneMessageBuffer.filter((m) => chatSet.has(m));
+    sceneBufferLastIndex = Math.min(sceneBufferLastIndex, context.chat.length - 1);
+  });
+
   onChatChanged();
 
   // ---- Slash commands -----------------------------------------------------
@@ -2156,10 +2208,12 @@ jQuery(async function () {
           await extractSessionMemories(recentSession);
           await extractArcs(recentArcs);
           injectMemories(characterName, isFreshStart());
-          injectSessionMemories();
+          await injectSessionMemories();
           injectArcs();
           updateLongTermUI(characterName);
+          updateSessionUI();
           updateArcsUI();
+          saveSettingsDebounced();
           setStatusMessage('Extraction complete.');
           toastr.success('Memory extraction complete.', 'Smart Memory', {
             timeOut: 4000,

@@ -75,7 +75,10 @@ export async function fetchOllamaModels(baseUrl) {
   const response = await fetch(`${url}/api/tags`);
   if (!response.ok) throw new Error(`Ollama responded with ${response.status}`);
   const data = await response.json();
-  return (data.models || []).map((m) => m.name).sort();
+  return (data.models || [])
+    .map((m) => m.name)
+    .filter((name) => typeof name === 'string' && name.length > 0)
+    .sort();
 }
 
 /**

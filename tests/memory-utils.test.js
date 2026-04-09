@@ -28,8 +28,20 @@ test('trimByPriority keeps high-importance memories over low-importance ones', (
 
 test('trimByPriority favors permanent expiration over scene when importance ties', () => {
   const memories = [
-    { type: 'event', content: 'temporary tavern chatter', importance: 2, expiration: 'scene', ts: 5000 },
-    { type: 'event', content: 'major oath was sworn', importance: 2, expiration: 'permanent', ts: 1000 },
+    {
+      type: 'event',
+      content: 'temporary tavern chatter',
+      importance: 2,
+      expiration: 'scene',
+      ts: 5000,
+    },
+    {
+      type: 'event',
+      content: 'major oath was sworn',
+      importance: 2,
+      expiration: 'permanent',
+      ts: 1000,
+    },
   ];
 
   const trimmed = trimByPriority(memories, 1);
@@ -38,9 +50,27 @@ test('trimByPriority favors permanent expiration over scene when importance ties
 
 test('prioritizeMemories boosts recurring keywords compared to one-off details', () => {
   const prioritized = prioritizeMemories([
-    { type: 'fact', content: 'The relic is hidden in the crypt vault', importance: 2, expiration: 'session', ts: 1000 },
-    { type: 'event', content: 'They opened the crypt gate at midnight', importance: 2, expiration: 'session', ts: 900 },
-    { type: 'detail', content: 'A lantern flickered once near the doorway', importance: 2, expiration: 'scene', ts: 3000 },
+    {
+      type: 'fact',
+      content: 'The relic is hidden in the crypt vault',
+      importance: 2,
+      expiration: 'session',
+      ts: 1000,
+    },
+    {
+      type: 'event',
+      content: 'They opened the crypt gate at midnight',
+      importance: 2,
+      expiration: 'session',
+      ts: 900,
+    },
+    {
+      type: 'detail',
+      content: 'A lantern flickered once near the doorway',
+      importance: 2,
+      expiration: 'scene',
+      ts: 3000,
+    },
   ]);
 
   assert.equal(prioritized[0].content, 'The relic is hidden in the crypt vault');
@@ -72,7 +102,9 @@ test('reconcileTypeEntries appends genuinely new entries', () => {
 test('reconcileTypeEntries infers timestamp for new promoted entries from timeline pool', () => {
   const base = [{ type: 'event', content: 'We escaped the city.', ts: 2000 }];
   const unprocessed = [{ type: 'event', content: 'We escaped the city at dawn.', ts: 3000 }];
-  const promoted = [{ type: 'event', content: 'We escaped the city at dawn via the east gate.', ts: 9999 }];
+  const promoted = [
+    { type: 'event', content: 'We escaped the city at dawn via the east gate.', ts: 9999 },
+  ];
 
   const reconciled = reconcileTypeEntries(base, promoted, 0.7, [...base, ...unprocessed]);
   const added = reconciled.find((m) => m.content === promoted[0].content);

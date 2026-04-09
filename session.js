@@ -49,6 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
+import { parseSessionOutput } from './parsers.js';
 import { batchVerify } from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
@@ -119,7 +120,9 @@ export function loadSessionMemories() {
     persona_relevance: m.persona_relevance ?? (m.type === 'development' ? 2 : 1),
     intimacy_relevance: m.intimacy_relevance ?? (m.type === 'development' ? 2 : 1),
     retrieval_count: m.retrieval_count ?? 0,
-    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? Date.now(),
+    // Fall back to 0 (not Date.now()) when both fields are absent so legacy
+    // entries don't receive an artificial recency boost in memoryUtilityScore.
+    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? 0,
   }));
 }
 
@@ -129,6 +132,7 @@ export function loadSessionMemories() {
  */
 export async function saveSessionMemories(memories) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].sessionMemories = memories;
   await context.saveMetadata();
@@ -146,35 +150,6 @@ export async function clearSessionMemories() {
 }
 
 // ---- Parsing ------------------------------------------------------------
-
-/**
- * Parses "[type] content" tagged lines from the model's session extraction output.
- * Lines with unrecognised types or very short content are skipped.
- * @param {string} text - Raw model response.
- * @returns {Array<{type: string, content: string, ts: number}>}
- */
-function parseSessionOutput(text) {
-  if (!text || text.trim().toUpperCase() === 'NONE') return [];
-  const results = [];
-  // Matches lines like: [scene:2] Candlelit tavern, late evening.
-  // Accepts optional spaces around ":" and after "]" for parser resilience.
-  // The importance score is optional - defaults to 2 if omitted.
-  const pattern =
-    /^\[(scene|revelation|development|detail)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    const type = match[1].toLowerCase();
-    const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const expiration = match[3] ? match[3].toLowerCase() : 'session';
-    const content = match[4].trim();
-    if (SESSION_TYPES.includes(type) && content.length > 3) {
-      // New entries start as unprocessed - they will be evaluated against the
-      // consolidated base before being promoted.
-      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
-    }
-  }
-  return results;
-}
 
 /**
  * Merges new session memories into the existing set, skipping near-duplicates
@@ -356,8 +331,9 @@ export async function consolidateSessionMemories(force = false) {
     } catch (err) {
       console.error(`[SmartMemory] Session consolidation failed for type [${type}]:`, err);
       // On failure, mark unprocessed as consolidated so they don't block future passes.
-      unprocessed.forEach((m) => (m.consolidated = true));
+      // Set dirty before the forEach so a mid-loop error still triggers the save.
       dirty = true;
+      unprocessed.forEach((m) => (m.consolidated = true));
     }
   }
 
@@ -392,8 +368,9 @@ export function formatSessionMemories(memories) {
  * Clears the slot if session memory is disabled or no memories exist.
  * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
  *   Only pass true from the post-extraction path (one real AI response turn).
+ * @returns {Promise<void>}
  */
-export function injectSessionMemories(updateTelemetry = false) {
+export async function injectSessionMemories(updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
@@ -435,7 +412,7 @@ export function injectSessionMemories(updateTelemetry = false) {
         last_confirmed_ts: Date.now(),
       };
     });
-    void saveSessionMemories(updated);
+    await saveSessionMemories(updated);
   }
 
   const template = settings.session_template ?? 'Details from this session:\n{{session}}';
@@ -447,7 +424,7 @@ export function injectSessionMemories(updateTelemetry = false) {
     PROMPT_KEY_SESSION,
     content,
     settings.session_position ?? extension_prompt_types.IN_PROMPT,
-    settings.session_depth ?? 1,
+    settings.session_depth ?? 3,
     false,
     settings.session_role ?? extension_prompt_roles.SYSTEM,
   );

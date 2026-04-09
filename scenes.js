@@ -43,37 +43,12 @@ import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
 import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
+import { detectSceneBreakHeuristic } from './parsers.js';
+
+// Re-export so index.js can import directly from scenes.js as before.
+export { detectSceneBreakHeuristic };
 
 // ---- Heuristics ---------------------------------------------------------
-
-// Patterns that reliably signal a scene transition in roleplay prose.
-// Grouped by category for easier tuning: time skips, location transitions,
-// and explicit separator markers authors use between scenes.
-const SCENE_BREAK_PATTERNS = [
-  // Time skips - relative (hours/days/weeks/months/years later)
-  /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|weeks later|months later|years? later|a (few )?(hours?|days?|weeks?|months?|years?) (later|passed|had passed)|the following (day|morning|week|month|year)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
-  // Time skips - absolute jumps ("a year passed", "three months went by")
-  /\b(a (year|month|week|decade)|several (years?|months?|weeks?|days?)|[a-z]+ (years?|months?|weeks?|days?) (passed|went by|had passed|had gone by))\b/i,
-  // Location transitions - arriving at a named or distinct new place.
-  // Deliberately narrow: "entered the room" is not a scene break, but
-  // "arrived at the castle" or "found himself in a foreign city" is.
-  /\b(arrived at (the|a|an)\s+\w+|found (himself|herself|themselves|myself|yourself) (in|at) (a|an|the)\s+\w+|made (his|her|their|my|your) way (to|into) (the|a|an)\s+\w+|fled (to|into) (the|a|an)\s+\w+|escaped (to|into) (the|a|an)\s+\w+)\b/i,
-  // Location transitions - establishing a new base or camp.
-  /\b(settled (in|into|down in)|made (a|his|her|their|my) (home|camp|base) (in|at)|took (shelter|refuge) (in|at|among))\b/i,
-  // Explicit separator markers (---, ***, * * *)
-  /^[-*~]{3,}$/m,
-  /\*\s*\*\s*\*/,
-];
-
-/**
- * Checks the message text against known scene-break patterns.
- * Fast and free - no model call required.
- * @param {string} messageText - The last AI message to inspect.
- * @returns {boolean} True if a scene break pattern is detected.
- */
-export function detectSceneBreakHeuristic(messageText) {
-  return SCENE_BREAK_PATTERNS.some((pattern) => pattern.test(messageText));
-}
 
 /**
  * Asks the model whether the message contains a scene break.
@@ -109,6 +84,7 @@ export function loadSceneHistory() {
  */
 export async function saveSceneHistory(scenes) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].sceneHistory = scenes;
   await context.saveMetadata();
@@ -230,7 +206,7 @@ export function injectSceneHistory() {
     PROMPT_KEY_SCENES,
     content,
     settings.scene_position ?? extension_prompt_types.IN_PROMPT,
-    settings.scene_depth ?? 3,
+    settings.scene_depth ?? 6,
     false,
     settings.scene_role ?? extension_prompt_roles.SYSTEM,
   );

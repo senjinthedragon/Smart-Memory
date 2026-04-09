@@ -42,6 +42,7 @@ import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_ARCS } from './constants.js';
 import { buildArcExtractionPrompt } from './prompts.js';
+import { parseArcOutput } from './parsers.js';
 
 // ---- Storage ------------------------------------------------------------
 
@@ -60,6 +61,7 @@ export function loadArcs() {
  */
 export async function saveArcs(arcs) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].storyArcs = arcs;
   await context.saveMetadata();
@@ -85,101 +87,6 @@ export async function clearArcs() {
     context.chatMetadata[META_KEY].storyArcs = [];
     await context.saveMetadata();
   }
-}
-
-// ---- Parsing ------------------------------------------------------------
-
-/**
- * Parses the model's arc extraction response into lists of arcs to add and
- * indices of existing arcs to resolve.
- *
- * New arcs are tagged [arc]. Resolved arcs are tagged [resolved] - the text
- * after the tag is matched against existing arcs by keyword overlap: if two
- * or more words from the resolved description appear in an existing arc, that
- * arc is marked for removal. This is intentionally loose to handle paraphrasing.
- *
- * @param {string} text - Raw model response.
- * @param {Array} existingArcs - The current arc list (used for resolution matching).
- * @returns {{add: Array, resolve: number[]}} Arcs to add and indices to remove.
- */
-function parseArcOutput(text, existingArcs) {
-  if (!text || text.trim().toUpperCase() === 'NONE') return { add: [], resolve: [] };
-
-  const toAdd = [];
-  const toResolve = [];
-
-  const addPattern = /^\[arc\]\s+(.+)$/gim;
-  const resolvedPattern = /^\[resolved\]\s+(.+)$/gim;
-
-  let match;
-  while ((match = addPattern.exec(text)) !== null) {
-    const content = match[1].trim();
-    if (content.length > 5) toAdd.push({ content, ts: Date.now() });
-  }
-
-  // Common English stop words that appear in almost any sentence and would
-  // produce false matches if included in the word-overlap calculation.
-  const STOP_WORDS = new Set([
-    'a',
-    'an',
-    'the',
-    'and',
-    'or',
-    'but',
-    'in',
-    'on',
-    'at',
-    'to',
-    'for',
-    'of',
-    'with',
-    'by',
-    'from',
-    'is',
-    'was',
-    'are',
-    'were',
-    'be',
-    'been',
-    'has',
-    'had',
-    'have',
-    'that',
-    'this',
-    'it',
-    'he',
-    'she',
-    'they',
-    'we',
-    'his',
-    'her',
-    'their',
-    'its',
-    'my',
-    'your',
-    'not',
-    'no',
-    'so',
-    'as',
-  ]);
-
-  while ((match = resolvedPattern.exec(text)) !== null) {
-    const resolvedText = match[1].trim().toLowerCase();
-    // Match against existing arcs by meaningful word overlap - stop words are
-    // excluded so common filler words don't cause false resolution matches.
-    existingArcs.forEach((arc, idx) => {
-      const arcWords = arc.content
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((w) => !STOP_WORDS.has(w));
-      const resolvedWords = resolvedText.split(/\s+/).filter((w) => !STOP_WORDS.has(w));
-      const overlap = arcWords.filter((w) => resolvedWords.includes(w)).length;
-      if (overlap >= 2) toResolve.push(idx);
-    });
-  }
-
-  // Deduplicate resolved indices in case multiple [resolved] lines matched the same arc.
-  return { add: toAdd, resolve: [...new Set(toResolve)] };
 }
 
 // ---- Extraction ---------------------------------------------------------
@@ -251,7 +158,7 @@ export function injectArcs() {
   }
 
   // Trim to token budget: drop oldest arcs (from the front) until we fit.
-  const budget = settings.arcs_inject_budget ?? 200;
+  const budget = settings.arcs_inject_budget ?? 400;
   const trimmed = [...arcs];
   while (trimmed.length > 1) {
     const text = trimmed.map((a) => `- ${a.content}`).join('\n');
@@ -266,7 +173,7 @@ export function injectArcs() {
     PROMPT_KEY_ARCS,
     content,
     settings.arcs_position ?? extension_prompt_types.IN_PROMPT,
-    settings.arcs_depth ?? 1,
+    settings.arcs_depth ?? 2,
     false,
     settings.arcs_role ?? extension_prompt_roles.SYSTEM,
   );

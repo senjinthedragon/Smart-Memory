@@ -2,6 +2,9 @@
 .claude/
 CLAUDE.md
 
+# Internal planning documents - not for public distribution
+docs/
+
 # Dependencies
 node_modules/
 package-lock.json

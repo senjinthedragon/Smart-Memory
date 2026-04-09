@@ -305,7 +305,9 @@ export function reconcileTypeEntries(base, promoted, threshold, timelinePool = [
       return jaccardSimilarity(mem.content, ex.content) > threshold;
     });
 
-    let inferredTs = mem.ts;
+    // Default to now so the entry always has a valid timestamp even if no
+    // source pool entry scores above the minimum inference threshold.
+    let inferredTs = Number.isFinite(mem.ts) ? mem.ts : Date.now();
     let bestScore = 0;
     // Require a minimum similarity before accepting an inferred timestamp - a
     // near-random match (score ~0.05) is not a meaningful source for the timeline.

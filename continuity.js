@@ -36,6 +36,7 @@ import { MODULE_NAME, META_KEY } from './constants.js';
 import { buildContinuityPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
+import { parseContradictions } from './parsers.js';
 
 /**
  * Collects all established facts into a single labelled text block.
@@ -82,46 +83,6 @@ function gatherEstablishedFacts(characterName) {
   }
 
   return parts.join('\n\n');
-}
-
-/**
- * Parses the model's continuity check response into an array of contradiction strings.
- * Strips leading bullet/numbering characters. Returns an empty array if the
- * model responded with NONE or produced nothing usable.
- * @param {string} text - Raw model response.
- * @returns {string[]}
- */
-// Phrases that indicate the model is saying "all clear" rather than listing
-// contradictions. Local models often write verbose explanations instead of
-// the single word "NONE" the prompt asks for.
-const ALL_CLEAR_PATTERNS = [
-  /\bno contradictions?\b/i,
-  /\bno conflicts?\b/i,
-  /\bdoes not contradict\b/i,
-  /\bdoes not conflict\b/i,
-  /\bconsistent with\b/i,
-  /\baligns? with\b/i,
-  /\bno issues? found\b/i,
-];
-
-function parseContradictions(text) {
-  if (!text || text.trim().toUpperCase() === 'NONE') return [];
-
-  // Local models often write a verdict on the first line ("NO CONFLICTS",
-  // "No contradictions found") followed by a verbose explanation, rather than
-  // outputting NONE. Check only the first non-empty line so we don't
-  // accidentally swallow a real contradiction response that happens to contain
-  // an all-clear phrase mid-text.
-  const firstLine = text
-    .split('\n')
-    .map((l) => l.trim())
-    .find((l) => l.length > 0);
-  if (firstLine && ALL_CLEAR_PATTERNS.some((p) => p.test(firstLine))) return [];
-
-  return text
-    .split('\n')
-    .map((line) => line.replace(/^[-•*\d.]+\s*/, '').trim())
-    .filter((line) => line.length > 5);
 }
 
 /**
