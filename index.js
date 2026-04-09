@@ -852,6 +852,7 @@ function updateSessionUI() {
 
   // Add memory form at the bottom of the list.
   const typeOptions = SESSION_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
+  $list.next('.sm_add_memory_form').remove();
   const $addForm = $(`
     <div class="sm_add_memory_form">
       <select class="sm_add_memory_type">${typeOptions}</select>
@@ -967,6 +968,7 @@ function updateArcsUI() {
   });
 
   // Add arc form at the bottom of the list.
+  $list.next('.sm_add_memory_form').remove();
   const $addForm = $(`
     <div class="sm_add_memory_form">
       <input type="text" class="sm_add_memory_input" placeholder="New story thread...">
@@ -1069,6 +1071,7 @@ function renderMemoriesList(memories, characterName) {
 
   // Add memory form at the bottom of the list.
   const typeOptions = MEMORY_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
+  $list.next('.sm_add_memory_form').remove();
   const $addForm = $(`
     <div class="sm_add_memory_form">
       <select class="sm_add_memory_type">${typeOptions}</select>
