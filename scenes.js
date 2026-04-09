@@ -230,7 +230,7 @@ export function injectSceneHistory() {
     PROMPT_KEY_SCENES,
     content,
     settings.scene_position ?? extension_prompt_types.IN_PROMPT,
-    settings.scene_depth ?? 3,
+    settings.scene_depth ?? 6,
     false,
     settings.scene_role ?? extension_prompt_roles.SYSTEM,
   );

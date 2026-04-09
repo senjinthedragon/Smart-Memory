@@ -345,6 +345,11 @@ async function onCharacterMessageRendered() {
     return;
   }
 
+  // A new AI message has arrived - dismiss any open recap modal so it doesn't
+  // linger while the user reads the response. Recap was only meant as a
+  // pre-response reminder; once the story is moving again it should be gone.
+  $('#sm_recap_overlay').remove();
+
   const characterName = getCurrentCharacterName();
 
   const lastMsg = context.chat
@@ -432,12 +437,17 @@ async function onCharacterMessageRendered() {
       messagesSinceLastExtraction = 0;
       extractionRunning = true;
 
-      const recentCount = Math.min(extractEvery * 2, context.chat.length);
-      const recentMessages = getStableExtractionWindow(context.chat, recentCount);
+      // Use separate windows per tier. Session benefits from more context than
+      // long-term (scene/detail extraction needs the surrounding messages);
+      // long-term extraction targets distilled facts that are visible in a
+      // narrower window. Arc extraction uses a wide window to catch threads
+      // that were introduced earlier in the session.
+      const sessionWindow = getStableExtractionWindow(context.chat, 40);
+      const longtermWindow = getStableExtractionWindow(context.chat, 20);
 
       // If only a fresh assistant reply exists beyond the stable boundary,
       // postpone extraction until the next turn so swipes settle first.
-      if (recentMessages.length === 0) {
+      if (longtermWindow.length === 0 && sessionWindow.length === 0) {
         extractionRunning = false;
         return;
       }
@@ -447,31 +457,34 @@ async function onCharacterMessageRendered() {
       // Run extraction tiers sequentially rather than in parallel.
       // Parallel model calls overwhelm local hardware (RTX 2080 / 8GB VRAM)
       // and gain nothing on Ollama which serializes requests anyway.
-      (async () => {
+      // Awaiting here also prevents compaction/scene detection on the next
+      // message from racing against an ongoing extraction and corrupting
+      // ST's TempResponseLength singleton (the same hazard fixed in 1.0.1).
+      try {
         let total = 0;
 
-        if (settings.session_enabled) {
-          const count = await extractSessionMemories(recentMessages).catch((err) => {
-            console.error('[SmartMemory] Background session extraction error:', err);
+        if (settings.session_enabled && sessionWindow.length > 0) {
+          const count = await extractSessionMemories(sessionWindow).catch((err) => {
+            console.error('[SmartMemory] Session extraction error:', err);
             return 0;
           });
           // Run session consolidation after extraction - fires per-type when threshold is reached.
           if (!consolidationRunning) {
             consolidationRunning = true;
             await consolidateSessionMemories().catch((err) => {
-              console.error('[SmartMemory] Background session consolidation error:', err);
+              console.error('[SmartMemory] Session consolidation error:', err);
             });
             consolidationRunning = false;
           }
-          injectSessionMemories(true);
+          await injectSessionMemories(true);
           updateSessionUI();
           total += count;
         }
 
-        if (settings.longterm_enabled && characterName) {
-          const count = await extractAndStoreMemories(characterName, recentMessages).catch(
+        if (settings.longterm_enabled && characterName && longtermWindow.length > 0) {
+          const count = await extractAndStoreMemories(characterName, longtermWindow).catch(
             (err) => {
-              console.error('[SmartMemory] Background long-term extraction error:', err);
+              console.error('[SmartMemory] Long-term extraction error:', err);
               return 0;
             },
           );
@@ -479,7 +492,7 @@ async function onCharacterMessageRendered() {
           if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
             consolidationRunning = true;
             const removed = await consolidateMemories(characterName).catch((err) => {
-              console.error('[SmartMemory] Background consolidation error:', err);
+              console.error('[SmartMemory] Consolidation error:', err);
               return 0;
             });
             consolidationRunning = false;
@@ -507,7 +520,7 @@ async function onCharacterMessageRendered() {
           // prompt so resolution still works even outside this window.
           const arcWindow = getStableExtractionWindow(context.chat, 100);
           const count = await extractArcs(arcWindow).catch((err) => {
-            console.error('[SmartMemory] Background arc extraction error:', err);
+            console.error('[SmartMemory] Arc extraction error:', err);
             return 0;
           });
           injectArcs();
@@ -517,12 +530,12 @@ async function onCharacterMessageRendered() {
 
         updateTokenDisplay();
         setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
-        extractionRunning = false;
-      })().catch((err) => {
+      } catch (err) {
         console.error('[SmartMemory] Extraction error:', err);
         setStatusMessage('');
+      } finally {
         extractionRunning = false;
-      });
+      }
     }
   }
 
@@ -2156,10 +2169,12 @@ jQuery(async function () {
           await extractSessionMemories(recentSession);
           await extractArcs(recentArcs);
           injectMemories(characterName, isFreshStart());
-          injectSessionMemories();
+          await injectSessionMemories();
           injectArcs();
           updateLongTermUI(characterName);
+          updateSessionUI();
           updateArcsUI();
+          saveSettingsDebounced();
           setStatusMessage('Extraction complete.');
           toastr.success('Memory extraction complete.', 'Smart Memory', {
             timeOut: 4000,

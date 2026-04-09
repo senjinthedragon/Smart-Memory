@@ -392,8 +392,9 @@ export function formatSessionMemories(memories) {
  * Clears the slot if session memory is disabled or no memories exist.
  * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
  *   Only pass true from the post-extraction path (one real AI response turn).
+ * @returns {Promise<void>}
  */
-export function injectSessionMemories(updateTelemetry = false) {
+export async function injectSessionMemories(updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
@@ -435,7 +436,7 @@ export function injectSessionMemories(updateTelemetry = false) {
         last_confirmed_ts: Date.now(),
       };
     });
-    void saveSessionMemories(updated);
+    await saveSessionMemories(updated);
   }
 
   const template = settings.session_template ?? 'Details from this session:\n{{session}}';
@@ -447,7 +448,7 @@ export function injectSessionMemories(updateTelemetry = false) {
     PROMPT_KEY_SESSION,
     content,
     settings.session_position ?? extension_prompt_types.IN_PROMPT,
-    settings.session_depth ?? 1,
+    settings.session_depth ?? 3,
     false,
     settings.session_role ?? extension_prompt_roles.SYSTEM,
   );

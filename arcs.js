@@ -251,7 +251,7 @@ export function injectArcs() {
   }
 
   // Trim to token budget: drop oldest arcs (from the front) until we fit.
-  const budget = settings.arcs_inject_budget ?? 200;
+  const budget = settings.arcs_inject_budget ?? 400;
   const trimmed = [...arcs];
   while (trimmed.length > 1) {
     const text = trimmed.map((a) => `- ${a.content}`).join('\n');
@@ -266,7 +266,7 @@ export function injectArcs() {
     PROMPT_KEY_ARCS,
     content,
     settings.arcs_position ?? extension_prompt_types.IN_PROMPT,
-    settings.arcs_depth ?? 1,
+    settings.arcs_depth ?? 2,
     false,
     settings.arcs_role ?? extension_prompt_roles.SYSTEM,
   );

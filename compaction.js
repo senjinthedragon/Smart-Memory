@@ -40,7 +40,7 @@ import { getContext, extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
 import { buildSummaryPrompt, buildUpdateSummaryPrompt } from './prompts.js';
-import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
+import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 
 /**
@@ -122,7 +122,11 @@ export async function runCompaction() {
     const existingSummary = meta?.summary;
     // summaryEnd is the chat array index of the last message already included
     // in the existing summary. Messages after this index are "new" for the update.
-    const summaryEnd = meta?.summaryEnd ?? 0;
+    // Clamp to the current chat length: if messages were deleted since the last
+    // summary, summaryEnd could point past the end of the array, which would
+    // cause the update path to process zero new messages and stall.
+    const rawSummaryEnd = meta?.summaryEnd ?? 0;
+    const summaryEnd = Math.min(rawSummaryEnd, context.chat.length);
 
     // Build a brief digest of what is already stored at other tiers so the
     // summary can focus on narrative flow rather than restating known facts.
@@ -130,18 +134,38 @@ export async function runCompaction() {
     const characterName = context.name2 || context.characterName || null;
     const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
     const sessionMemories = loadSessionMemories();
+    // Build a digest of what is stored at other tiers so the summary can skip
+    // restating known facts. Cap by token budget rather than entry count so a
+    // few very long memories don't overflow the model context window.
+    const DIGEST_TOKEN_BUDGET = 400;
     const storedDigestParts = [];
     if (longtermMemories.length > 0) {
-      storedDigestParts.push(
-        `Long-term memories:\n${formatMemoriesForPrompt(longtermMemories.slice(0, 10))}`,
-      );
+      let ltLines = [];
+      let ltTokens = 0;
+      for (const m of longtermMemories) {
+        const line = `[${m.type}] ${m.content}`;
+        const est = estimateTokens(line);
+        if (ltTokens + est > DIGEST_TOKEN_BUDGET) break;
+        ltLines.push(line);
+        ltTokens += est;
+      }
+      if (ltLines.length > 0) {
+        storedDigestParts.push(`Long-term memories:\n${ltLines.join('\n')}`);
+      }
     }
     if (sessionMemories.length > 0) {
-      const sessionLines = sessionMemories
-        .slice(0, 10)
-        .map((m) => `[${m.type}] ${m.content}`)
-        .join('\n');
-      storedDigestParts.push(`Session memories:\n${sessionLines}`);
+      let sesLines = [];
+      let sesTokens = 0;
+      for (const m of sessionMemories) {
+        const line = `[${m.type}] ${m.content}`;
+        const est = estimateTokens(line);
+        if (sesTokens + est > DIGEST_TOKEN_BUDGET) break;
+        sesLines.push(line);
+        sesTokens += est;
+      }
+      if (sesLines.length > 0) {
+        storedDigestParts.push(`Session memories:\n${sesLines.join('\n')}`);
+      }
     }
     const storedMemories = storedDigestParts.join('\n\n');
 
@@ -204,13 +228,13 @@ export function injectSummary(summary) {
 
   // Truncate to response length - the LLM shouldn't generate more than we inject,
   // so response_length doubles as the injection cap for short-term memory.
-  const budget = settings.compaction_response_length ?? 1500;
+  const budget = settings.compaction_response_length ?? 2000;
   let summaryText = summary;
   if (estimateTokens(summaryText) > budget) {
     summaryText = summaryText.slice(0, budget * 4) + '... [truncated]';
   }
 
-  const template = settings.compaction_template || '[Story so far:\n{{summary}}]';
+  const template = settings.compaction_template || 'Story so far:\n{{summary}}';
   const content = template.replace('{{summary}}', summaryText);
 
   setExtensionPrompt(

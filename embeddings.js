@@ -199,30 +199,38 @@ export async function batchVerify(candidates, existing) {
     ),
   ];
   const vectorMap = await getEmbeddingBatch(allTexts);
-  const useSemantic = vectorMap.size > 0;
-
-  const sameTypeThreshold = useSemantic ? 0.82 : 0.65;
-  const crossTypeThreshold = useSemantic ? 0.88 : 0.75;
+  const anyEmbeddings = vectorMap.size > 0;
 
   for (const cand of candidates) {
     const candText = String(cand.content || '')
       .toLowerCase()
       .trim();
-    const candVec = vectorMap.get(candText) ?? null;
+    const candVec = anyEmbeddings ? (vectorMap.get(candText) ?? null) : null;
 
     let isDuplicate = false;
     for (const ex of existing) {
       const exText = String(ex.content || '')
         .toLowerCase()
         .trim();
+
+      // Select threshold and scoring method per pair. Fall back to Jaccard
+      // with Jaccard thresholds when either vector is missing - using a
+      // semantic threshold against a Jaccard score would give wrong results.
       let score;
-      if (useSemantic && candVec) {
-        const exVec = vectorMap.get(exText) ?? null;
+      let sameThreshold;
+      let crossThreshold;
+      const exVec = anyEmbeddings ? (vectorMap.get(exText) ?? null) : null;
+      if (candVec && exVec) {
         score = cosineSimilarity(candVec, exVec);
+        sameThreshold = 0.82;
+        crossThreshold = 0.88;
       } else {
         score = jaccardSimilarity(candText, exText);
+        sameThreshold = 0.65;
+        crossThreshold = 0.75;
       }
-      const threshold = ex.type === cand.type ? sameTypeThreshold : crossTypeThreshold;
+
+      const threshold = ex.type === cand.type ? sameThreshold : crossThreshold;
       if (score > threshold) {
         isDuplicate = true;
         break;
@@ -231,6 +239,8 @@ export async function batchVerify(candidates, existing) {
 
     if (!isDuplicate) passed.add(candText);
   }
+
+  const useSemantic = anyEmbeddings;
 
   return { passed, semantic: useSemantic };
 }

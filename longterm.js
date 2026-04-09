@@ -278,12 +278,16 @@ function mergeMemories(existing, incoming, maxTotal) {
     if (typeAdded >= MAX_NEW_PER_TYPE_PER_EXTRACTION) continue;
 
     // If this type is already at the per-type storage cap, evict the
-    // lowest-priority existing entry of this type before adding the new one.
+    // lowest-priority existing entry of this type before adding the new one -
+    // but only if the new entry actually outscores the one we'd displace.
+    // Without this guard a burst of low-priority new entries could displace
+    // high-priority existing ones that are far more valuable to keep.
     const typeEntries = merged.filter((m) => m.type === mem.type);
     if (typeEntries.length >= perTypeCap) {
       const prioritized = prioritizeMemories(typeEntries);
-      // Last entry in prioritized is lowest priority - remove it from merged.
+      // Last entry in prioritized is lowest priority.
       const toEvict = prioritized[prioritized.length - 1];
+      if (incomingPriorityScore(mem) <= incomingPriorityScore(toEvict)) continue;
       const evictIdx = merged.findIndex(
         (m) => m.type === toEvict.type && m.content === toEvict.content,
       );
