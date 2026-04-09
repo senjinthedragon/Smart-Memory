@@ -55,6 +55,8 @@ import {
   PROMPT_KEY_SESSION,
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
+  MEMORY_TYPES,
+  SESSION_TYPES,
 } from './constants.js';
 import { memory_sources, fetchOllamaModels, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
@@ -90,7 +92,7 @@ import {
   clearSceneHistory,
   detectSceneBreakHeuristic,
 } from './scenes.js';
-import { extractArcs, injectArcs, loadArcs, clearArcs, deleteArc } from './arcs.js';
+import { extractArcs, injectArcs, loadArcs, saveArcs, clearArcs, deleteArc } from './arcs.js';
 import { checkContinuity } from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
 
@@ -847,6 +849,40 @@ function updateSessionUI() {
     injectSessionMemories();
     updateSessionUI();
   });
+
+  // Add memory form at the bottom of the list.
+  const typeOptions = SESSION_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
+  const $addForm = $(`
+    <div class="sm_add_memory_form">
+      <select class="sm_add_memory_type">${typeOptions}</select>
+      <input type="text" class="sm_add_memory_input" placeholder="New session memory...">
+      <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
+    </div>
+  `);
+  $list.append($addForm);
+
+  $addForm.find('.sm_add_memory_btn').on('click', async () => {
+    const type = $addForm.find('.sm_add_memory_type').val();
+    const content = $addForm.find('.sm_add_memory_input').val().trim();
+    if (!content) return;
+    const memories = loadSessionMemories();
+    memories.push({
+      type,
+      content,
+      importance: 2,
+      expiration: 'session',
+      ts: Date.now(),
+      consolidated: true,
+      confidence: 1.0,
+      persona_relevance: 1,
+      intimacy_relevance: 1,
+      retrieval_count: 0,
+      last_confirmed_ts: Date.now(),
+    });
+    await saveSessionMemories(memories);
+    await injectSessionMemories();
+    updateSessionUI();
+  });
 }
 
 /** Re-renders the scene history list. */
@@ -867,7 +903,7 @@ function updateScenesUI() {
   });
 }
 
-/** Re-renders the story arcs list with per-arc resolve buttons. */
+/** Re-renders the story arcs list with per-arc edit, resolve, and add buttons. */
 function updateArcsUI() {
   const arcs = loadArcs();
   const $list = $('#sm_arcs_list');
@@ -875,13 +911,15 @@ function updateArcsUI() {
 
   if (arcs.length === 0) {
     $list.append('<div class="sm_no_char">No open story threads.</div>');
-    return;
   }
 
   arcs.forEach((arc, idx) => {
     const $item = $(`
             <div class="sm_arc_item" data-index="${idx}">
                 <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
+                <button class="sm_edit_arc menu_button" data-index="${idx}" title="Edit this arc">
+                    <i class="fa-solid fa-pencil"></i>
+                </button>
                 <button class="sm_delete_arc menu_button" data-index="${idx}" title="Resolve / remove this arc">
                     <i class="fa-solid fa-check"></i>
                 </button>
@@ -890,9 +928,59 @@ function updateArcsUI() {
     $list.append($item);
   });
 
+  $list.find('.sm_edit_arc').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const $item = $(this).closest('.sm_arc_item');
+    const $textSpan = $item.find('.sm_arc_text');
+    const current = loadArcs();
+    if (!current[idx]) return;
+
+    const $textarea = $('<textarea class="sm_memory_edit_input">').val(current[idx].content);
+    $textSpan.replaceWith($textarea);
+    $textarea.trigger('focus');
+
+    $(this).hide();
+    $item.find('.sm_delete_arc').hide();
+    const $save = $('<button class="sm_save_arc menu_button" title="Save">Save</button>');
+    const $cancel = $('<button class="sm_cancel_arc menu_button" title="Cancel">Cancel</button>');
+    $item.append($save, $cancel);
+
+    $save.on('click', async () => {
+      const newContent = $textarea.val().trim();
+      if (!newContent) return;
+      const arcs = loadArcs();
+      if (!arcs[idx]) return;
+      arcs[idx].content = newContent;
+      await saveArcs(arcs);
+      injectArcs();
+      updateArcsUI();
+    });
+
+    $cancel.on('click', () => updateArcsUI());
+  });
+
   $list.find('.sm_delete_arc').on('click', async function () {
     const idx = parseInt($(this).data('index'), 10);
     await deleteArc(idx);
+    injectArcs();
+    updateArcsUI();
+  });
+
+  // Add arc form at the bottom of the list.
+  const $addForm = $(`
+    <div class="sm_add_memory_form">
+      <input type="text" class="sm_add_memory_input" placeholder="New story thread...">
+      <button class="sm_add_memory_btn menu_button" title="Add arc">Add</button>
+    </div>
+  `);
+  $list.append($addForm);
+
+  $addForm.find('.sm_add_memory_btn').on('click', async () => {
+    const content = $addForm.find('.sm_add_memory_input').val().trim();
+    if (!content) return;
+    const arcs = loadArcs();
+    arcs.push({ content, ts: Date.now() });
+    await saveArcs(arcs);
     injectArcs();
     updateArcsUI();
   });
@@ -977,6 +1065,41 @@ function renderMemoriesList(memories, characterName) {
     saveCharacterMemories(characterName, current);
     saveSettingsDebounced();
     renderMemoriesList(current, characterName);
+  });
+
+  // Add memory form at the bottom of the list.
+  const typeOptions = MEMORY_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('');
+  const $addForm = $(`
+    <div class="sm_add_memory_form">
+      <select class="sm_add_memory_type">${typeOptions}</select>
+      <input type="text" class="sm_add_memory_input" placeholder="New memory...">
+      <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
+    </div>
+  `);
+  $list.append($addForm);
+
+  $addForm.find('.sm_add_memory_btn').on('click', () => {
+    const type = $addForm.find('.sm_add_memory_type').val();
+    const content = $addForm.find('.sm_add_memory_input').val().trim();
+    if (!content) return;
+    const memories = loadCharacterMemories(characterName);
+    memories.push({
+      type,
+      content,
+      importance: 2,
+      expiration: 'permanent',
+      ts: Date.now(),
+      consolidated: true,
+      confidence: 1.0,
+      persona_relevance: type === 'relationship' ? 3 : 1,
+      intimacy_relevance: type === 'preference' ? 3 : 1,
+      retrieval_count: 0,
+      last_confirmed_ts: Date.now(),
+    });
+    saveCharacterMemories(characterName, memories);
+    saveSettingsDebounced();
+    injectMemories(characterName, isFreshStart());
+    renderMemoriesList(loadCharacterMemories(characterName), characterName);
   });
 }
 
