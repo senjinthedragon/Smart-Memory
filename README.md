@@ -99,12 +99,13 @@ Smart Memory's defaults are designed to layer cleanly alongside vector storage. 
 
 | Tier | Position | Depth | Notes |
 | --- | --- | --- | --- |
-| Recap | In-chat | 0 | Temporary - cleared after first response |
 | Arcs | In-chat | 2 | Shares depth with ST chat vectors intentionally |
 | Session | In-chat | 3 | Just above ST's default vector depth |
 | Scenes | In-chat | 6 | Further back - past scene context |
 | Long-term | In-prompt | - | Near character card |
 | Short-term | In-prompt | - | Narrative background |
+
+The away recap is shown as a popup to the user, not injected into the prompt.
 
 If you change ST's vector storage depth, set session memory one higher so it still layers above vectors.
 
@@ -196,9 +197,8 @@ ollama pull nomic-embed-text
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| Enable recap | On | Generate a recap when returning after a gap |
+| Enable recap | On | Show a recap popup when returning after a gap |
 | Threshold | 4 hours | Minimum time away before a recap is generated |
-| Injection position | In-chat @ depth 0 | Right before the AI responds; cleared after first response |
 
 ---
 
