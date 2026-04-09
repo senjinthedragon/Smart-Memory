@@ -98,6 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `updateSessionUI()` after extraction so the UI reflects the new state immediately.
 - **Recap overlay**: the away recap popup is now dismissed on the first AI response
   after it is shown, rather than persisting until manually closed.
+- **`summaryEnd` clamp**: `summaryEnd` is now clamped to the current chat length
+  before use. If messages were deleted since the last compaction, a stale
+  `summaryEnd` pointing past the end of the array would cause the progressive
+  update path to process zero new messages and stall indefinitely.
+- **Telemetry persistence**: `saveSettingsDebounced()` is now called immediately
+  after the retrieval telemetry write in `injectMemories` (`retrieval_count` and
+  `last_confirmed_ts`). Previously these writes were lost if the browser tab
+  closed before the next explicit settings save.
 - **`memory-utils.js` timestamp inference**: uses `Number.isFinite` to guard
   against non-numeric `ts` values when inferring timestamps for promoted entries.
 - **`injectSessionMemories`** is now fully async so telemetry writes complete
