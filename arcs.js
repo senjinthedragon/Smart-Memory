@@ -42,6 +42,7 @@ import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_ARCS } from './constants.js';
 import { buildArcExtractionPrompt } from './prompts.js';
+import { parseArcOutput } from './parsers.js';
 
 // ---- Storage ------------------------------------------------------------
 
@@ -86,62 +87,6 @@ export async function clearArcs() {
     context.chatMetadata[META_KEY].storyArcs = [];
     await context.saveMetadata();
   }
-}
-
-// ---- Parsing ------------------------------------------------------------
-
-/**
- * Parses the model's arc extraction response into lists of arcs to add and
- * indices of existing arcs to resolve.
- *
- * New arcs are tagged [arc]. Resolved arcs are tagged [resolved] - the text
- * after the tag is matched against existing arcs by keyword overlap: if two
- * or more words from the resolved description appear in an existing arc, that
- * arc is marked for removal. This is intentionally loose to handle paraphrasing.
- *
- * @param {string} text - Raw model response.
- * @param {Array} existingArcs - The current arc list (used for resolution matching).
- * @returns {{add: Array, resolve: number[]}} Arcs to add and indices to remove.
- */
-function parseArcOutput(text, existingArcs) {
-  if (!text || text.trim().toUpperCase() === 'NONE') return { add: [], resolve: [] };
-
-  const toAdd = [];
-  const toResolve = [];
-
-  const addPattern = /^\[arc\]\s+(.+)$/gim;
-  const resolvedPattern = /^\[resolved\]\s+(.+)$/gim;
-
-  let match;
-  while ((match = addPattern.exec(text)) !== null) {
-    const content = match[1].trim();
-    if (content.length > 5) toAdd.push({ content, ts: Date.now() });
-  }
-
-  while ((match = resolvedPattern.exec(text)) !== null) {
-    const resolvedText = match[1].trim().toLowerCase();
-    // Match against existing arcs using Jaccard word-overlap similarity.
-    // A flat "overlap >= 2" count was brittle: short arcs with two shared
-    // non-stop words would falsely co-resolve unrelated arcs, while word-form
-    // differences (meet/met, promise/promised) caused genuine resolutions to
-    // miss. A proportional similarity threshold handles both problems better.
-    existingArcs.forEach((arc, idx) => {
-      const arcWords = new Set(arc.content.toLowerCase().split(/\s+/).filter(Boolean));
-      const resolvedWords = new Set(resolvedText.split(/\s+/).filter(Boolean));
-      if (arcWords.size === 0 || resolvedWords.size === 0) return;
-      const intersection = [...arcWords].filter((w) => resolvedWords.has(w)).length;
-      const union = new Set([...arcWords, ...resolvedWords]).size;
-      const similarity = intersection / union;
-      // Threshold: require at least 25% Jaccard overlap. This is intentionally
-      // permissive - the model already paraphrases the arc in the [resolved]
-      // line so exact word matches are rare, but 25% rules out coincidental
-      // two-word matches between completely unrelated arcs.
-      if (similarity >= 0.25) toResolve.push(idx);
-    });
-  }
-
-  // Deduplicate resolved indices in case multiple [resolved] lines matched the same arc.
-  return { add: toAdd, resolve: [...new Set(toResolve)] };
 }
 
 // ---- Extraction ---------------------------------------------------------

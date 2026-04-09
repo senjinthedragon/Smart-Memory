@@ -49,6 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
+import { parseSessionOutput } from './parsers.js';
 import { batchVerify } from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
@@ -149,35 +150,6 @@ export async function clearSessionMemories() {
 }
 
 // ---- Parsing ------------------------------------------------------------
-
-/**
- * Parses "[type] content" tagged lines from the model's session extraction output.
- * Lines with unrecognised types or very short content are skipped.
- * @param {string} text - Raw model response.
- * @returns {Array<{type: string, content: string, ts: number}>}
- */
-function parseSessionOutput(text) {
-  if (!text || text.trim().toUpperCase() === 'NONE') return [];
-  const results = [];
-  // Matches lines like: [scene:2] Candlelit tavern, late evening.
-  // Accepts optional spaces around ":" and after "]" for parser resilience.
-  // The importance score is optional - defaults to 2 if omitted.
-  const pattern =
-    /^\[(scene|revelation|development|detail)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    const type = match[1].toLowerCase();
-    const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const expiration = match[3] ? match[3].toLowerCase() : 'session';
-    const content = match[4].trim();
-    if (SESSION_TYPES.includes(type) && content.length > 3) {
-      // New entries start as unprocessed - they will be evaluated against the
-      // consolidated base before being promoted.
-      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
-    }
-  }
-  return results;
-}
 
 /**
  * Merges new session memories into the existing set, skipping near-duplicates

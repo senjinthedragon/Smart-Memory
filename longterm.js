@@ -51,6 +51,7 @@ import {
   META_KEY,
 } from './constants.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
+import { parseExtractionOutput } from './parsers.js';
 import {
   prioritizeMemories,
   reconcileTypeEntries,
@@ -195,38 +196,6 @@ export function formatMemoriesForPrompt(memories) {
 }
 
 // ---- Extraction ---------------------------------------------------------
-
-/**
- * Parses "[type] content" tagged lines from the model's extraction output.
- * Lines that don't match the expected format or have unrecognised types are skipped.
- * @param {string} text - Raw model response.
- * @returns {Array<{type: string, content: string, ts: number}>}
- */
-function parseExtractionOutput(text) {
-  if (!text || text.trim().toUpperCase() === 'NONE') return [];
-
-  const results = [];
-  // Matches lines like: [fact:2] The character is tall.
-  // Accepts optional spaces around ":" and after "]" for parser resilience.
-  // The importance score is optional - defaults to 2 if omitted.
-  const linePattern =
-    /^\[(fact|relationship|preference|event)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
-  let match;
-
-  while ((match = linePattern.exec(text)) !== null) {
-    const type = match[1].toLowerCase();
-    const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const expiration = match[3] ? match[3].toLowerCase() : 'permanent';
-    const content = match[4].trim();
-    if (MEMORY_TYPES.includes(type) && content.length > 5) {
-      // New entries start as unprocessed - they will be evaluated against the
-      // consolidated base before being promoted.
-      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
-    }
-  }
-
-  return results;
-}
 
 /**
  * Merges new memories into the existing set, skipping near-duplicates and

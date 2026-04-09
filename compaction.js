@@ -40,6 +40,7 @@ import { getContext, extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
 import { buildSummaryPrompt, buildUpdateSummaryPrompt } from './prompts.js';
+import { formatSummary } from './parsers.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 
@@ -75,35 +76,6 @@ export async function shouldCompact() {
 
   const ratio = tokens / maxTokens;
   return ratio >= settings.compaction_threshold / 100;
-}
-
-/**
- * Strips the <analysis> scratchpad block and unwraps the <summary> block
- * from the model's raw output. Falls back to the trimmed raw string if
- * no <summary> tags are present.
- * @param {string} raw - Raw model output.
- * @returns {string} Cleaned summary text.
- */
-function formatSummary(raw) {
-  // Strip analysis block - handle both closed and unclosed tags.
-  // If the model didn't write </analysis>, strip everything from <analysis>
-  // up to the first <summary> tag so it doesn't bleed into the summary content.
-  let result = raw.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim();
-  // Fallback: unclosed <analysis> - strip from tag to start of <summary>
-  result = result.replace(/<analysis>[\s\S]*?(?=<summary>)/i, '').trim();
-  // Try a complete <summary>...</summary> block first.
-  const fullMatch = result.match(/<summary>([\s\S]*?)<\/summary>/i);
-  if (fullMatch) {
-    return fullMatch[1].trim();
-  }
-  // If the closing tag is missing the model was cut off mid-response.
-  // Extract whatever content appeared after the opening tag rather than
-  // falling back to the raw string which still contains the opening tag.
-  const partialMatch = result.match(/<summary>([\s\S]*)/i);
-  if (partialMatch) {
-    return partialMatch[1].trim();
-  }
-  return result;
 }
 
 /**
