@@ -87,7 +87,6 @@ function verifyLongtermCandidates(candidates, existing) {
     seen.add(key);
 
     const isNearDuplicate = existing.some((ex) => {
-      if (ex.type !== mem.type) return false;
       const a = new Set(lower.split(/\s+/));
       const b = new Set(
         String(ex.content || '')
@@ -96,10 +95,16 @@ function verifyLongtermCandidates(candidates, existing) {
       );
       const overlap = [...a].filter((w) => b.has(w)).length;
       const union = new Set([...a, ...b]).size || 1;
-      // Lowered from 0.85 to 0.65 - catches more semantic near-duplicates that
-      // share the same topic but vary in phrasing. False positives (dropping a
-      // genuinely new entry) are less harmful than letting 10 variants accumulate.
-      return overlap / union > 0.65;
+      const similarity = overlap / union;
+
+      // Same type: use the standard 0.65 threshold.
+      if (ex.type === mem.type) return similarity > 0.65;
+
+      // Cross-type: only flag as duplicate if very high overlap (0.75+).
+      // "Finn needs dual-stimulation" filed as both fact and preference is a
+      // duplicate regardless of type; "first love was my ai, second was my wife"
+      // share words but are clearly distinct and should not be merged.
+      return similarity > 0.75;
     });
     return !isNearDuplicate;
   });
@@ -500,6 +505,21 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
       break;
     }
   }
+
+  // Diversity floor: cap entries per type so a flood of near-duplicate
+  // variants of one type (e.g. many preference entries about the same topic)
+  // cannot crowd out other types entirely. Cap is proportional to budget so
+  // larger budgets allow more entries per type without being too restrictive.
+  // Formula: max(2, floor(budget / 150)) gives 2 at 200 tokens, 3 at 500, 6 at 900.
+  const perTypeCap = Math.max(2, Math.floor(budget / 150));
+  const typeCount = new Map();
+  const diversified = trimmed.filter((m) => {
+    const count = typeCount.get(m.type) ?? 0;
+    if (count >= perTypeCap) return false;
+    typeCount.set(m.type, count + 1);
+    return true;
+  });
+  trimmed.splice(0, trimmed.length, ...diversified);
 
   // Only update retrieval telemetry when called from a real AI response turn.
   // Skipping on chat load, settings changes etc. prevents the signal from
