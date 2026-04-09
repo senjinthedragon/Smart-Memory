@@ -365,6 +365,7 @@
 
 #smart_memory_settings .sm_add_memory_type {
   flex-shrink: 0;
+  max-width: 8em;
   background: var(--greyCAl, rgba(255, 255, 255, 0.07));
   border: 1px solid var(--border-color, #555);
   border-radius: 3px;

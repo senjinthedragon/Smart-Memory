@@ -859,7 +859,7 @@ function updateSessionUI() {
       <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
     </div>
   `);
-  $list.append($addForm);
+  $list.after($addForm);
 
   $addForm.find('.sm_add_memory_btn').on('click', async () => {
     const type = $addForm.find('.sm_add_memory_type').val();
@@ -973,7 +973,7 @@ function updateArcsUI() {
       <button class="sm_add_memory_btn menu_button" title="Add arc">Add</button>
     </div>
   `);
-  $list.append($addForm);
+  $list.after($addForm);
 
   $addForm.find('.sm_add_memory_btn').on('click', async () => {
     const content = $addForm.find('.sm_add_memory_input').val().trim();
@@ -1076,7 +1076,7 @@ function renderMemoriesList(memories, characterName) {
       <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
     </div>
   `);
-  $list.append($addForm);
+  $list.after($addForm);
 
   $addForm.find('.sm_add_memory_btn').on('click', () => {
     const type = $addForm.find('.sm_add_memory_type').val();
