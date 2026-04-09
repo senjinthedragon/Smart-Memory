@@ -5,40 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - 2026-04-07
+## [1.2.0] - 2026-04-09
 
 ### Added
 
+- **Semantic embedding deduplication**: memory candidates are now compared using
+  vector similarity via Ollama's `/api/embed` endpoint instead of word overlap.
+  Catches near-paraphrase duplicates that Jaccard misses - e.g. "Finn is
+  Senjin's anchor" and "Finn serves as Senjin's emotional foundation" are
+  correctly identified as the same fact. Falls back to word-overlap
+  automatically when no embedding model is available.
+  - New settings panel section: embedding model, URL, and keep-in-memory toggle.
+  - Defaults to `nomic-embed-text` - already installed by most users via
+    SillyTavern's Vector Storage extension.
+  - All candidate and existing memory texts are embedded in a single batch API
+    call per verification pass, minimizing model swap overhead on constrained
+    hardware.
+- **Per-type storage cap**: long-term memory storage is now capped per type
+  (derived from `Max memories per character / 4`). At the default of 25, no
+  single type can exceed 7 entries. When a new entry would push a type over its
+  cap, the lowest-priority existing entry of that type is evicted first. Scales
+  automatically when users raise the overall limit.
+- **Cross-tier memory awareness**: the short-term summary is now aware of
+  long-term and session memory contents and avoids restating facts already
+  stored at other tiers. Session extraction skips facts already captured in
+  long-term memory.
+- **Ollama and OpenAI Compatible memory LLM sources**: Smart Memory can now use
+  a dedicated Ollama instance or any OpenAI-compatible API for memory work,
+  keeping the main roleplay model free.
+- **Away recap popup**: the away recap is now shown as a user-facing popup on
+  return rather than silently injected into the AI context.
 - Session prompt injection now prepends a compact **Current scene state** block
-  synthesized from the latest session memories across `scene`, `development`,
-  `detail`, and `revelation` types.
-- Added unit coverage for current scene-state block synthesis to ensure newest
-  per-type details are selected.
-- Introduced a second-stage memory candidate verifier for both long-term and
-  session extraction flows. The verifier filters malformed/low-signal lines,
-  drops uncertain wording, and suppresses highly redundant candidates before
-  persistence.
-- Added utility-decay retention scoring signals to memory prioritization:
-  confidence, persona relevance, intimacy relevance, retrieval count, and
-  last-confirmed timestamp now influence which memories survive trimming.
-- Added protected-slot trimming behavior in prompt injection:
-  - Long-term injection now reserves slots for relationship/preference/fact
-    continuity when possible.
-  - Session injection now reserves slots for development/scene continuity when
-    possible.
-- Added retrieval telemetry updates on injected memories (`retrieval_count`,
-  `last_confirmed_ts`) so frequently used memories are retained more reliably
-  in future trims.
-- Added unit tests for utility scoring and protected-slot selection behavior.
+  synthesized from the latest session memories.
+- Second-stage memory candidate verifier filters malformed and low-signal
+  entries before persistence.
+- Utility-decay retention scoring: confidence, persona relevance, intimacy
+  relevance, retrieval count, and last-confirmed timestamp now influence which
+  memories survive trimming.
+- Protected-slot injection: long-term and session injection reserve slots for
+  high-continuity types so they are not crowded out by lower-priority entries.
+- Retrieval telemetry on injected memories so frequently recalled entries are
+  retained more reliably over time.
 
 ### Changed
 
-- Long-term and session memory loading now auto-migrates additional metadata
-  defaults for legacy entries (`confidence`, `persona_relevance`,
-  `intimacy_relevance`, `retrieval_count`, `last_confirmed_ts`) without
-  breaking existing stores.
+- Per-extraction limit changed from 4 total new entries to 2 per type - prevents
+  a burst of similar events from flooding one type in a single pass.
+- Compaction response length raised from 1500 to 2000 tokens to prevent
+  truncation on long 9-section summaries.
+- Arc injection budget raised from 200 to 400 tokens so all 10 arcs fit without
+  truncation.
+- All injection templates changed from bracket-wrapped (`[Story so far: ...]`)
+  to plain text to prevent bracket notation bleeding into RP output.
+- Consolidation thresholds now configurable per type in the settings panel.
 - Retention ordering now uses utility-decay scoring instead of only
   expiration/importance/keyword frequency/recency.
+- Long-term and session memory loading now auto-migrates additional metadata
+  defaults for legacy entries without breaking existing stores.
+
+### Fixed
+
+- `<analysis>` scratchpad tag no longer bleeds into stored summaries when the
+  model omits the closing tag.
+- Truncated summary responses now recover partial content from unclosed
+  `<summary>` tags rather than discarding the entire response.
+- Extraction and compaction no longer fire on swipes - only accepted messages
+  are processed.
+- All manual extract and clear buttons are blocked while Memorize Chat is
+  running to prevent conflicting writes.
+- Confirmation required before Memorize Chat when memories already exist, to
+  prevent accidental near-duplicate accumulation.
+- Scene catch-up now correctly walks all heuristic scene breaks across the full
+  chat history instead of only detecting the last scene.
+- "Now X, now Y" accumulation in progressive summary updates eliminated by
+  per-section rewrite/append rules in the update prompt.
+- Consolidation now runs after each catch-up chunk rather than only at the end,
+  preventing near-duplicate buildup during long processing passes.
+- Stop tokens passed explicitly in Ollama API calls to prevent the memory model
+  continuing into roleplay output.
 
 ## [1.1.0] - 2026-04-05
 
