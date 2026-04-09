@@ -2112,6 +2112,16 @@ jQuery(async function () {
   eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
 
+  // When a message is deleted, trim the scene buffer to only messages that
+  // still exist in the chat. Without this, a deleted message would remain in
+  // the buffer and be included in the next scene summary.
+  eventSource.on(event_types.MESSAGE_DELETED, () => {
+    const context = getContext();
+    const chatSet = new Set(context.chat);
+    sceneMessageBuffer = sceneMessageBuffer.filter((m) => chatSet.has(m));
+    sceneBufferLastIndex = Math.min(sceneBufferLastIndex, context.chat.length - 1);
+  });
+
   onChatChanged();
 
   // ---- Slash commands -----------------------------------------------------

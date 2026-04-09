@@ -358,8 +358,9 @@ export async function consolidateSessionMemories(force = false) {
     } catch (err) {
       console.error(`[SmartMemory] Session consolidation failed for type [${type}]:`, err);
       // On failure, mark unprocessed as consolidated so they don't block future passes.
-      unprocessed.forEach((m) => (m.consolidated = true));
+      // Set dirty before the forEach so a mid-loop error still triggers the save.
       dirty = true;
+      unprocessed.forEach((m) => (m.consolidated = true));
     }
   }
 
