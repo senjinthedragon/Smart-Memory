@@ -18,22 +18,37 @@
  */
 
 /**
- * Continuity checker: manually triggered contradiction detection.
+ * Continuity checker: manually triggered contradiction detection and optional
+ * auto-repair injection.
  *
  * Gathers all established facts (short-term summary, long-term memories,
  * session memories) and asks the model whether the last AI response contradicts
  * any of them. Results are shown in the UI - not auto-applied.
  *
+ * When auto-repair is enabled and contradictions are found, a second model call
+ * generates a brief corrective note that is injected into the prompt for the
+ * next AI turn, then automatically cleared after that response is rendered.
+ *
  * Manual-only because running this automatically on every message would be
  * too expensive on local hardware (RTX 2080 / 8GB VRAM).
  *
- * checkContinuity - runs a contradiction check against the last AI message
+ * checkContinuity     - runs a contradiction check against the last AI message
+ * generateRepair      - generates a corrective note from a contradiction list
+ * injectRepair        - stores the repair note and injects it into the prompt
+ * clearRepair         - removes the pending repair from storage and the prompt
+ * loadAndInjectRepair - restores a stored repair injection on chat load
  */
 
 import { generateMemoryExtract } from './generate.js';
-import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY } from './constants.js';
-import { buildContinuityPrompt } from './prompts.js';
+import {
+  getContext,
+  extension_settings,
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../extensions.js';
+import { MODULE_NAME, META_KEY, PROMPT_KEY_REPAIR } from './constants.js';
+import { buildContinuityPrompt, buildRepairPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 import { parseContradictions } from './parsers.js';
@@ -85,6 +100,9 @@ function gatherEstablishedFacts(characterName) {
   return parts.join('\n\n');
 }
 
+// chatMetadata key under META_KEY where the pending repair note is stored.
+const REPAIR_KEY = 'pendingRepair';
+
 /**
  * Runs a continuity check against the last AI message in the current chat.
  * Gathers established facts from all memory tiers and asks the model whether
@@ -119,5 +137,82 @@ export async function checkContinuity(characterName) {
   } catch (err) {
     console.error('[SmartMemory] Continuity check failed:', err);
     throw err;
+  }
+}
+
+/**
+ * Generates a brief corrective context note from a list of contradictions.
+ * Called after checkContinuity finds issues and auto-repair is enabled.
+ * @param {string[]} contradictions - Array of contradiction descriptions.
+ * @param {string} characterName - Used to load the correct long-term memories.
+ * @returns {Promise<string>} The corrective note text.
+ */
+export async function generateRepair(contradictions, characterName) {
+  const settings = extension_settings[MODULE_NAME];
+  const facts = gatherEstablishedFacts(characterName);
+  const prompt = buildRepairPrompt(contradictions, facts);
+
+  const note = await generateMemoryExtract(prompt, {
+    responseLength: settings.continuity_response_length ?? 300,
+  });
+
+  console.log('[SmartMemory] Repair note generated:', note);
+  return note.trim();
+}
+
+/**
+ * Stores a repair note in chatMetadata and injects it into the prompt at
+ * depth 0 IN_CHAT so it sits immediately before the next AI response.
+ * The note is one-shot - clearRepair() removes it after the next render.
+ * @param {string} repairNote - The corrective note text.
+ */
+export function injectRepair(repairNote) {
+  const context = getContext();
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY][REPAIR_KEY] = repairNote;
+  context.saveMetadata();
+
+  setExtensionPrompt(
+    PROMPT_KEY_REPAIR,
+    `[Continuity correction - apply to this response: ${repairNote}]`,
+    extension_prompt_types.IN_CHAT,
+    0,
+    false,
+    extension_prompt_roles.SYSTEM,
+  );
+}
+
+/**
+ * Removes the pending repair note from chatMetadata and clears the injection
+ * slot. Called after the next AI message is rendered.
+ */
+export function clearRepair() {
+  const context = getContext();
+  if (context.chatMetadata?.[META_KEY]) {
+    delete context.chatMetadata[META_KEY][REPAIR_KEY];
+    context.saveMetadata();
+  }
+  setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
+}
+
+/**
+ * Restores a stored repair injection on chat load. If a repair note was queued
+ * before the chat was closed or switched, this re-injects it so it is still
+ * active for the next AI turn.
+ */
+export function loadAndInjectRepair() {
+  const context = getContext();
+  const repair = context.chatMetadata?.[META_KEY]?.[REPAIR_KEY];
+  if (repair) {
+    setExtensionPrompt(
+      PROMPT_KEY_REPAIR,
+      `[Continuity correction - apply to this response: ${repair}]`,
+      extension_prompt_types.IN_CHAT,
+      0,
+      false,
+      extension_prompt_roles.SYSTEM,
+    );
+  } else {
+    setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
   }
 }

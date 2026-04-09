@@ -33,6 +33,7 @@
  * ARC_EXTRACTION_SYSTEM        - system role string for arc extraction
  * buildArcExtractionPrompt     - assembles the arc extraction prompt
  * buildContinuityPrompt        - assembles the continuity check prompt
+ * buildRepairPrompt            - assembles the corrective note prompt from a contradiction list
  * EXTRACTION_SYSTEM_PROMPT     - system role string for long-term extraction
  * buildExtractionPrompt        - assembles the long-term memory extraction prompt
  * buildLongtermConsolidationPrompt - evaluates a batch of unprocessed long-term entries against the consolidated base for one type
@@ -298,6 +299,32 @@ ${latestResponse}
 
 ---
 Does the latest response contradict or conflict with any established fact? List each contradiction precisely and briefly. If there are none, output: NONE`
+  );
+}
+
+// ---- Continuity repair --------------------------------------------------
+
+/**
+ * Assembles the prompt that turns a list of detected contradictions into a
+ * short corrective context note, ready to inject before the next AI turn.
+ * @param {string[]} contradictions - Array of contradiction descriptions from parseContradictions.
+ * @param {string} establishedFacts - Combined summary + memories as a text block.
+ * @returns {string} The complete prompt string.
+ */
+export function buildRepairPrompt(contradictions, establishedFacts) {
+  const numbered = contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+  return (
+    NO_ACTION_PREAMBLE +
+    `[CONTINUITY REPAIR TASK - Do NOT roleplay. Write a corrective context note only.]
+
+The following contradictions were found in the last AI response:
+${numbered}
+
+Established facts for reference:
+${establishedFacts}
+
+---
+Write a brief, direct correction note (2-4 sentences) to be injected as a system reminder before the next response. Use second person ("Note:" or "Correction:"). State only the facts that were wrong and what the correct information is. Do not narrate or continue the story.`
   );
 }
 

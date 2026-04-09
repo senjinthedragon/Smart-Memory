@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and immediately cancels any in-flight Ollama or OpenAI-compatible memory generation
   via `AbortController`. This prevents swipe requests from queuing behind an ongoing
   memory extraction and being rejected by ST while the memory model is busy.
+- **Continuity auto-repair**: the continuity checker now has an optional
+  auto-repair mode. When enabled and contradictions are found, a second model
+  call generates a brief corrective note that is automatically injected into the
+  next AI response turn and then cleared. Disabled by default.
 - **Token bar readability**: the Scenes segment color changed from teal-green to
   amber so it is clearly distinct from the adjacent Short-term green segment.
 - **Compaction toast**: when using an external LLM source (Ollama or OpenAI-compat),

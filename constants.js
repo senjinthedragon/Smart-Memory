@@ -37,6 +37,9 @@ export const PROMPT_KEY_LONG = 'smart_memory_long';
 export const PROMPT_KEY_SESSION = 'smart_memory_session';
 export const PROMPT_KEY_SCENES = 'smart_memory_scenes';
 export const PROMPT_KEY_ARCS = 'smart_memory_arcs';
+// One-shot corrective note injected after a continuity check finds contradictions.
+// Cleared automatically after the next AI response is rendered.
+export const PROMPT_KEY_REPAIR = 'smart_memory_repair';
 
 /** Valid type tags for long-term memory entries. */
 export const MEMORY_TYPES = ['fact', 'relationship', 'preference', 'event'];

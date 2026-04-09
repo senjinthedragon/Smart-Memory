@@ -71,6 +71,8 @@ Come back after a long break and not quite remember where you left off? Smart Me
 
 A manual tool you can reach for when something feels off. Click **Check Last Response** (or use `/sm-check`) and Smart Memory asks the AI whether the last response contradicts anything in your established facts. Useful for catching drift in long stories - the AI suddenly forgetting a character detail, reversing a decision that was made, that kind of thing.
 
+Enable **Auto-repair contradictions** to go one step further: when contradictions are found, Smart Memory makes a second model call to generate a brief corrective note and injects it into the next AI response turn. The note is cleared automatically after that response - it is a one-shot nudge, not a persistent injection. This costs one extra model call per check, so it is disabled by default.
+
 > **Note:** The continuity checker is only as good as the model doing the checking, and it only knows what is stored in Smart Memory - not what is on the character card by heart. Think of it as a sanity check, not a guarantee.
 
 ### Token Usage Display

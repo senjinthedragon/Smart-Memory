@@ -55,6 +55,7 @@ import {
   PROMPT_KEY_SESSION,
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
+  PROMPT_KEY_REPAIR,
   MEMORY_TYPES,
   SESSION_TYPES,
 } from './constants.js';
@@ -93,7 +94,13 @@ import {
   detectSceneBreakHeuristic,
 } from './scenes.js';
 import { extractArcs, injectArcs, loadArcs, saveArcs, clearArcs, deleteArc } from './arcs.js';
-import { checkContinuity } from './continuity.js';
+import {
+  checkContinuity,
+  generateRepair,
+  injectRepair,
+  clearRepair,
+  loadAndInjectRepair,
+} from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
 
 // ---- Default settings ---------------------------------------------------
@@ -177,6 +184,7 @@ const defaultSettings = {
 
   // Continuity
   continuity_response_length: 300,
+  continuity_auto_repair: false,
 
   // Semantic embedding deduplication
   embedding_enabled: true,
@@ -283,6 +291,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_SESSION, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_SCENES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_ARCS, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_REPAIR, '', none, 0);
   updateTokenDisplay();
 }
 
@@ -563,7 +572,11 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 4: update lastActive so the away recap threshold stays accurate.
+  // Step 4: clear any pending continuity repair - it was injected for this
+  // response turn and should not carry over to the next message.
+  clearRepair();
+
+  // Step 5: update lastActive so the away recap threshold stays accurate.
   updateLastActive();
 }
 
@@ -603,6 +616,7 @@ async function onChatChanged() {
   injectSessionMemories();
   injectSceneHistory();
   injectArcs();
+  loadAndInjectRepair();
 
   updateLongTermUI(characterName);
   updateFreshStartUI(freshStart);
@@ -2332,6 +2346,13 @@ function bindSettingsUI() {
     });
 
   // ---- Continuity checker ---------------------------------------------
+  $('#sm_auto_repair')
+    .prop('checked', s.continuity_auto_repair)
+    .on('change', function () {
+      getSettings().continuity_auto_repair = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
   $('#sm_check_continuity').on('click', async function () {
     const characterName = getCurrentCharacterName();
     $(this).prop('disabled', true);
@@ -2358,6 +2379,24 @@ function bindSettingsUI() {
         setStatusMessage(
           `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found.`,
         );
+
+        // If auto-repair is on, generate a corrective note and inject it for
+        // the next AI turn. The note is cleared automatically once that response
+        // is rendered by onCharacterMessageRendered.
+        if (getSettings().continuity_auto_repair) {
+          setStatusMessage('Generating repair...');
+          try {
+            const note = await generateRepair(contradictions, characterName);
+            injectRepair(note);
+            $result.append(
+              $('<p class="sm_repair_queued">').text('Correction queued for next response.'),
+            );
+            setStatusMessage('Correction queued.');
+          } catch (repairErr) {
+            console.error('[SmartMemory] Repair generation failed:', repairErr);
+            setStatusMessage('Repair failed - see console.');
+          }
+        }
       }
     } catch (err) {
       showError('Continuity check', err);
