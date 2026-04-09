@@ -1855,6 +1855,14 @@ function bindSettingsUI() {
 
   // ---- Clear Chat Context ---------------------------------------------
   $('#sm_clear_chat_context').on('click', async function () {
+    if (extractionRunning || compactionRunning) {
+      toastr.warning(
+        'Cannot clear while Memorize Chat is running. Cancel it first.',
+        'Smart Memory',
+        { timeOut: 4000, positionClass: 'toast-bottom-right' },
+      );
+      return;
+    }
     if (
       !confirm(
         'Clear all Smart Memory context for this chat?\n\nThis will erase the summary, session memories, scene history, and story arcs. Long-term memories are not affected.',
@@ -1893,6 +1901,14 @@ function bindSettingsUI() {
 
   // ---- Fresh Start ----------------------------------------------------
   $('#sm_fresh_start_button').on('click', async function () {
+    if (extractionRunning || compactionRunning) {
+      toastr.warning(
+        'Cannot run Fresh Start while Memorize Chat is running. Cancel it first.',
+        'Smart Memory',
+        { timeOut: 4000, positionClass: 'toast-bottom-right' },
+      );
+      return;
+    }
     const characterName = getCurrentCharacterName();
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
