@@ -49,7 +49,53 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
-import { reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
+import { batchVerify } from './embeddings.js';
+import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
+import {
+  buildCurrentSceneStateBlock,
+  prioritizeMemories,
+  reconcileTypeEntries,
+  selectProtectedMemories,
+  sortByTimeline,
+  trimByPriority,
+} from './memory-utils.js';
+
+/**
+ * Filters session memory candidates against existing entries, removing
+ * near-duplicates and entries that fail basic quality checks.
+ *
+ * All texts are embedded in a single batch API call so nomic-embed-text only
+ * needs to load once per verification pass rather than once per candidate.
+ * Falls back to Jaccard word-overlap when embeddings are unavailable.
+ *
+ * @param {Array} candidates - Newly extracted session memory objects.
+ * @param {Array} existing   - Currently stored session memories.
+ * @returns {Promise<Array>} Candidates that passed all checks.
+ */
+async function verifySessionCandidates(candidates, existing) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+
+  const seen = new Set();
+  const filtered = candidates.filter((mem) => {
+    const text = String(mem.content || '').trim();
+    if (text.length < 5 || text.length > 240) return false;
+    const key = `${mem.type}|${text.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (filtered.length === 0) return [];
+
+  const { passed } = await batchVerify(filtered, existing);
+  return filtered.filter((m) =>
+    passed.has(
+      String(m.content || '')
+        .toLowerCase()
+        .trim(),
+    ),
+  );
+}
 
 // ---- Storage (chatMetadata) ---------------------------------------------
 
@@ -68,6 +114,12 @@ export function loadSessionMemories() {
     ...m,
     consolidated: m.consolidated ?? true,
     importance: m.importance ?? 2,
+    expiration: m.expiration ?? 'session',
+    confidence: m.confidence ?? 0.7,
+    persona_relevance: m.persona_relevance ?? (m.type === 'development' ? 2 : 1),
+    intimacy_relevance: m.intimacy_relevance ?? (m.type === 'development' ? 2 : 1),
+    retrieval_count: m.retrieval_count ?? 0,
+    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? Date.now(),
   }));
 }
 
@@ -105,17 +157,20 @@ function parseSessionOutput(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
   const results = [];
   // Matches lines like: [scene:2] Candlelit tavern, late evening.
-  // The importance score (:N) is optional - defaults to 2 if omitted.
-  const pattern = /^\[(scene|revelation|development|detail)(?::([123]))?\]\s+(.+)$/gim;
+  // Accepts optional spaces around ":" and after "]" for parser resilience.
+  // The importance score is optional - defaults to 2 if omitted.
+  const pattern =
+    /^\[(scene|revelation|development|detail)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
   let match;
   while ((match = pattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
     const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const content = match[3].trim();
+    const expiration = match[3] ? match[3].toLowerCase() : 'session';
+    const content = match[4].trim();
     if (SESSION_TYPES.includes(type) && content.length > 3) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, importance, ts: Date.now(), consolidated: false });
+      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
     }
   }
   return results;
@@ -152,14 +207,10 @@ function deduplicateSession(existing, incoming, max) {
     if (!isDuplicate) merged.push(mem);
   }
   // When over the cap, drop the least valuable entries first:
-  // sort by importance ascending then age ascending, remove from the tail.
+  // sort by expiration/importance/keyword recurrence/age, remove from the tail.
   if (merged.length > max) {
-    merged.sort((a, b) => {
-      const ia = a.importance ?? 2;
-      const ib = b.importance ?? 2;
-      if (ia !== ib) return ib - ia; // higher importance first
-      return b.ts - a.ts; // newer first within same importance
-    });
+    const prioritized = prioritizeMemories(merged);
+    merged.splice(0, merged.length, ...prioritized);
     merged.splice(max);
   }
   return merged;
@@ -188,8 +239,15 @@ export async function extractSessionMemories(recentMessages) {
     const existing = loadSessionMemories();
     const existingText = existing.map((m) => `[${m.type}] ${m.content}`).join('\n');
 
+    // Pass long-term memories so the model skips facts already stored there.
+    // Cap to 15 entries to avoid inflating the prompt on local hardware.
+    const characterName = getContext().name2 || getContext().characterName || null;
+    const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
+    const longtermText =
+      longtermMemories.length > 0 ? formatMemoriesForPrompt(longtermMemories.slice(0, 15)) : '';
+
     const response = await generateMemoryExtract(
-      buildSessionExtractionPrompt(chatHistory, existingText),
+      buildSessionExtractionPrompt(chatHistory, existingText, longtermText),
       { responseLength: settings.session_response_length ?? 500 },
     );
 
@@ -197,15 +255,16 @@ export async function extractSessionMemories(recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const incoming = parseSessionOutput(response);
+    const incoming = await verifySessionCandidates(parseSessionOutput(response), existing);
     if (incoming.length === 0) return 0;
 
     const max = settings.session_max_memories ?? 30;
     const merged = deduplicateSession(existing, incoming, max);
-    const added = merged.length - Math.min(existing.length, max);
+    const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
+    const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
     await saveSessionMemories(merged);
 
-    return Math.max(0, added);
+    return added;
   } catch (err) {
     console.error('[SmartMemory] Session extraction failed:', err);
     throw err;
@@ -230,9 +289,12 @@ const DEFAULT_SESSION_CONSOLIDATION_THRESHOLD = 3;
  * Fires per-type independently - a burst of new [scene] entries does not
  * trigger [detail] consolidation.
  *
+ * @param {boolean} [force=false] - If true, consolidate all types regardless of threshold.
+ *   Used by the catch-up final pass to flush any entries that never accumulated enough
+ *   to hit the threshold during per-chunk consolidation.
  * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
  */
-export async function consolidateSessionMemories() {
+export async function consolidateSessionMemories(force = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) return 0;
   const threshold = Math.max(
@@ -242,12 +304,14 @@ export async function consolidateSessionMemories() {
 
   const memories = loadSessionMemories();
   let totalRemoved = 0;
+  let dirty = false;
 
   for (const type of SESSION_TYPES) {
     const base = memories.filter((m) => m.type === type && m.consolidated);
     const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
-    if (unprocessed.length < threshold) continue;
+    if (!force && unprocessed.length < threshold) continue;
+    if (unprocessed.length === 0) continue;
 
     try {
       const baseText = base.map((m) => `[${m.type}] ${m.content}`).join('\n');
@@ -263,6 +327,7 @@ export async function consolidateSessionMemories() {
       if (!response || response.trim().toUpperCase() === 'NONE') {
         // Nothing to add - mark unprocessed as consolidated as-is.
         unprocessed.forEach((m) => (m.consolidated = true));
+        dirty = true;
         continue;
       }
 
@@ -283,6 +348,7 @@ export async function consolidateSessionMemories() {
       const after = reconciledType.length;
       const removed = before - after;
       totalRemoved += Math.max(0, removed);
+      dirty = true;
 
       console.log(
         `[SmartMemory] Session [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
@@ -291,16 +357,13 @@ export async function consolidateSessionMemories() {
       console.error(`[SmartMemory] Session consolidation failed for type [${type}]:`, err);
       // On failure, mark unprocessed as consolidated so they don't block future passes.
       unprocessed.forEach((m) => (m.consolidated = true));
+      dirty = true;
     }
   }
 
   const max = settings.session_max_memories ?? 30;
   const finalMemories = sortByTimeline(trimByPriority(memories, max));
-  if (
-    totalRemoved > 0 ||
-    finalMemories.length !== memories.length ||
-    memories.some((m) => m.consolidated)
-  ) {
+  if (dirty || finalMemories.length !== memories.length) {
     await saveSessionMemories(finalMemories);
   }
 
@@ -310,22 +373,27 @@ export async function consolidateSessionMemories() {
 // ---- Injection ----------------------------------------------------------
 
 /**
- * Formats the session memory array as [type] content lines.
+ * Formats the session memory array as plain bullet lines for RP prompt injection.
+ * The [type] format is kept internally for the extraction/consolidation pipeline
+ * (see the inline formatters in extractSessionMemories and consolidateSessionMemories).
+ * Using plain bullets here prevents bracket notation from bleeding into story output.
  * @param {Array<{type: string, content: string}>} memories
  * @returns {string}
  */
 export function formatSessionMemories(memories) {
   if (!memories || memories.length === 0) return '';
   return sortByTimeline(memories)
-    .map((m) => `[${m.type}] ${m.content}`)
+    .map((m) => `- ${m.content}`)
     .join('\n');
 }
 
 /**
  * Injects session memories into the prompt via setExtensionPrompt.
  * Clears the slot if session memory is disabled or no memories exist.
+ * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
+ *   Only pass true from the post-extraction path (one real AI response turn).
  */
-export function injectSessionMemories() {
+export function injectSessionMemories(updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
@@ -341,18 +409,39 @@ export function injectSessionMemories() {
   // Trim to token budget: sort so low-importance old entries are dropped first.
   // Primary sort: importance descending (3 before 1). Secondary: age descending (newest first).
   const budget = settings.session_inject_budget ?? 400;
-  const trimmed = [...memories].sort((a, b) => {
-    const ia = a.importance ?? 2;
-    const ib = b.importance ?? 2;
-    if (ia !== ib) return ib - ia; // higher importance first
-    return b.ts - a.ts; // newer first within same importance
-  });
+  const protectedSet = new Set(selectProtectedMemories(memories, ['development', 'scene']));
+  const trimmed = prioritizeMemories(memories);
   while (trimmed.length > 1 && estimateTokens(formatSessionMemories(trimmed)) > budget) {
-    trimmed.pop();
+    let idx = -1;
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      if (!protectedSet.has(trimmed[i])) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) trimmed.splice(idx, 1);
+    else break;
   }
 
-  const template = settings.session_template ?? '[Details from this session:\n{{session}}]';
-  const content = template.replace('{{session}}', formatSessionMemories(trimmed));
+  // Only update retrieval telemetry when called from a real AI response turn.
+  if (updateTelemetry) {
+    const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
+    const updated = memories.map((m) => {
+      const key = `${m.type}|${m.content}`;
+      if (!recalled.has(key)) return m;
+      return {
+        ...m,
+        retrieval_count: (m.retrieval_count ?? 0) + 1,
+        last_confirmed_ts: Date.now(),
+      };
+    });
+    void saveSessionMemories(updated);
+  }
+
+  const template = settings.session_template ?? 'Details from this session:\n{{session}}';
+  const sessionBlock = template.replace('{{session}}', formatSessionMemories(trimmed));
+  const sceneStateBlock = buildCurrentSceneStateBlock(trimmed);
+  const content = sceneStateBlock ? `${sceneStateBlock}\n${sessionBlock}` : sessionBlock;
 
   setExtensionPrompt(
     PROMPT_KEY_SESSION,

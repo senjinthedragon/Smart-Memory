@@ -55,9 +55,8 @@ import {
   PROMPT_KEY_SESSION,
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
-  PROMPT_KEY_RECAP,
 } from './constants.js';
-import { memory_sources } from './generate.js';
+import { memory_sources, fetchOllamaModels } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
@@ -73,7 +72,7 @@ import {
   isFreshStart,
   setFreshStart,
 } from './longterm.js';
-import { updateLastActive, getAwayHours, generateRecap, injectRecap, clearRecap } from './recap.js';
+import { updateLastActive, getAwayHours, generateRecap, displayRecap } from './recap.js';
 import {
   extractSessionMemories,
   consolidateSessionMemories,
@@ -88,9 +87,11 @@ import {
   loadSceneHistory,
   saveSceneHistory,
   clearSceneHistory,
+  detectSceneBreakHeuristic,
 } from './scenes.js';
 import { extractArcs, injectArcs, loadArcs, clearArcs, deleteArc } from './arcs.js';
 import { checkContinuity } from './continuity.js';
+import { clearEmbeddingCache } from './embeddings.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -100,19 +101,27 @@ const defaultSettings = {
   // LLM source for all memory operations (extraction, summarization, recap)
   source: memory_sources.main,
 
+  // Ollama direct source settings
+  ollama_url: 'http://localhost:11434',
+  ollama_model: '',
+
+  // OpenAI Compatible source settings
+  openai_compat_url: '',
+  openai_compat_key: '',
+  openai_compat_model: '',
+
   // Short-term (compaction)
   compaction_enabled: true,
   compaction_threshold: 80,
   compaction_keep_recent: 10,
-  compaction_response_length: 1500,
+  compaction_response_length: 2000,
   compaction_position: extension_prompt_types.IN_PROMPT,
   compaction_depth: 0,
   compaction_role: extension_prompt_roles.SYSTEM,
-  compaction_template: '[Story so far:\n{{summary}}]',
+  compaction_template: 'Story so far:\n{{summary}}',
 
   // Long-term
   longterm_enabled: true,
-  longterm_carry_over: true,
   longterm_consolidate: true,
   longterm_consolidation_threshold_fact: 4,
   longterm_consolidation_threshold_relationship: 3,
@@ -125,7 +134,7 @@ const defaultSettings = {
   longterm_position: extension_prompt_types.IN_PROMPT,
   longterm_depth: 2,
   longterm_role: extension_prompt_roles.SYSTEM,
-  longterm_template: '[Memories from previous conversations:\n{{memories}}]',
+  longterm_template: 'Memories from previous conversations:\n{{memories}}',
 
   // Session memory
   session_enabled: true,
@@ -137,7 +146,7 @@ const defaultSettings = {
   session_position: extension_prompt_types.IN_CHAT,
   session_depth: 3,
   session_role: extension_prompt_roles.SYSTEM,
-  session_template: '[Details from this session:\n{{session}}]',
+  session_template: 'Details from this session:\n{{session}}',
 
   // Scene detection
   scene_enabled: true,
@@ -153,7 +162,7 @@ const defaultSettings = {
   arcs_enabled: true,
   arcs_max: 10,
   arcs_response_length: 400,
-  arcs_inject_budget: 200,
+  arcs_inject_budget: 400,
   arcs_position: extension_prompt_types.IN_CHAT,
   arcs_depth: 2,
   arcs_role: extension_prompt_roles.SYSTEM,
@@ -162,12 +171,15 @@ const defaultSettings = {
   recap_enabled: true,
   recap_threshold_hours: 4,
   recap_response_length: 300,
-  recap_position: extension_prompt_types.IN_CHAT,
-  recap_depth: 0,
-  recap_role: extension_prompt_roles.SYSTEM,
 
   // Continuity
   continuity_response_length: 300,
+
+  // Semantic embedding deduplication
+  embedding_enabled: true,
+  embedding_url: '',
+  embedding_model: 'nomic-embed-text',
+  embedding_keep: false,
 
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
@@ -180,20 +192,65 @@ const defaultSettings = {
 let messagesSinceLastExtraction = 0;
 let compactionRunning = false;
 let extractionRunning = false;
+let consolidationRunning = false;
 
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
-
-// True while a recap is injected; cleared after the first AI response.
-let recapActive = false;
 
 // Tracks whether the group chat warning toast has already been shown this
 // session so it doesn't fire on every message in a group.
 let groupChatWarningShown = false;
 
+// Last observed chat length, used to distinguish new messages from swipes.
+// CHARACTER_MESSAGE_RENDERED fires on both; swipes do not grow the chat array.
+let lastKnownChatLength = 0;
+
+/**
+ * Returns a stable extraction window that excludes the currently swipable
+ * assistant reply (the trailing non-user message in 1:1 chats). This prevents
+ * storing memories from temporary swipe candidates the user may discard.
+ *
+ * The latest assistant reply is naturally included on the next turn after the
+ * user responds, so accepted content is still captured with a one-turn delay.
+ *
+ * @param {Array} chat - Full chat array from SillyTavern context.
+ * @param {number} windowSize - Max number of messages to return.
+ * @returns {Array} Stable message slice safe for extraction.
+ */
+function getStableExtractionWindow(chat, windowSize) {
+  if (!Array.isArray(chat) || chat.length === 0) return [];
+
+  const last = chat[chat.length - 1];
+  const cutoff = last && !last.is_user && !last.is_system ? chat.length - 1 : chat.length;
+  if (cutoff <= 0) return [];
+
+  const start = Math.max(0, cutoff - windowSize);
+  return chat.slice(start, cutoff);
+}
+
+/**
+ * Stable extraction window with fallback for small/new chats.
+ *
+ * @param {Array} chat - Full chat array from SillyTavern context.
+ * @param {number} windowSize - Max number of messages to return.
+ * @returns {Array} Stable message slice, or plain tail slice if none exist yet.
+ */
+function getStableExtractionWindowWithFallback(chat, windowSize) {
+  const stable = getStableExtractionWindow(chat, windowSize);
+  if (stable.length > 0) return stable;
+
+  if (!Array.isArray(chat) || chat.length === 0) return [];
+  const start = Math.max(0, chat.length - windowSize);
+  return chat.slice(start);
+}
+
 // Accumulates messages since the last detected scene break. Reset to []
 // when a break is detected so the next scene starts from a clean buffer.
 let sceneMessageBuffer = [];
+// Index of the last chat message already pushed into sceneMessageBuffer.
+// Prevents duplicate pushes when CHARACTER_MESSAGE_RENDERED fires more than
+// once for the same message (e.g. during swipes or re-renders).
+let sceneBufferLastIndex = -1;
 
 // ---- Helpers ------------------------------------------------------------
 
@@ -219,7 +276,6 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_SESSION, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_SCENES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_ARCS, '', none, 0);
-  setExtensionPrompt(PROMPT_KEY_RECAP, '', none, 0);
   updateTokenDisplay();
 }
 
@@ -229,12 +285,19 @@ function clearAllInjections() {
  * Fires after each AI message is rendered (registered with makeLast so Smart
  * Memory runs after all other extensions have processed the message).
  *
- * Orchestration order:
- *   1. Clear recap if one was active (it served its purpose after one response).
- *   2. Check for compaction threshold and run if needed (async, non-blocking).
- *   3. Check for scene break in the latest message (async, non-blocking).
- *   4. Every N messages: batch extraction for session + long-term + arcs.
- *   5. Update lastActive timestamp for the away recap system.
+ * Swipe detection: CHARACTER_MESSAGE_RENDERED fires on swipes (alternative
+ * generations) as well as on new messages. A swipe replaces the last message
+ * in-place without growing the chat array, so we compare the current chat
+ * length against lastKnownChatLength to detect and skip swipes entirely.
+ * Only new messages (chat grew) trigger compaction, scene detection, and
+ * extraction. lastActive is updated on swipes so the recap threshold stays
+ * accurate during long swipe sessions.
+ *
+ * Orchestration order (new messages only):
+ *   1. Check for compaction threshold and run if needed (async, non-blocking).
+ *   2. Check for scene break in the latest message (async, non-blocking).
+ *   3. Every N messages: batch extraction for session + long-term + arcs.
+ *   4. Update lastActive timestamp for the away recap system.
  *
  * Compaction and extraction both pass a responseLength to ST's generateRaw /
  * generateQuietPrompt, which temporarily modifies the global amount_gen via
@@ -269,6 +332,19 @@ async function onCharacterMessageRendered() {
     return;
   }
 
+  // Swipe detection: CHARACTER_MESSAGE_RENDERED fires on swipes too, but a swipe
+  // replaces the last message in-place - the chat array does not grow. Only
+  // process when the chat actually advanced (new message added by a real turn).
+  const currentLength = context.chat.length;
+  const isSwipe = currentLength <= lastKnownChatLength;
+  lastKnownChatLength = currentLength;
+  if (isSwipe) {
+    // Still update lastActive so the recap threshold stays accurate during
+    // a long swipe session where the user is clearly present.
+    updateLastActive();
+    return;
+  }
+
   const characterName = getCurrentCharacterName();
 
   const lastMsg = context.chat
@@ -286,20 +362,16 @@ async function onCharacterMessageRendered() {
     .find((m) => m.is_user && !m.is_system && m.mes);
   const lastUserMsgText = lastUserMsg?.mes ?? '';
 
-  // Push the last two messages (user turn + AI response) so scene summaries
-  // include both sides of each exchange, not just the AI response.
-  // CHARACTER_MESSAGE_RENDERED fires once per new AI message, so the preceding
-  // user message is always new to the buffer at this point.
-  sceneMessageBuffer.push(...context.chat.slice(-2));
-
-  // Step 1: clear the recap after the first AI response.
-  if (recapActive) {
-    clearRecap();
-    recapActive = false;
-    updateTokenDisplay();
+  // Push only messages not yet in the buffer. Using the chat index as a
+  // cursor prevents duplicate pushes when the event fires more than once
+  // for the same message (swipes, re-renders).
+  const newMessages = context.chat.slice(sceneBufferLastIndex + 1);
+  if (newMessages.length > 0) {
+    sceneMessageBuffer.push(...newMessages);
+    sceneBufferLastIndex = context.chat.length - 1;
   }
 
-  // Step 2: compaction - awaited before extraction to prevent concurrent use
+  // Step 1: compaction - awaited before extraction to prevent concurrent use
   // of ST's TempResponseLength singleton, which would corrupt amount_gen.
   if (settings.compaction_enabled && !compactionRunning) {
     compactionRunning = true;
@@ -324,7 +396,7 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 3: scene break detection - awaited before extraction for the same
+  // Step 2: scene break detection - awaited before extraction for the same
   // reason as compaction: the AI detection path uses responseLength: 5 which
   // would corrupt amount_gen if it raced with extraction.
   // Check both the AI response and the preceding user message - transitions
@@ -338,6 +410,7 @@ async function onCharacterMessageRendered() {
         updateScenesUI();
         updateTokenDisplay();
         sceneMessageBuffer = [];
+        sceneBufferLastIndex = -1;
         setStatusMessage('Scene break detected.');
       }
     } catch (err) {
@@ -345,7 +418,7 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 4: batched extraction every N messages.
+  // Step 3: batched extraction every N messages.
   // extractEvery uses the smaller of the two intervals so neither tier
   // falls behind if one is configured more frequently than the other.
   if (!extractionRunning) {
@@ -360,7 +433,14 @@ async function onCharacterMessageRendered() {
       extractionRunning = true;
 
       const recentCount = Math.min(extractEvery * 2, context.chat.length);
-      const recentMessages = context.chat.slice(-recentCount);
+      const recentMessages = getStableExtractionWindow(context.chat, recentCount);
+
+      // If only a fresh assistant reply exists beyond the stable boundary,
+      // postpone extraction until the next turn so swipes settle first.
+      if (recentMessages.length === 0) {
+        extractionRunning = false;
+        return;
+      }
 
       setStatusMessage('Extracting memories...');
 
@@ -376,10 +456,14 @@ async function onCharacterMessageRendered() {
             return 0;
           });
           // Run session consolidation after extraction - fires per-type when threshold is reached.
-          await consolidateSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Background session consolidation error:', err);
-          });
-          injectSessionMemories();
+          if (!consolidationRunning) {
+            consolidationRunning = true;
+            await consolidateSessionMemories().catch((err) => {
+              console.error('[SmartMemory] Background session consolidation error:', err);
+            });
+            consolidationRunning = false;
+          }
+          injectSessionMemories(true);
           updateSessionUI();
           total += count;
         }
@@ -392,13 +476,14 @@ async function onCharacterMessageRendered() {
             },
           );
           // Run consolidation after extraction if new memories were added.
-          if (count > 0 && settings.longterm_consolidate) {
+          if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
+            consolidationRunning = true;
             const removed = await consolidateMemories(characterName).catch((err) => {
               console.error('[SmartMemory] Background consolidation error:', err);
               return 0;
             });
+            consolidationRunning = false;
             if (removed > 0) {
-              injectMemories(characterName, isFreshStart());
               setStatusMessage(`Consolidated ${removed} redundant memories.`);
               toastr.info(
                 `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
@@ -407,6 +492,9 @@ async function onCharacterMessageRendered() {
               );
             }
           }
+          // Inject once after extraction (and any consolidation) - this is the
+          // one call per AI response turn where telemetry should be updated.
+          injectMemories(characterName, isFreshStart(), true);
           updateLongTermUI(characterName);
           saveSettingsDebounced();
           total += count;
@@ -417,7 +505,7 @@ async function onCharacterMessageRendered() {
           // arcs opened earlier in the session, but is capped to avoid overflowing
           // the model's context on long chats. Existing arcs are passed to the
           // prompt so resolution still works even outside this window.
-          const arcWindow = context.chat.slice(-100);
+          const arcWindow = getStableExtractionWindow(context.chat, 100);
           const count = await extractArcs(arcWindow).catch((err) => {
             console.error('[SmartMemory] Background arc extraction error:', err);
             return 0;
@@ -438,7 +526,7 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 5: update lastActive so the away recap threshold stays accurate.
+  // Step 4: update lastActive so the away recap threshold stays accurate.
   updateLastActive();
 }
 
@@ -451,9 +539,11 @@ async function onChatChanged() {
   messagesSinceLastExtraction = 0;
   compactionRunning = false;
   extractionRunning = false;
-  recapActive = false;
   sceneMessageBuffer = [];
+  sceneBufferLastIndex = -1;
   groupChatWarningShown = false;
+  lastKnownChatLength = 0;
+  clearEmbeddingCache();
 
   const settings = getSettings();
   if (!settings.enabled) return;
@@ -471,11 +561,7 @@ async function onChatChanged() {
   const summary = loadAndInjectSummary();
   updateShortTermUI(summary);
 
-  if (settings.longterm_carry_over) {
-    injectMemories(characterName, freshStart);
-  } else {
-    injectMemories(null, true);
-  }
+  injectMemories(characterName, freshStart);
 
   injectSessionMemories();
   injectSceneHistory();
@@ -488,7 +574,7 @@ async function onChatChanged() {
   updateArcsUI();
   updateTokenDisplay();
 
-  // Generate a recap if the user has been away long enough.
+  // Show a recap popup if the user has been away long enough.
   if (settings.recap_enabled) {
     const hoursAway = getAwayHours();
     if (hoursAway > 0) {
@@ -497,15 +583,9 @@ async function onChatChanged() {
         .then((recap) => {
           if (recap) {
             // Pass hoursAway explicitly - updateLastActive() runs after this
-            // async block starts, so getAwayHours() inside injectRecap would
+            // async block starts, so getAwayHours() inside displayRecap would
             // return 0 and always show "short break" regardless of actual gap.
-            injectRecap(recap, hoursAway);
-            recapActive = true;
-            updateTokenDisplay();
-            toastr.info('A recap of your last session has been added to context.', 'Smart Memory', {
-              timeOut: 5000,
-              positionClass: 'toast-bottom-right',
-            });
+            displayRecap(recap, hoursAway);
           }
           setStatusMessage('');
         })
@@ -531,7 +611,6 @@ const TOKEN_TIERS = [
   { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
   { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#5a8e7a' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
-  { key: PROMPT_KEY_RECAP, label: 'Recap', color: '#8e6e3a' },
 ];
 
 /**
@@ -793,6 +872,41 @@ function loadSettings() {
       extension_settings[MODULE_NAME][key] = value;
     }
   }
+
+  // Migration: replace old bracket-wrapped template defaults with plain-text equivalents.
+  // Only affects users who never customized these fields (exact match on the old default).
+  // Bracket notation in injections bleeds into RP output - the model mimics it.
+  const TEMPLATE_MIGRATIONS = {
+    compaction_template: {
+      from: '[Story so far:\n{{summary}}]',
+      to: 'Story so far:\n{{summary}}',
+    },
+    longterm_template: {
+      from: '[Memories from previous conversations:\n{{memories}}]',
+      to: 'Memories from previous conversations:\n{{memories}}',
+    },
+    session_template: {
+      from: '[Details from this session:\n{{session}}]',
+      to: 'Details from this session:\n{{session}}',
+    },
+  };
+  for (const [key, migration] of Object.entries(TEMPLATE_MIGRATIONS)) {
+    if (extension_settings[MODULE_NAME][key] === migration.from) {
+      extension_settings[MODULE_NAME][key] = migration.to;
+    }
+  }
+
+  // Migration: raise compaction response length from 1500 to 2000.
+  // 1500 tokens was too tight for a 9-section summary, causing truncated output.
+  if (extension_settings[MODULE_NAME].compaction_response_length === 1500) {
+    extension_settings[MODULE_NAME].compaction_response_length = 2000;
+  }
+
+  // Migration: raise arc injection budget from 200 to 400.
+  // 200 tokens is too tight for 10 arcs, causing the last entry to be cut mid-sentence.
+  if (extension_settings[MODULE_NAME].arcs_inject_budget === 200) {
+    extension_settings[MODULE_NAME].arcs_inject_budget = 400;
+  }
 }
 
 /**
@@ -807,6 +921,27 @@ function showError(operation, err) {
     timeOut: 6000,
     positionClass: 'toast-bottom-right',
   });
+}
+
+/**
+ * Returns true and shows a warning toast if a catch-up or compaction is
+ * currently running. Use this to block manual extract/clear buttons that
+ * would conflict with an in-progress background job.
+ * @returns {boolean}
+ */
+function isCatchUpRunning() {
+  if (extractionRunning || compactionRunning) {
+    toastr.warning(
+      'Cannot do this while Memorize Chat is running. Cancel it first.',
+      'Smart Memory',
+      {
+        timeOut: 4000,
+        positionClass: 'toast-bottom-right',
+      },
+    );
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -833,10 +968,108 @@ function bindSettingsUI() {
     });
 
   // ---- LLM source -----------------------------------------------------
+
+  /**
+   * Shows or hides the per-source settings sections based on the current source.
+   * @param {string} source
+   */
+  function updateSourceSections(source) {
+    $('#sm_ollama_settings').toggle(source === memory_sources.ollama);
+    $('#sm_openai_compat_settings').toggle(source === memory_sources.openai_compatible);
+  }
+
+  /**
+   * Fetches installed Ollama models and populates the model dropdown.
+   * Preserves the previously selected model if it is still available.
+   */
+  async function refreshOllamaModels() {
+    const $select = $('#sm_ollama_model');
+    const $btn = $('#sm_ollama_refresh');
+    const prevModel = getSettings().ollama_model;
+    $btn.prop('disabled', true);
+    try {
+      const models = await fetchOllamaModels();
+      $select.empty();
+      if (models.length === 0) {
+        $select.append('<option value="">No models found</option>');
+      } else {
+        models.forEach((name) => {
+          $select.append(`<option value="${name}">${name}</option>`);
+        });
+        const best = models.includes(prevModel) ? prevModel : models[0];
+        $select.val(best);
+        getSettings().ollama_model = best;
+        saveSettingsDebounced();
+      }
+    } catch (err) {
+      toastr.error(
+        `Could not reach Ollama at ${getSettings().ollama_url || 'http://localhost:11434'}. Is it running?`,
+        'Smart Memory',
+      );
+      console.error('[SmartMemory] Ollama model fetch failed:', err);
+    } finally {
+      $btn.prop('disabled', false);
+    }
+  }
+
+  const currentSource = s.source ?? memory_sources.main;
   $('#sm_source')
-    .val(s.source ?? memory_sources.main)
+    .val(currentSource)
     .on('change', function () {
-      getSettings().source = $(this).val();
+      const source = $(this).val();
+      getSettings().source = source;
+      saveSettingsDebounced();
+      updateSourceSections(source);
+      if (source === memory_sources.ollama && !getSettings().ollama_model) {
+        refreshOllamaModels();
+      }
+    });
+
+  updateSourceSections(currentSource);
+
+  // Ollama URL field
+  $('#sm_ollama_url')
+    .val(s.ollama_url ?? 'http://localhost:11434')
+    .on('change', function () {
+      getSettings().ollama_url = $(this).val().trim();
+      saveSettingsDebounced();
+      // Refresh models when the URL changes so the list reflects the new instance.
+      refreshOllamaModels();
+    });
+
+  // Ollama model dropdown
+  $('#sm_ollama_model').on('change', function () {
+    getSettings().ollama_model = $(this).val();
+    saveSettingsDebounced();
+  });
+
+  // Populate Ollama model list on load if Ollama is already selected.
+  if (currentSource === memory_sources.ollama) {
+    refreshOllamaModels();
+  }
+
+  // Ollama refresh button
+  $('#sm_ollama_refresh').on('click', () => refreshOllamaModels());
+
+  // OpenAI Compatible fields
+  $('#sm_openai_compat_url')
+    .val(s.openai_compat_url ?? '')
+    .on('change', function () {
+      getSettings().openai_compat_url = $(this).val().trim();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_openai_compat_key')
+    .val(s.openai_compat_key ?? '')
+    .on('change', function () {
+      getSettings().openai_compat_key = $(this).val();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_openai_compat_model')
+    .val(s.openai_compat_model ?? '')
+    .on('input', function () {
+      getSettings().openai_compat_model = $(this).val().trim();
       saveSettingsDebounced();
     });
 
@@ -896,6 +1129,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_summarize_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (compactionRunning) return;
     compactionRunning = true;
     setStatusMessage('Generating summary...');
@@ -934,13 +1168,6 @@ function bindSettingsUI() {
       getSettings().longterm_enabled = $(this).prop('checked');
       saveSettingsDebounced();
       injectMemories(getCurrentCharacterName(), isFreshStart());
-    });
-
-  $('#sm_longterm_carry_over')
-    .prop('checked', s.longterm_carry_over)
-    .on('change', function () {
-      getSettings().longterm_carry_over = $(this).prop('checked');
-      saveSettingsDebounced();
     });
 
   $('#sm_longterm_consolidate')
@@ -1058,7 +1285,8 @@ function bindSettingsUI() {
   });
 
   $('#sm_extract_now').on('click', async function () {
-    if (extractionRunning) return;
+    if (isCatchUpRunning()) return;
+    if (extractionRunning || consolidationRunning) return;
     const characterName = getCurrentCharacterName();
     if (!characterName) return;
     extractionRunning = true;
@@ -1066,7 +1294,7 @@ function bindSettingsUI() {
     setStatusMessage('Extracting memories...');
     try {
       const context = getContext();
-      const recentMessages = context.chat.slice(-20);
+      const recentMessages = getStableExtractionWindowWithFallback(context.chat, 20);
       const count = await extractAndStoreMemories(characterName, recentMessages);
       saveSettingsDebounced();
       updateLongTermUI(characterName);
@@ -1085,6 +1313,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_memories').on('click', function () {
+    if (isCatchUpRunning()) return;
     const characterName = getCurrentCharacterName();
     if (!characterName) return;
     if (!confirm(`Clear all memories for "${characterName}"?`)) return;
@@ -1172,11 +1401,13 @@ function bindSettingsUI() {
     });
 
   $('#sm_extract_session_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     $(this).prop('disabled', true);
     setStatusMessage('Extracting session memories...');
     try {
       const context = getContext();
-      const count = await extractSessionMemories(context.chat.slice(-40));
+      const recentMessages = getStableExtractionWindowWithFallback(context.chat, 40);
+      const count = await extractSessionMemories(recentMessages);
       injectSessionMemories();
       updateSessionUI();
       updateTokenDisplay();
@@ -1194,6 +1425,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_session').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (!confirm('Clear all session memories for this chat?')) return;
     await clearSessionMemories();
     injectSessionMemories();
@@ -1258,6 +1490,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_extract_scenes_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     $(this).prop('disabled', true);
     setStatusMessage('Summarizing current scene...');
     try {
@@ -1274,6 +1507,7 @@ function bindSettingsUI() {
         await saveSceneHistory(history);
         // Reset the buffer - we just archived what was in it.
         sceneMessageBuffer = [];
+        sceneBufferLastIndex = -1;
         injectSceneHistory();
         updateScenesUI();
         updateTokenDisplay();
@@ -1290,6 +1524,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_scenes').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (!confirm('Clear all scene history for this chat?')) return;
     await clearSceneHistory();
     injectSceneHistory();
@@ -1347,11 +1582,13 @@ function bindSettingsUI() {
     });
 
   $('#sm_extract_arcs_now').on('click', async function () {
+    if (isCatchUpRunning()) return;
     $(this).prop('disabled', true);
     setStatusMessage('Extracting story arcs...');
     try {
       const context = getContext();
-      const count = await extractArcs(context.chat.slice(-100));
+      const recentMessages = getStableExtractionWindowWithFallback(context.chat, 100);
+      const count = await extractArcs(recentMessages);
       injectArcs();
       updateArcsUI();
       setStatusMessage(
@@ -1366,6 +1603,7 @@ function bindSettingsUI() {
   });
 
   $('#sm_clear_arcs').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (!confirm('Clear all story arcs for this chat?')) return;
     await clearArcs();
     injectArcs();
@@ -1391,35 +1629,14 @@ function bindSettingsUI() {
     });
   $('#sm_recap_threshold_value').text(s.recap_threshold_hours + 'h');
 
-  $(`input[name="sm_recap_position"][value="${s.recap_position}"]`).prop('checked', true);
-  $('input[name="sm_recap_position"]').on('change', function () {
-    getSettings().recap_position = parseInt($(this).val(), 10);
-    saveSettingsDebounced();
-  });
-
-  $('#sm_recap_depth')
-    .val(s.recap_depth)
-    .on('input', function () {
-      getSettings().recap_depth = parseInt($(this).val(), 10);
-      saveSettingsDebounced();
-    });
-
-  $('#sm_recap_role')
-    .val(s.recap_role)
-    .on('change', function () {
-      getSettings().recap_role = parseInt($(this).val(), 10);
-      saveSettingsDebounced();
-    });
-
   $('#sm_recap_now').on('click', async function () {
     $(this).prop('disabled', true);
     setStatusMessage('Generating recap...');
     try {
       const recap = await generateRecap();
       if (recap) {
-        injectRecap(recap);
-        recapActive = true;
-        setStatusMessage('Recap injected.');
+        displayRecap(recap);
+        setStatusMessage('Recap displayed.');
       } else {
         setStatusMessage('Recap failed.');
       }
@@ -1449,6 +1666,18 @@ function bindSettingsUI() {
       return;
     }
 
+    // Warn if memories already exist - running catch-up again on the same chat
+    // can introduce near-duplicate entries that displace lower-importance ones.
+    const existingMemories = loadCharacterMemories(characterName);
+    if (existingMemories.length > 0) {
+      if (
+        !confirm(
+          'Memories already exist for this character. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
+        )
+      )
+        return;
+    }
+
     extractionRunning = true;
     compactionRunning = true;
     catchUpCancelled = false;
@@ -1459,9 +1688,13 @@ function bindSettingsUI() {
       const context = getContext();
       const settings = getSettings();
 
+      // Use the stable window first so an in-progress trailing swipe candidate
+      // is not ingested during catch-up.
+      const stableChat = getStableExtractionWindowWithFallback(context.chat, context.chat.length);
+
       // Filter to real messages only so system/hidden entries don't inflate
       // the chunk count or confuse the model.
-      const allMessages = context.chat.filter((m) => m.mes && !m.is_system);
+      const allMessages = stableChat.filter((m) => m.mes && !m.is_system);
       const total = allMessages.length;
 
       // Process the chat in fixed-size chunks sequentially. Each extraction
@@ -1478,58 +1711,121 @@ function bindSettingsUI() {
         );
 
         if (settings.longterm_enabled && characterName) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - extracting long-term)`);
           await extractAndStoreMemories(characterName, chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
           });
+          // Consolidate after each chunk so near-duplicates are collapsed before
+          // the next chunk can add more similar entries. Without this, a full chat
+          // with many thematically similar exchanges floods the unprocessed queue
+          // with variants that all slip under the per-entry Jaccard threshold.
+          if (settings.longterm_consolidate) {
+            setStatusMessage(`Catching up... (${i}/${total} messages - consolidating long-term)`);
+            await consolidateMemories(characterName).catch((err) => {
+              console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
+            });
+          }
         }
         if (settings.session_enabled) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - extracting session)`);
           await extractSessionMemories(chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up session extraction error (chunk):', err);
           });
+          setStatusMessage(`Catching up... (${i}/${total} messages - consolidating session)`);
+          await consolidateSessionMemories().catch((err) => {
+            console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
+          });
         }
         if (settings.arcs_enabled) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - extracting arcs)`);
           await extractArcs(chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
         }
 
-        // Update progress after the chunk completes so the percentage reflects
-        // work actually done, not work about to start.
+        // Re-inject after each chunk so the token display reflects what is
+        // actually stored, not just what was injected before catch-up started.
+        if (settings.longterm_enabled && characterName) {
+          injectMemories(characterName, isFreshStart());
+        }
+        if (settings.session_enabled) {
+          injectSessionMemories();
+        }
+        if (settings.arcs_enabled) {
+          injectArcs();
+        }
+
+        // Update progress and token display after each chunk so the user can
+        // see memories accumulating in real time rather than only at the end.
         setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
+        updateTokenDisplay();
       }
 
       if (!catchUpCancelled) {
-        // Scene: summarize the last chunk of the chat as a single scene entry.
-        // Capped to the last 40 messages - same as the manual Extract Scene button.
+        // Scene: walk through the full chat using heuristic break detection,
+        // summarizing each detected scene. AI detection is skipped here - it
+        // would cost one model call per message across potentially hundreds of
+        // messages. The heuristic is free and good enough for bulk processing.
         if (settings.scene_enabled) {
-          setStatusMessage('Summarizing scene history...');
-          await summarizeScene(context.chat.slice(-40))
-            .then(async (sceneSummary) => {
-              if (!sceneSummary) return;
-              const history = loadSceneHistory();
-              const max = settings.scene_max_history ?? 5;
-              history.push({ summary: sceneSummary, ts: Date.now() });
-              if (history.length > max) history.splice(0, history.length - max);
-              await saveSceneHistory(history);
-              sceneMessageBuffer = [];
-            })
-            .catch((err) => {
-              console.error('[SmartMemory] Catch-up scene summary failed:', err);
+          setStatusMessage('Detecting and summarizing scenes...');
+          const sceneHistory = loadSceneHistory();
+          const max = settings.scene_max_history ?? 5;
+          let sceneBuffer = [];
+
+          for (const msg of allMessages) {
+            if (catchUpCancelled) break;
+            sceneBuffer.push(msg);
+
+            const msgText = msg.mes ?? '';
+            if (detectSceneBreakHeuristic(msgText) && sceneBuffer.length > 1) {
+              const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
+                console.error('[SmartMemory] Catch-up scene summary failed:', err);
+                return null;
+              });
+              if (sceneSummary) {
+                sceneHistory.push({ summary: sceneSummary, ts: Date.now() });
+                if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
+              }
+              sceneBuffer = [];
+            }
+          }
+
+          // Summarize any remaining messages after the last break as the current scene.
+          if (!catchUpCancelled && sceneBuffer.length > 1) {
+            const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
+              console.error('[SmartMemory] Catch-up final scene summary failed:', err);
+              return null;
             });
+            if (sceneSummary) {
+              sceneHistory.push({ summary: sceneSummary, ts: Date.now() });
+              if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
+            }
+          }
+
+          await saveSceneHistory(sceneHistory).catch((err) => {
+            console.error('[SmartMemory] Catch-up scene history save failed:', err);
+          });
+          sceneMessageBuffer = [];
+          sceneBufferLastIndex = -1;
+          updateTokenDisplay();
         }
 
-        // Consolidate after all chunks so the model sees the full merged set.
+        // Final consolidation pass for any entries that didn't accumulate enough
+        // to hit the per-chunk threshold (e.g. a type that only got 1-2 new entries
+        // across the whole chat). Forces consolidation regardless of threshold.
         if (settings.longterm_enabled && settings.longterm_consolidate && characterName) {
           setStatusMessage('Consolidating long-term memories...');
-          await consolidateMemories(characterName).catch((err) => {
-            console.error('[SmartMemory] Catch-up consolidation failed:', err);
+          await consolidateMemories(characterName, true).catch((err) => {
+            console.error('[SmartMemory] Catch-up final consolidation failed:', err);
           });
+          updateTokenDisplay();
         }
         if (settings.session_enabled) {
           setStatusMessage('Consolidating session memories...');
-          await consolidateSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Catch-up session consolidation failed:', err);
+          await consolidateSessionMemories(true).catch((err) => {
+            console.error('[SmartMemory] Catch-up final session consolidation failed:', err);
           });
+          updateTokenDisplay();
         }
 
         // Short-term compaction runs once at the end - it uses the real token
@@ -1546,6 +1842,7 @@ function bindSettingsUI() {
             .catch((err) => {
               console.error('[SmartMemory] Catch-up compaction failed:', err);
             });
+          updateTokenDisplay();
         }
       }
 
@@ -1595,6 +1892,7 @@ function bindSettingsUI() {
 
   // ---- Clear Chat Context ---------------------------------------------
   $('#sm_clear_chat_context').on('click', async function () {
+    if (isCatchUpRunning()) return;
     if (
       !confirm(
         'Clear all Smart Memory context for this chat?\n\nThis will erase the summary, session memories, scene history, and story arcs. Long-term memories are not affected.',
@@ -1627,16 +1925,18 @@ function bindSettingsUI() {
     updateArcsUI();
     updateTokenDisplay();
     sceneMessageBuffer = [];
+    sceneBufferLastIndex = -1;
     setStatusMessage('Chat context cleared.');
   });
 
   // ---- Fresh Start ----------------------------------------------------
   $('#sm_fresh_start_button').on('click', async function () {
+    if (isCatchUpRunning()) return;
     const characterName = getCurrentCharacterName();
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
       !confirm(
-        `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nMemory injection will also be suppressed for this chat.\n\nThis cannot be undone. Continue?`,
+        `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nThis cannot be undone. Continue?`,
       )
     )
       return;
@@ -1657,32 +1957,64 @@ function bindSettingsUI() {
     await clearSessionMemories();
     await clearSceneHistory();
     await clearArcs();
+    // Dismiss any open recap modal.
+    $('#sm_recap_overlay').remove();
 
-    // Enable the fresh-start flag so long-term injection stays suppressed.
-    await setFreshStart(true);
     await context.saveMetadata();
 
     // Clear all injection slots.
     loadAndInjectSummary();
-    injectMemories(characterName, true);
+    injectMemories(characterName, isFreshStart());
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);
-    updateFreshStartUI(true);
+    updateFreshStartUI(isFreshStart());
     updateSessionUI();
     updateScenesUI();
     updateArcsUI();
     updateTokenDisplay();
     sceneMessageBuffer = [];
+    sceneBufferLastIndex = -1;
     setStatusMessage('Fresh start complete.');
     toastr.success(`All memories cleared for ${nameLabel}.`, 'Smart Memory', {
       timeOut: 4000,
       positionClass: 'toast-bottom-right',
     });
   });
+
+  // ---- Embedding deduplication ----------------------------------------
+  $('#sm_embedding_enabled')
+    .prop('checked', s.embedding_enabled)
+    .on('change', function () {
+      getSettings().embedding_enabled = $(this).prop('checked');
+      $('#sm_embedding_config').toggle(getSettings().embedding_enabled);
+      saveSettingsDebounced();
+    });
+  $('#sm_embedding_config').toggle(s.embedding_enabled);
+
+  $('#sm_embedding_url')
+    .val(s.embedding_url ?? '')
+    .on('input', function () {
+      getSettings().embedding_url = $(this).val().trim();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_embedding_model')
+    .val(s.embedding_model ?? 'nomic-embed-text')
+    .on('input', function () {
+      getSettings().embedding_model = $(this).val().trim();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_embedding_keep')
+    .prop('checked', s.embedding_keep)
+    .on('change', function () {
+      getSettings().embedding_keep = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
 
   // ---- Continuity checker ---------------------------------------------
   $('#sm_check_continuity').on('click', async function () {
@@ -1817,9 +2149,12 @@ jQuery(async function () {
         setStatusMessage('Extracting memories...');
         try {
           const context = getContext();
-          await extractAndStoreMemories(characterName, context.chat.slice(-20));
-          await extractSessionMemories(context.chat.slice(-40));
-          await extractArcs(context.chat.slice(-100));
+          const recentLongTerm = getStableExtractionWindowWithFallback(context.chat, 20);
+          const recentSession = getStableExtractionWindowWithFallback(context.chat, 40);
+          const recentArcs = getStableExtractionWindowWithFallback(context.chat, 100);
+          await extractAndStoreMemories(characterName, recentLongTerm);
+          await extractSessionMemories(recentSession);
+          await extractArcs(recentArcs);
           injectMemories(characterName, isFreshStart());
           injectSessionMemories();
           injectArcs();
@@ -1853,18 +2188,12 @@ jQuery(async function () {
           });
           return 'Recap generation failed.';
         }
-        injectRecap(recap);
-        recapActive = true;
-        updateTokenDisplay();
-        setStatusMessage('Recap injected.');
-        toastr.info('Recap injected into context.', 'Smart Memory', {
-          timeOut: 4000,
-          positionClass: 'toast-bottom-right',
-        });
+        displayRecap(recap);
+        setStatusMessage('Recap displayed.');
         return recap;
       },
       helpString:
-        'Generates a "Previously on..." recap of the current chat and injects it into context.',
+        'Generates a "Previously on..." recap of the current chat and displays it as a popup.',
       returns: ARGUMENT_TYPE.STRING,
     }),
   );

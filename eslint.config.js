@@ -19,6 +19,7 @@ export default [
         clearInterval: 'readonly',
         confirm: 'readonly',
         alert: 'readonly',
+        fetch: 'readonly',
         // jQuery and toastr - provided by SillyTavern host page
         $: 'readonly',
         jQuery: 'readonly',

@@ -50,7 +50,74 @@ import {
   META_KEY,
 } from './constants.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
-import { reconcileTypeEntries, sortByTimeline, trimByPriority } from './memory-utils.js';
+import {
+  prioritizeMemories,
+  reconcileTypeEntries,
+  selectProtectedMemories,
+  sortByTimeline,
+  trimByPriority,
+} from './memory-utils.js';
+import { batchVerify } from './embeddings.js';
+
+// Maximum new entries accepted per type per extraction pass.
+// Prevents one burst of similar events flooding a single type while still
+// allowing genuinely diverse new facts through.
+const MAX_NEW_PER_TYPE_PER_EXTRACTION = 2;
+
+function incomingPriorityScore(mem) {
+  const typeBonus =
+    mem.type === 'relationship'
+      ? 30
+      : mem.type === 'fact'
+        ? 20
+        : mem.type === 'preference'
+          ? 10
+          : 0;
+  return (mem.importance ?? 2) * 100 + typeBonus + (mem.ts ?? 0) / 1e13;
+}
+
+/**
+ * Filters a list of candidate memories against existing ones, removing
+ * near-duplicates and entries that fail basic quality checks.
+ *
+ * All texts are embedded in a single batch API call so nomic-embed-text only
+ * needs to load once per verification pass rather than once per candidate.
+ * Falls back to Jaccard word-overlap when embeddings are unavailable.
+ *
+ * @param {Array} candidates - Newly extracted memory objects to evaluate.
+ * @param {Array} existing   - Currently stored memories to compare against.
+ * @returns {Promise<Array>} Candidates that passed all checks.
+ */
+async function verifyLongtermCandidates(candidates, existing) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+
+  const bannedPhrases = ['maybe', 'might be', 'possibly', 'i think', 'perhaps', 'seems like'];
+  const seen = new Set();
+
+  // Apply quality filters before embedding - no point embedding entries we'll discard.
+  const filtered = candidates.filter((mem) => {
+    const text = String(mem.content || '').trim();
+    if (text.length < 8 || text.length > 280) return false;
+    const lower = text.toLowerCase();
+    if (bannedPhrases.some((p) => lower.includes(p))) return false;
+    const key = `${mem.type}|${lower}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (filtered.length === 0) return [];
+
+  // Batch-embed all candidates and existing memories in one API call.
+  const { passed } = await batchVerify(filtered, existing);
+  return filtered.filter((m) =>
+    passed.has(
+      String(m.content || '')
+        .toLowerCase()
+        .trim(),
+    ),
+  );
+}
 
 // ---- Storage helpers ----------------------------------------------------
 
@@ -71,6 +138,12 @@ export function loadCharacterMemories(characterName) {
     ...m,
     consolidated: m.consolidated ?? true,
     importance: m.importance ?? 2,
+    expiration: m.expiration ?? 'permanent',
+    confidence: m.confidence ?? 0.7,
+    persona_relevance: m.persona_relevance ?? (m.type === 'relationship' ? 3 : 1),
+    intimacy_relevance: m.intimacy_relevance ?? (m.type === 'preference' ? 3 : 1),
+    retrieval_count: m.retrieval_count ?? 0,
+    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? Date.now(),
   }));
 }
 
@@ -131,18 +204,21 @@ function parseExtractionOutput(text) {
 
   const results = [];
   // Matches lines like: [fact:2] The character is tall.
-  // The importance score (:N) is optional - defaults to 2 if omitted.
-  const linePattern = /^\[(fact|relationship|preference|event)(?::([123]))?\]\s+(.+)$/gim;
+  // Accepts optional spaces around ":" and after "]" for parser resilience.
+  // The importance score is optional - defaults to 2 if omitted.
+  const linePattern =
+    /^\[(fact|relationship|preference|event)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
   let match;
 
   while ((match = linePattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
     const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const content = match[3].trim();
+    const expiration = match[3] ? match[3].toLowerCase() : 'permanent';
+    const content = match[4].trim();
     if (MEMORY_TYPES.includes(type) && content.length > 5) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, importance, ts: Date.now(), consolidated: false });
+      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
     }
   }
 
@@ -167,33 +243,62 @@ function parseExtractionOutput(text) {
  * @param {number} maxTotal - Hard cap on the total number of memories to keep.
  * @returns {Array} The merged memory array.
  */
+/**
+ * Merges new memories into the existing set with two layers of churn control:
+ *
+ * 1. Per-type extraction cap: at most MAX_NEW_PER_TYPE_PER_EXTRACTION entries
+ *    per type are accepted per pass. Prevents a burst of similar events from
+ *    flooding one type while the rest accumulate normally.
+ *
+ * 2. Per-type storage cap: derived from maxTotal / number of types (rounded up).
+ *    When a new entry would push a type over its cap, the lowest-priority entry
+ *    of that type is evicted first so the total stays balanced. Cloud users who
+ *    raise maxTotal get proportionally larger per-type budgets automatically.
+ *
+ * @param {Array} existing - Currently stored memories.
+ * @param {Array} incoming - Newly extracted memories (already deduped by verifyLongtermCandidates).
+ * @param {number} maxTotal - Hard cap on total stored memories (from settings).
+ * @returns {Array} The merged memory array.
+ */
 function mergeMemories(existing, incoming, maxTotal) {
   const merged = [...existing];
 
-  for (const mem of incoming) {
-    const newWords = new Set(mem.content.toLowerCase().split(/\s+/));
-    const isDuplicate = merged.some((ex) => {
-      if (ex.type !== mem.type) return false;
-      const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
-      const intersection = [...newWords].filter((w) => exWords.has(w)).length;
-      const union = new Set([...newWords, ...exWords]).size;
-      return intersection / union > 0.7;
-    });
+  // Per-type cap derived from the overall max - equal split across all types.
+  // At 25 total -> 7 per type (ceil(25/4)), at 50 -> 13, at 100 -> 25.
+  const perTypeCap = Math.ceil(maxTotal / MEMORY_TYPES.length);
 
-    if (!isDuplicate) {
-      merged.push(mem);
+  // Track how many new entries we've accepted per type this pass.
+  const addedPerType = new Map();
+
+  // Sort incoming by priority so when we hit the per-type cap we keep the best.
+  const sorted = [...incoming].sort((a, b) => incomingPriorityScore(b) - incomingPriorityScore(a));
+
+  for (const mem of sorted) {
+    const typeAdded = addedPerType.get(mem.type) ?? 0;
+    if (typeAdded >= MAX_NEW_PER_TYPE_PER_EXTRACTION) continue;
+
+    // If this type is already at the per-type storage cap, evict the
+    // lowest-priority existing entry of this type before adding the new one.
+    const typeEntries = merged.filter((m) => m.type === mem.type);
+    if (typeEntries.length >= perTypeCap) {
+      const prioritized = prioritizeMemories(typeEntries);
+      // Last entry in prioritized is lowest priority - remove it from merged.
+      const toEvict = prioritized[prioritized.length - 1];
+      const evictIdx = merged.findIndex(
+        (m) => m.type === toEvict.type && m.content === toEvict.content,
+      );
+      if (evictIdx >= 0) merged.splice(evictIdx, 1);
     }
+
+    merged.push(mem);
+    addedPerType.set(mem.type, typeAdded + 1);
   }
 
-  // When over the cap, drop the least valuable entries first:
-  // sort by importance ascending then age ascending, remove from the tail.
+  // Final safety trim to maxTotal in case types were already over cap before
+  // this pass (e.g. migrating from an older version without the cap).
   if (merged.length > maxTotal) {
-    merged.sort((a, b) => {
-      const ia = a.importance ?? 2;
-      const ib = b.importance ?? 2;
-      if (ia !== ib) return ib - ia; // higher importance first
-      return b.ts - a.ts; // newer first within same importance
-    });
+    const prioritized = prioritizeMemories(merged);
+    merged.splice(0, merged.length, ...prioritized);
     merged.splice(maxTotal);
   }
 
@@ -222,15 +327,21 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     const existingMemories = loadCharacterMemories(characterName);
     const existingText = formatMemoriesForPrompt(existingMemories);
 
-    const response = await generateMemoryExtract(buildExtractionPrompt(chatHistory, existingText), {
-      responseLength: settings.longterm_response_length || 600,
-    });
+    const response = await generateMemoryExtract(
+      buildExtractionPrompt(chatHistory, existingText, characterName),
+      {
+        responseLength: settings.longterm_response_length || 600,
+      },
+    );
 
     console.log(`[SmartMemory] Raw extraction response for "${characterName}":`, response);
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const newMemories = parseExtractionOutput(response);
+    const newMemories = await verifyLongtermCandidates(
+      parseExtractionOutput(response),
+      existingMemories,
+    );
     if (newMemories.length === 0) {
       console.log('[SmartMemory] No parseable memories in response. Check format above.');
       return 0;
@@ -238,13 +349,16 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     const maxMemories = settings.longterm_max_memories || 25;
     const merged = mergeMemories(existingMemories, newMemories, maxMemories);
-    const added = merged.length - Math.min(existingMemories.length, maxMemories);
+    // Count how many of the new candidates actually survived dedup and made it
+    // into the merged set, regardless of whether older entries were displaced.
+    const existingKeys = new Set(existingMemories.map((m) => `${m.type}|${m.content}`));
+    const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
     saveCharacterMemories(characterName, merged);
 
     console.log(
       `[SmartMemory] Saved ${added} new memories for "${characterName}". Total: ${merged.length}`,
     );
-    return Math.max(0, added);
+    return added;
   } catch (err) {
     console.error('[SmartMemory] Memory extraction failed:', err);
     throw err;
@@ -298,22 +412,27 @@ function getConsolidationThresholds(settings) {
  * does not trigger [relationship] consolidation.
  *
  * @param {string} characterName
+ * @param {boolean} [force=false] - If true, consolidate all types regardless of threshold.
+ *   Used by the catch-up final pass to flush any entries that never accumulated enough
+ *   to hit the threshold during per-chunk consolidation.
  * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
  */
-export async function consolidateMemories(characterName) {
+export async function consolidateMemories(characterName, force = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.longterm_consolidate || !characterName) return 0;
   const thresholds = getConsolidationThresholds(settings);
 
   const memories = loadCharacterMemories(characterName);
   let totalRemoved = 0;
+  let dirty = false;
 
   for (const type of MEMORY_TYPES) {
     const base = memories.filter((m) => m.type === type && m.consolidated);
     const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
 
     const threshold = thresholds[type] ?? DEFAULT_CONSOLIDATION_THRESHOLDS.fact;
-    if (unprocessed.length < threshold) continue;
+    if (!force && unprocessed.length < threshold) continue;
+    if (unprocessed.length === 0) continue;
 
     try {
       const baseText = formatMemoriesForPrompt(base);
@@ -329,6 +448,7 @@ export async function consolidateMemories(characterName) {
       if (!response || response.trim().toUpperCase() === 'NONE') {
         // Model found nothing to add - mark unprocessed as consolidated as-is.
         unprocessed.forEach((m) => (m.consolidated = true));
+        dirty = true;
         continue;
       }
 
@@ -350,6 +470,7 @@ export async function consolidateMemories(characterName) {
       const after = reconciledType.length;
       const removed = before - after;
       totalRemoved += Math.max(0, removed);
+      dirty = true;
 
       console.log(
         `[SmartMemory] [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
@@ -358,16 +479,13 @@ export async function consolidateMemories(characterName) {
       console.error(`[SmartMemory] Consolidation failed for type [${type}]:`, err);
       // On failure, mark unprocessed as consolidated so they don't block future passes.
       unprocessed.forEach((m) => (m.consolidated = true));
+      dirty = true;
     }
   }
 
   const maxMemories = settings.longterm_max_memories || 25;
   const finalMemories = sortByTimeline(trimByPriority(memories, maxMemories));
-  if (
-    totalRemoved > 0 ||
-    finalMemories.length !== memories.length ||
-    memories.some((m) => m.consolidated)
-  ) {
+  if (dirty || finalMemories.length !== memories.length) {
     saveCharacterMemories(characterName, finalMemories);
   }
 
@@ -382,8 +500,11 @@ export async function consolidateMemories(characterName) {
  * or the character has no memories yet.
  * @param {string} characterName
  * @param {boolean} [freshStart=false] - If true, suppress injection for this chat.
+ * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
+ *   Only pass true from the post-extraction path (one real AI response turn). All other callers
+ *   (chat load, settings change, etc.) leave telemetry unchanged to avoid inflating the signal.
  */
-export function injectMemories(characterName, freshStart = false) {
+export function injectMemories(characterName, freshStart = false, updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.longterm_enabled || freshStart || !characterName) {
@@ -401,19 +522,68 @@ export function injectMemories(characterName, freshStart = false) {
   // Primary sort: importance ascending (1 before 3). Secondary: age ascending (oldest first).
   // This way a low-importance old entry is always dropped before a high-importance new one.
   const budget = settings.longterm_inject_budget ?? 500;
-  const trimmed = [...memories].sort((a, b) => {
-    const ia = a.importance ?? 2;
-    const ib = b.importance ?? 2;
-    if (ia !== ib) return ib - ia; // higher importance first
-    return b.ts - a.ts; // newer first within same importance
-  });
-  while (trimmed.length > 1 && estimateTokens(formatMemoriesForPrompt(trimmed)) > budget) {
-    trimmed.pop();
+  const protectedSet = new Set(
+    selectProtectedMemories(memories, ['relationship', 'preference', 'fact']),
+  );
+  const trimmed = prioritizeMemories(memories);
+  // Use the injection format for budget estimation so the check matches what is actually injected.
+  while (
+    trimmed.length > 1 &&
+    estimateTokens(trimmed.map((m) => `- ${m.content}`).join('\n')) > budget
+  ) {
+    let idx = -1;
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      if (!protectedSet.has(trimmed[i])) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) {
+      trimmed.splice(idx, 1);
+    } else {
+      break;
+    }
   }
 
-  const memoryText = formatMemoriesForPrompt(trimmed);
+  // Diversity floor: cap entries per type so a flood of near-duplicate
+  // variants of one type (e.g. many preference entries about the same topic)
+  // cannot crowd out other types entirely. Cap is proportional to budget so
+  // larger budgets allow more entries per type without being too restrictive.
+  // Formula: max(2, floor(budget / 150)) gives 2 at 200 tokens, 3 at 500, 6 at 900.
+  const perTypeCap = Math.max(2, Math.floor(budget / 150));
+  const typeCount = new Map();
+  const diversified = trimmed.filter((m) => {
+    const count = typeCount.get(m.type) ?? 0;
+    if (count >= perTypeCap) return false;
+    typeCount.set(m.type, count + 1);
+    return true;
+  });
+  trimmed.splice(0, trimmed.length, ...diversified);
+
+  // Only update retrieval telemetry when called from a real AI response turn.
+  // Skipping on chat load, settings changes etc. prevents the signal from
+  // saturating too quickly and becoming meaningless.
+  if (updateTelemetry) {
+    const recalled = new Set(trimmed.map((m) => `${m.type}|${m.content}`));
+    const updated = memories.map((m) => {
+      const key = `${m.type}|${m.content}`;
+      if (!recalled.has(key)) return m;
+      return {
+        ...m,
+        retrieval_count: (m.retrieval_count ?? 0) + 1,
+        last_confirmed_ts: Date.now(),
+      };
+    });
+    saveCharacterMemories(characterName, updated);
+  }
+
+  // Format for injection: plain bullet list without [type] tags.
+  // The [type] format is kept in formatMemoriesForPrompt for the extraction/consolidation
+  // pipeline - those prompts need it. The RP model does not, and bracket notation
+  // bleeds into story output when the model sees it repeatedly in context.
+  const memoryText = trimmed.map((m) => `- ${m.content}`).join('\n');
   const template =
-    settings.longterm_template || '[Memories from previous conversations:\n{{memories}}]';
+    settings.longterm_template || 'Memories from previous conversations:\n{{memories}}';
   const content = template.replace('{{memories}}', memoryText);
 
   setExtensionPrompt(

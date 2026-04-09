@@ -260,7 +260,7 @@ export function injectArcs() {
   }
 
   const text = trimmed.map((a) => `- ${a.content}`).join('\n');
-  const content = `[Active story threads:\n${text}]`;
+  const content = `Active story threads:\n${text}`;
 
   setExtensionPrompt(
     PROMPT_KEY_ARCS,

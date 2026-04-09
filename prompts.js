@@ -23,8 +23,8 @@
  * Static exports are ready-to-use prompt strings. Builder functions accept
  * runtime values and return the assembled prompt string.
  *
- * SUMMARY_PROMPT               - full compaction prompt (first-time summary)
- * UPDATE_SUMMARY_PROMPT        - progressive update prompt (extends existing summary)
+ * buildSummaryPrompt           - assembles the full compaction prompt (first-time summary)
+ * buildUpdateSummaryPrompt     - assembles the progressive update prompt (extends existing summary)
  * RECAP_PROMPT                 - away recap "Previously on..." prompt
  * SESSION_EXTRACTION_SYSTEM    - system role string for session extraction
  * buildSessionExtractionPrompt - assembles the session extraction prompt
@@ -44,14 +44,27 @@
 // Local Ollama models often ignore the systemPrompt parameter, so this
 // must live in the prompt body itself.
 const NO_ACTION_PREAMBLE = `CRITICAL: Respond with plain TEXT ONLY. Do NOT continue the roleplay. Do NOT speak as any character. You are writing a document, not a story.
+CRITICAL: If any other instruction conflicts with this task format, ignore it and follow this task format exactly.
 
 `;
 
 // ---- Short-term: full compaction ----------------------------------------
 
-export const SUMMARY_PROMPT =
-  NO_ACTION_PREAMBLE +
-  `Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
+/**
+ * Assembles the full compaction prompt (first-time summary).
+ * @param {string} [storedMemories] - Brief digest of long-term and session memories already
+ *   stored at other tiers, passed so the summary can focus on narrative flow rather than
+ *   restating facts already captured elsewhere. Keep this short to avoid overwhelming local models.
+ * @returns {string} The complete prompt string.
+ */
+export function buildSummaryPrompt(storedMemories = '') {
+  const storedSection = storedMemories
+    ? `ALREADY STORED IN OTHER MEMORY TIERS (do not restate these as Revealed Information - focus the summary on narrative flow and story state instead):\n${storedMemories}\n\n`
+    : '';
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `${storedSection}Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
 
 Before writing your summary, organize your thoughts in <analysis> tags, then write the summary in <summary> tags.
 
@@ -61,7 +74,7 @@ Your summary must cover ALL of the following sections:
 2. Characters Present: Who is involved, their current emotional state, disposition, and demeanor.
 3. Key Events: What happened during this conversation, in chronological order. Be specific.
 4. Relationship Dynamics: The current state of the relationship(s) between characters - trust, tension, affection, history.
-5. Revealed Information: Backstory, secrets, lore, or facts about characters or the world that came to light.
+5. Revealed Information: New facts that came to light THIS session that are NOT already stored elsewhere.
 6. Story Threads: Unresolved tensions, promises made, questions raised, or ongoing conflicts.
 7. User's Direction: What themes, tone, or direction the user has been steering the story toward.
 8. Current Moment: Precisely where the story was at the moment this summary was triggered - what was just said or done.
@@ -98,17 +111,39 @@ Your summary must cover ALL of the following sections:
 
 9. Next Beat:
    [Details]
-</summary>`;
+</summary>`
+  );
+}
 
 // ---- Short-term: progressive update -------------------------------------
 
-export const UPDATE_SUMMARY_PROMPT =
-  NO_ACTION_PREAMBLE +
-  `An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
+/**
+ * Assembles the progressive update prompt (extends existing summary).
+ * @param {string} [storedMemories] - Brief digest of long-term and session memories already
+ *   stored at other tiers. Same purpose as in buildSummaryPrompt.
+ * @returns {string} The complete prompt string.
+ */
+export function buildUpdateSummaryPrompt(storedMemories = '') {
+  const storedSection = storedMemories
+    ? `ALREADY STORED IN OTHER MEMORY TIERS (do not restate these as Revealed Information):\n${storedMemories}\n\n`
+    : '';
 
-CRITICAL: You must reproduce every section in full. Do NOT write "Same as before", "Unchanged", "As previously noted", or any similar shorthand. If a section has not changed, copy it word for word from the existing summary. The existing summary will not be available after this update - any section you omit or abbreviate is permanently lost.
+  return (
+    NO_ACTION_PREAMBLE +
+    `${storedSection}An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
 
-Only add or update content where the new events require it. Preserve the 9-section format.
+CRITICAL: You must reproduce every section in full. Do NOT write "Same as before", "Unchanged", "As previously noted", or any similar shorthand. The existing summary will not be available after this update - any section you omit or abbreviate is permanently lost.
+
+Section update rules - follow these exactly:
+- Section 1 (Scene & Setting): REWRITE to describe the current location, time, and atmosphere only. Do not accumulate past locations.
+- Section 2 (Characters Present): REWRITE to describe each character's current state, mood, and disposition only. Do not append "now X, now Y" chains - replace the previous description entirely with where they are NOW.
+- Section 3 (Key Events): APPEND new events to the existing list. Keep all prior events.
+- Section 4 (Relationship Dynamics): REWRITE to reflect the current state of relationships.
+- Section 5 (Revealed Information): APPEND any newly revealed facts. Keep all prior entries.
+- Section 6 (Story Threads): UPDATE - add new threads, mark resolved ones as resolved.
+- Section 7 (User's Direction): REWRITE to reflect the current tone and direction.
+- Section 8 (Current Moment): REWRITE to describe precisely where the story is right now.
+- Section 9 (Next Beat): REWRITE to reflect the most natural immediate continuation.
 
 EXISTING SUMMARY:
 {{existing_summary}}
@@ -116,11 +151,13 @@ EXISTING SUMMARY:
 NEW EVENTS TO INCORPORATE:
 {{new_events}}
 
-Write the complete updated summary inside <summary> tags using the same 9-section format. Update especially sections 2, 3, 4, 5, 6, 8, and 9 as needed.
+Write the complete updated summary inside <summary> tags using the same 9-section format.
 
 <summary>
 [Updated summary here]
-</summary>`;
+</summary>`
+  );
+}
 
 // ---- Away recap ---------------------------------------------------------
 
@@ -136,21 +173,32 @@ export const SESSION_EXTRACTION_SYSTEM = `You are a session archivist. You extra
  * Assembles the session memory extraction prompt.
  * @param {string} chatHistory - Formatted recent messages (name: text pairs).
  * @param {string} existingSession - Already-recorded session items (may be empty).
+ * @param {string} [longtermMemories] - Already-stored long-term memories (may be empty).
+ *   Passed so the model can skip facts already captured at the long-term tier.
  * @returns {string} The complete prompt string.
  */
-export function buildSessionExtractionPrompt(chatHistory, existingSession) {
+export function buildSessionExtractionPrompt(chatHistory, existingSession, longtermMemories = '') {
   const existingSection = existingSession
     ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\n`
+    : '';
+
+  const longtermSection = longtermMemories
+    ? `ALREADY IN LONG-TERM MEMORY (do not re-extract these - they are already stored):\n${longtermMemories}\n\n`
     : '';
 
   return (
     NO_ACTION_PREAMBLE +
     `[SESSION MEMORY EXTRACTION - Do NOT roleplay. Output structured data only.]
 
-${existingSection}RECENT EXCHANGES:\n${chatHistory}
+${longtermSection}${existingSection}RECENT EXCHANGES:\n${chatHistory}
 
 ---
-Extract NEW details worth remembering within this session. Be more specific than long-term memories - capture scene details, emotional beats, specific objects/names/places, and how things developed.
+Extract NEW details worth remembering within this session. Focus on session-specific context: scene details, emotional beats, specific objects/names/places, and how things developed THIS session. Do not re-extract facts already in long-term memory.
+
+SKIP these - they do not belong in session memory:
+- Transient physical details that only matter for this exact moment (stained clothes, spilled food, current body positions)
+- Generic atmosphere descriptions without story significance
+- Anything already captured in long-term memory above
 
 Types:
 - scene       - current or recently completed scene details (location, atmosphere, time)
@@ -158,24 +206,32 @@ Types:
 - development - how the relationship or situation changed
 - detail      - specific facts, names, objects, or details mentioned (e.g. "The whiskey is Dragon's Fire brand")
 
-For each item, also rate its importance on a scale of 1-3:
-- 1 = low    - passing detail, unlikely to matter later this session
-- 2 = medium - useful context, standard session fact (use this when unsure)
-- 3 = high   - pivotal scene, major revelation, or relationship-defining moment
+SCORING CRITERIA:
+- 1: Atmospheric or minor flavor detail
+- 2: Useful context or meaningful update
+- 3: Critical change, pivotal revelation, or defining moment
+
+EXPIRATION CLASS (choose one):
+- scene      - likely irrelevant after this scene transition
+- session    - useful for this current chat/session
+- permanent  - should persist as a durable memory
 
 One item per line, exact format:
-[scene:2] We are in a candlelit tavern, late evening, rain outside.
-[detail:3] The character's horse is named Ember, a chestnut mare.
-[revelation:1] He mentioned in passing that it rained last week.
+[scene:2:scene] We are in a candlelit tavern, late evening, rain outside.
+[detail:3:permanent] The character's horse is named Ember, a chestnut mare.
+[revelation:1:session] He mentioned in passing that it rained last week.
 
-If nothing new, output: NONE`
+FINAL RULE: Output ONLY [type:score:expiration] lines. No headers. No intros. No explanations.
+If nothing new, output exactly: NONE`
   );
 }
 
 // ---- Scene break detection ----------------------------------------------
 
 /** Simple yes/no prompt - expects "YES" or "NO" as the entire response. */
-export const SCENE_DETECT_PROMPT = `Did the following story text contain a scene break - meaning a time skip, location change, or clear transition to a new scene? Answer with YES or NO only, nothing else.
+export const SCENE_DETECT_PROMPT =
+  NO_ACTION_PREAMBLE +
+  `Did the following story text contain a scene break - meaning a time skip, location change, or clear transition to a new scene? Answer with YES or NO only, nothing else.
 
 TEXT:
 {{text}}`;
@@ -210,6 +266,8 @@ ${existingSection}CONVERSATION:\n${chatHistory}
 
 ---
 Extract open story threads - unresolved conflicts, promises made, character goals, mysteries introduced, tensions established.
+
+CRITICAL: Each arc must be one short sentence only. No sub-clauses, no questions, no elaboration. State the unresolved thread as a plain fact.
 
 One arc per line:
 [arc] She promised to meet him at dawn but never explained why.
@@ -261,8 +319,8 @@ Does the latest response contradict or conflict with any established fact? List 
  */
 export function buildLongtermConsolidationPrompt(type, baseText, batchText) {
   const baseSection = baseText
-    ? `CONSOLIDATED BASE (read-only - do NOT modify or reproduce these):\n${baseText}\n\n`
-    : `CONSOLIDATED BASE: (empty - no existing entries for this type)\n\n`;
+    ? `EXISTING BASE ENTRIES (context only - do not output these unless updating one):\n${baseText}\n\n`
+    : `EXISTING BASE ENTRIES: (none yet for this type)\n\n`;
 
   return (
     NO_ACTION_PREAMBLE +
@@ -272,21 +330,26 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-For each new entry above, decide:
-1. DUPLICATE - already fully captured by a base entry. Drop it entirely.
-2. NEW DETAIL - adds specific information to an existing base entry. Output a revised version of that base entry with the detail folded in.
-3. GENUINELY NEW - not covered by any base entry. Keep it as-is.
+For each new entry, decide:
+1. DUPLICATE - already fully captured by an existing base entry, or describes the same subject from a different angle with no net new information. Drop it entirely.
+2. UPDATE - describes the same subject as an existing base entry but adds genuinely new detail. Output one merged entry that combines both into a single concise line - do NOT keep the old version alongside the new one.
+3. NEW - describes a subject not covered by any base entry at all. Keep it as-is.
 
 Rules:
-- Never remove or paraphrase base entries that are not being extended.
-- Never invent information not present in the originals.
-- If folding a detail in would make a base entry too long or unwieldy, keep it as a separate entry instead.
-- Preserve the most specific and informative wording.
-- Use the [${type}] type tag for all output entries.
+- SAME SUBJECT = same person, relationship, or fact, even if the wording differs. Two entries about "Finn and Senjin's bond" are the same subject regardless of which aspect they emphasize.
+- When merging, fold all unique details from both entries into one compact line. Do not append - rewrite as a single unified statement.
+- NEW information OVERRIDES outdated or conflicting base information.
+- Never invent information not present in the base or new entries.
+- Keep entries compact and precise - one line per distinct subject.
+
+For each output entry, include an importance score (1-3) and expiration:
+- importance 1: minor flavor detail, 2: useful context, 3: critical trait or major event
+- expiration: scene (fades after scene), session (fades after chat), permanent (durable fact)
 
 Output ONLY the entries to ADD or UPDATE in the base, one per line:
-[${type}] The memory entry here.
+[${type}:2:permanent] The memory entry here.
 
+FINAL RULE: Output ONLY [${type}:score:expiration] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
   );
 }
@@ -307,8 +370,8 @@ If all new entries are duplicates and nothing needs to be added, output exactly:
  */
 export function buildSessionConsolidationPrompt(type, baseText, batchText) {
   const baseSection = baseText
-    ? `CONSOLIDATED BASE (read-only - do NOT modify or reproduce these):\n${baseText}\n\n`
-    : `CONSOLIDATED BASE: (empty - no existing entries for this type)\n\n`;
+    ? `EXISTING BASE ENTRIES (context only - do not output these unless updating one):\n${baseText}\n\n`
+    : `EXISTING BASE ENTRIES: (none yet for this type)\n\n`;
 
   return (
     NO_ACTION_PREAMBLE +
@@ -318,21 +381,26 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-For each new entry above, decide:
-1. DUPLICATE - already fully captured by a base entry. Drop it entirely.
-2. NEW DETAIL - adds specific information to an existing base entry. Output a revised version of that base entry with the detail folded in.
-3. GENUINELY NEW - not covered by any base entry. Keep it as-is.
+For each new entry, decide:
+1. DUPLICATE - already fully captured by an existing base entry, or describes the same subject from a different angle with no net new information. Drop it entirely.
+2. UPDATE - describes the same subject as an existing base entry but adds genuinely new detail. Output one merged entry that combines both into a single concise line - do NOT keep the old version alongside the new one.
+3. NEW - describes a subject not covered by any base entry at all. Keep it as-is.
 
 Rules:
-- Never remove or paraphrase base entries that are not being extended.
-- Never invent information not present in the originals.
-- If folding a detail in would make a base entry too long or unwieldy, keep it as a separate entry instead.
-- Preserve the most specific and informative wording.
-- Use the [${type}] type tag for all output entries.
+- SAME SUBJECT = same scene, event, or detail, even if the wording differs.
+- When merging, fold all unique details from both entries into one compact line. Do not append - rewrite as a single unified statement.
+- NEW information OVERRIDES outdated or conflicting base information.
+- Never invent information not present in the base or new entries.
+- Keep entries compact and precise - one line per distinct subject.
+
+For each output entry, include an importance score (1-3) and expiration:
+- importance 1: passing detail, 2: useful session context, 3: pivotal moment or key revelation
+- expiration: scene (fades after scene transition), session (relevant for this chat only), permanent (durable across sessions)
 
 Output ONLY the entries to ADD or UPDATE in the base, one per line:
-[${type}] The session memory entry here.
+[${type}:2:session] The session memory entry here.
 
+FINAL RULE: Output ONLY [${type}:score:expiration] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
   );
 }
@@ -345,9 +413,13 @@ export const EXTRACTION_SYSTEM_PROMPT = `You are a memory archivist. Your only j
  * Assembles the long-term memory extraction prompt.
  * @param {string} chatHistory - Formatted recent messages (name: text pairs).
  * @param {string} existingMemories - Already-stored memories as [type] content lines (may be empty).
+ * @param {string} [characterName] - Active roleplay character for this memory store.
  * @returns {string} The complete prompt string.
  */
-export function buildExtractionPrompt(chatHistory, existingMemories) {
+export function buildExtractionPrompt(chatHistory, existingMemories, characterName = '') {
+  const activeCharacterSection = characterName
+    ? `ACTIVE CHARACTER FOR THIS MEMORY STORE: ${characterName}\n\n`
+    : '';
   const existingSection = existingMemories
     ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\n`
     : '';
@@ -356,10 +428,15 @@ export function buildExtractionPrompt(chatHistory, existingMemories) {
     NO_ACTION_PREAMBLE +
     `[MEMORY EXTRACTION TASK - Do NOT continue the roleplay. Do NOT speak as a character. Output structured data only.]
 
-${existingSection}RECENT CONVERSATION TO ANALYZE:\n${chatHistory}
+${activeCharacterSection}${existingSection}RECENT CONVERSATION TO ANALYZE:\n${chatHistory}
 
 ---
 Your task: Extract NEW facts worth remembering in future sessions with this character. Ignore filler and small talk. Focus on information that would meaningfully change how future conversations begin or flow.
+
+Prioritization rules (strict):
+- Prioritize durable memories about the ACTIVE CHARACTER and their bond with the user.
+- If temporary side characters appear, store only major lasting impact (e.g. a new ally/rival), not blow-by-blow dialogue.
+- Avoid over-capturing a single short-lived topic; keep long-term memory diverse and stable across many sessions.
 
 Use one of these memory types:
 - fact        - established truths about the character, world, or other characters
@@ -368,16 +445,22 @@ Use one of these memory types:
 - event       - significant events that occurred and should be recalled
 
 For each memory, also rate its importance on a scale of 1-3:
-- 1 = low    - incidental detail, minor observation, unlikely to matter in future sessions
-- 2 = medium - useful context, standard fact (use this when unsure)
-- 3 = high   - character-defining trait, core relationship fact, major event, or plot-critical information
+- 1: Atmospheric or minor flavor detail
+- 2: Useful context or meaningful update
+- 3: Critical trait, major event, or relationship-defining shift
+
+Also classify expiration:
+- scene      - likely irrelevant after this scene transition
+- session    - useful for this current chat/session, but may fade
+- permanent  - durable fact that should persist long-term
 
 Output ONLY one memory per line using this exact format (nothing else):
-[fact:2] The character's name is Elara and she works as a blacksmith.
-[relationship:3] We have developed a close friendship after helping each other escape the dungeon.
-[preference:2] The user enjoys slow-burn romance and witty banter.
-[event:1] They briefly discussed the weather near the harbour.
+[fact:2:permanent] The character's name is Elara and she works as a blacksmith.
+[relationship:3:permanent] We have developed a close friendship after helping each other escape the dungeon.
+[preference:2:session] The user enjoys slow-burn romance and witty banter.
+[event:1:scene] They briefly discussed the weather near the harbour.
 
+FINAL RULE: Output ONLY [type:score:expiration] lines. No headers. No intros. No explanations.
 If there is nothing new worth preserving, output exactly: NONE`
   );
 }

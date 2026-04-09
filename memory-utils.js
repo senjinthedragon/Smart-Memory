@@ -20,7 +20,8 @@
 /**
  * Shared utility helpers for memory retention and consolidation.
  *
- * trimByPriority        - trims a memory array to a cap, keeping high-importance and newer entries
+ * prioritizeMemories    - sorts memories by durability/importance/keyword-recurrence/recency
+ * trimByPriority        - trims a memory array to a cap, keeping durable/high-importance/newer entries
  * reconcileTypeEntries  - merges promoted consolidation entries into a base, replacing overlapping originals
  * sortByTimeline        - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
  */
@@ -38,9 +39,108 @@ function jaccardSimilarity(a, b) {
   return union > 0 ? intersection / union : 0;
 }
 
+const STOPWORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'been',
+  'but',
+  'by',
+  'for',
+  'from',
+  'had',
+  'has',
+  'have',
+  'he',
+  'her',
+  'him',
+  'his',
+  'i',
+  'if',
+  'in',
+  'into',
+  'is',
+  'it',
+  'its',
+  'me',
+  'my',
+  'of',
+  'on',
+  'or',
+  'our',
+  'she',
+  'that',
+  'the',
+  'their',
+  'them',
+  'there',
+  'they',
+  'this',
+  'to',
+  'us',
+  'was',
+  'we',
+  'were',
+  'with',
+  'you',
+  'your',
+]);
+
+const EXPIRATION_WEIGHT = {
+  permanent: 3,
+  session: 2,
+  scene: 1,
+};
+
+function numberOr(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeExpiration(value, fallback = 'session') {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'scene' || normalized === 'session' || normalized === 'permanent') {
+    return normalized;
+  }
+  return fallback;
+}
+
+function keywordSet(text) {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !STOPWORDS.has(w)),
+  );
+}
+
+function buildKeywordFrequency(memories) {
+  const freq = new Map();
+  for (const mem of memories) {
+    const words = keywordSet(mem.content);
+    for (const w of words) {
+      freq.set(w, (freq.get(w) ?? 0) + 1);
+    }
+  }
+  return freq;
+}
+
+function keywordFrequencyScore(mem, freq) {
+  let score = 0;
+  for (const w of keywordSet(mem.content)) {
+    score += freq.get(w) ?? 0;
+  }
+  return score;
+}
+
 /**
  * Trims a memory array to at most `max` entries, preferring to keep
- * high-importance and newer entries when dropping.
+ * durable memories, then high-importance and newer entries when dropping.
+ * Also uses keyword-frequency weighting so repeated themes are retained.
  *
  * Returns a new array; does not mutate the input.
  *
@@ -48,16 +148,80 @@ function jaccardSimilarity(a, b) {
  * @param {number} max
  * @returns {Array}
  */
+export function prioritizeMemories(memories) {
+  const keywordFreq = buildKeywordFrequency(memories);
+  return [...memories].sort((a, b) => {
+    const sa = memoryUtilityScore(a, keywordFreq);
+    const sb = memoryUtilityScore(b, keywordFreq);
+    if (sa !== sb) return sb - sa;
+    return numberOr(b.ts, 0) - numberOr(a.ts, 0) || 0;
+  });
+}
+
+/**
+ * Utility-decay style score used for retention and trimming.
+ * Higher score means "keep this memory longer".
+ *
+ * Signals:
+ * - durability via expiration class
+ * - explicit importance from extractor
+ * - persona and intimacy relevance (character-card continuity)
+ * - confidence (if present)
+ * - retrieval count and confirmation freshness
+ * - keyword recurrence in the current pool
+ *
+ * @param {Object} mem
+ * @param {Map<string, number>} [keywordFreq]
+ * @returns {number}
+ */
+export function memoryUtilityScore(mem, keywordFreq = null) {
+  const expiration = EXPIRATION_WEIGHT[normalizeExpiration(mem.expiration)] ?? 2;
+  const importance = numberOr(mem.importance, 2);
+  const confidence = Math.max(0, Math.min(1, numberOr(mem.confidence, 0.7)));
+  const personaRelevance = Math.max(0, Math.min(3, numberOr(mem.persona_relevance, 1)));
+  const intimacyRelevance = Math.max(0, Math.min(3, numberOr(mem.intimacy_relevance, 1)));
+  const retrievalCount = Math.max(0, numberOr(mem.retrieval_count, 0));
+  const confirmedTs = numberOr(mem.last_confirmed_ts, mem.ts ?? 0);
+  const recencyBoost = confirmedTs > 0 ? confirmedTs / 1e13 : 0;
+  const keywordScore = keywordFreq ? keywordFrequencyScore(mem, keywordFreq) : 0;
+
+  return (
+    importance * 100 +
+    expiration * 35 +
+    confidence * 25 +
+    personaRelevance * 25 +
+    intimacyRelevance * 20 +
+    Math.min(20, retrievalCount * 2) +
+    keywordScore * 2 +
+    recencyBoost
+  );
+}
+
 export function trimByPriority(memories, max) {
   if (memories.length <= max) return memories;
-  return [...memories]
-    .sort((a, b) => {
-      const ia = a.importance ?? 2;
-      const ib = b.importance ?? 2;
-      if (ia !== ib) return ib - ia; // higher importance first
-      return b.ts - a.ts; // newer first within same importance
-    })
-    .slice(0, max);
+  return prioritizeMemories(memories).slice(0, max);
+}
+
+/**
+ * Selects protected memories that must be preserved during budget trimming.
+ * Keeps at most one per requested type, preferring highest utility.
+ *
+ * @param {Array} memories
+ * @param {Array<string>} requiredTypes
+ * @returns {Array}
+ */
+export function selectProtectedMemories(memories, requiredTypes) {
+  const prioritized = prioritizeMemories(memories);
+  const selected = [];
+  const used = new Set();
+  for (const type of requiredTypes) {
+    const pick = prioritized.find((m) => m.type === type && !used.has(m));
+    if (pick) {
+      selected.push(pick);
+      used.add(pick);
+    }
+  }
+  return selected;
 }
 
 /**
@@ -77,6 +241,43 @@ export function sortByTimeline(memories) {
       return a.i - b.i;
     })
     .map((x) => x.m);
+}
+
+/**
+ * Builds a compact "current scene state" block from session memories.
+ * Prioritizes the newest memory per scene-oriented type.
+ *
+ * @param {Array<{type?: string, content?: string, ts?: number}>} memories
+ * @returns {string}
+ */
+export function buildCurrentSceneStateBlock(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) return '';
+
+  const newestByType = new Map();
+  for (const mem of memories) {
+    const type = String(mem.type || '').toLowerCase();
+    if (!['scene', 'development', 'detail', 'revelation'].includes(type)) continue;
+    const existing = newestByType.get(type);
+    const currentTs = Number.isFinite(mem.ts) ? mem.ts : 0;
+    const existingTs = Number.isFinite(existing?.ts) ? existing.ts : 0;
+    if (!existing || currentTs >= existingTs) {
+      newestByType.set(type, mem);
+    }
+  }
+
+  const lines = [];
+  const scene = newestByType.get('scene');
+  const development = newestByType.get('development');
+  const detail = newestByType.get('detail');
+  const revelation = newestByType.get('revelation');
+
+  if (scene?.content) lines.push(`- Setting/atmosphere: ${scene.content}`);
+  if (development?.content) lines.push(`- Relationship/situation shift: ${development.content}`);
+  if (detail?.content) lines.push(`- Immediate continuity detail: ${detail.content}`);
+  if (revelation?.content) lines.push(`- Newly revealed context: ${revelation.content}`);
+
+  if (lines.length === 0) return '';
+  return `Current scene state:\n${lines.join('\n')}`;
 }
 
 /**
@@ -106,10 +307,13 @@ export function reconcileTypeEntries(base, promoted, threshold, timelinePool = [
 
     let inferredTs = mem.ts;
     let bestScore = 0;
+    // Require a minimum similarity before accepting an inferred timestamp - a
+    // near-random match (score ~0.05) is not a meaningful source for the timeline.
+    const MIN_TS_INFERENCE_SCORE = 0.3;
     for (const src of sourcePool) {
       if (src.type !== mem.type) continue;
       const score = jaccardSimilarity(mem.content, src.content);
-      if (score > bestScore && Number.isFinite(src.ts)) {
+      if (score > bestScore && score >= MIN_TS_INFERENCE_SCORE && Number.isFinite(src.ts)) {
         bestScore = score;
         inferredTs = src.ts;
       }

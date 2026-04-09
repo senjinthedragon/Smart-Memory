@@ -224,7 +224,7 @@ export function injectSceneHistory() {
   }
 
   const text = trimmed.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
-  const content = `[Previous scenes:\n${text}]`;
+  const content = `Previous scenes:\n${text}`;
 
   setExtensionPrompt(
     PROMPT_KEY_SCENES,

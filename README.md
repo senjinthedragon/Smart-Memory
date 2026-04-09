@@ -47,7 +47,7 @@ After the first summary exists, only new messages are processed and folded in - 
 
 Facts, relationship history, preferences, and significant events are extracted from your chats and stored per character. These memories survive across all sessions - when you open a new chat with a character, everything the AI has learned about them is already there waiting.
 
-Over time, memories are automatically consolidated so the same information doesn't pile up in slightly different forms. You end up with a clean, rich picture of the character rather than a cluttered list.
+Over time, memories are automatically consolidated so the same information doesn't pile up in slightly different forms. Semantic embedding comparison catches near-paraphrase duplicates before they are stored. You end up with a clean, rich picture of the character rather than a cluttered list.
 
 ### Session Memory - Within-Chat Details
 
@@ -118,6 +118,25 @@ Selects which LLM handles all Smart Memory work - summarization, extraction, and
 
 Options: **Main API** or **WebLLM Extension**.
 
+### Memory Deduplication
+
+Smart Memory uses an embedding model to detect near-duplicate memories that differ only in wording. This catches cases that keyword matching misses - for example, "Finn is Senjin's anchor" and "Finn serves as Senjin's emotional foundation" score near-zero in word overlap but are identified as the same fact by vector similarity.
+
+When an embedding model is not available, the system falls back to word-overlap comparison automatically.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Use semantic embeddings | On | Compare memories by meaning rather than word overlap |
+| Ollama URL | *(blank, uses localhost:11434)* | Only change if your embedding model is on a different port |
+| Embedding model | `nomic-embed-text` | Ollama model tag for embedding generation |
+| Keep model in memory | Off | Keeps the embedding model loaded in Ollama between calls rather than unloading after each use - faster for repeated deduplication passes |
+
+**Requirements:** The embedding model must be installed in Ollama before enabling this. If you already use SillyTavern's built-in Vector Storage extension with Ollama, you likely have `nomic-embed-text` installed already. If not:
+
+```sh
+ollama pull nomic-embed-text
+```
+
 ### Short-term Memory
 
 | Setting | Default | Description |
@@ -125,7 +144,7 @@ Options: **Main API** or **WebLLM Extension**.
 | Enable auto-summarization | On | Summarize automatically at threshold |
 | Context threshold | 80% | Summarize when context reaches this % of the model's limit |
 | Summary response length | 1500 tokens | Length budget for the summary - also acts as the injection cap |
-| Injection template | `[Story so far:\n{{summary}}]` | Wrapper text around the summary |
+| Injection template | `Story so far:\n{{summary}}` | Wrapper text around the summary |
 | Injection position | In-prompt | Where in the prompt the summary appears |
 
 ### Long-term Memory
@@ -133,13 +152,12 @@ Options: **Main API** or **WebLLM Extension**.
 | Setting | Default | Description |
 | --- | --- | --- |
 | Enable long-term memory | On | Extract and inject persistent character facts |
-| Carry over to new chats | On | Inject memories when starting a new chat with the same character |
 | Auto-consolidate | On | Periodically merge near-duplicate entries |
 | Fresh start (per-chat) | Off | Suppress memory injection for this specific chat |
 | Extract every N messages | 3 | How often automatic extraction runs |
 | Max memories per character | 25 | Hard cap - oldest entries dropped when exceeded |
 | Injection token budget | 500 | Oldest memories dropped first if total would exceed this |
-| Injection template | `[Memories from previous conversations:\n{{memories}}]` | Wrapper text |
+| Injection template | `Memories from previous conversations:\n{{memories}}` | Wrapper text |
 | Injection position | In-prompt | Where in the prompt memories appear |
 
 ### Session Memory
@@ -150,7 +168,7 @@ Options: **Main API** or **WebLLM Extension**.
 | Extract every N messages | 3 | How often automatic extraction runs |
 | Max session memories | 30 | Consider lowering to ~15 on limited VRAM |
 | Injection token budget | 400 | Oldest memories dropped first if exceeded |
-| Injection template | `[Details from this session:\n{{session}}]` | Wrapper text |
+| Injection template | `Details from this session:\n{{session}}` | Wrapper text |
 | Injection position | In-chat @ depth 3 | Sits just above ST's default vector depth |
 
 ### Scene Detection
@@ -186,21 +204,23 @@ Options: **Main API** or **WebLLM Extension**.
 
 All manual operations are in the **Configuration** section at the top of the panel, or inside their respective tier sections.
 
-### Catch Up - Process the Full Chat
+### Memorize Chat
 
-Processes the entire chat history in chunks, running every enabled extraction tier across the backlog. Use this when you load an older chat that Smart Memory hasn't seen yet, or when you want to build up a character's long-term memory from previous sessions.
+Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, and summary. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
 
 A **Cancel** button appears during processing. Cancelling stops the loop cleanly between chunks - partial results are saved.
 
-To build long-term memory from multiple older chats, simply open each one and run Catch Up. Memories accumulate and deduplicate automatically. Skip any chats you'd rather not include.
+To build long-term memory from multiple older chats, simply open each one and run Memorize Chat. Memories accumulate and deduplicate automatically. Skip any chats you'd rather not include.
 
-### Clear Chat Context
+### Forget This Chat
 
-Clears Smart Memory's state for the current chat - summary, session memories, scene history, and story arcs. Long-term memories are not touched. Useful before a Catch Up run to re-derive everything cleanly from scratch.
+Clears all Smart Memory context for the current chat - summary, session memories, scene history, and story arcs. Long-term memories are not touched. Useful before a Memorize Chat run to re-derive everything cleanly from scratch.
 
 ### Fresh Start
 
-Clears everything, including long-term memories for the current character, and suppresses future memory injection for this chat. Use this after test or throwaway sessions to make sure nothing bleeds into future chats. Asks for confirmation before proceeding - this cannot be undone.
+Clears everything for a clean slate - long-term memories for the current character plus all chat-scoped tiers (summary, session memories, scene history, arcs). Does not suppress future memory generation; the AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
+
+To prevent a specific chat from contributing to long-term memory at all, use the **Exclude this chat from long-term memory** checkbox in the Long-term Memory section instead.
 
 ### Per-tier Extract Buttons
 
@@ -250,6 +270,16 @@ For the full chat backlog, use **Catch Up** instead.
 - `revelation` - something discovered or revealed this session
 - `development` - how the relationship or situation changed
 - `detail` - specific facts, names, objects, or places mentioned
+
+Extraction also assigns:
+
+- **Importance (1-3)** - how impactful the memory is (`1` fluff, `2` context, `3` core)
+- **Expiration** - expected durability:
+  - `scene` (short-lived)
+  - `session` (current chat scope)
+  - `permanent` (durable, keep aggressively)
+
+During trimming, Smart Memory prioritizes entries by expiration + importance + recency, with a keyword-frequency boost so repeated core terms are retained.
 
 ---
 
