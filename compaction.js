@@ -199,6 +199,7 @@ export async function runCompaction() {
 
     const summary = formatSummary(raw);
 
+    if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
     context.chatMetadata[META_KEY].summary = summary;
     context.chatMetadata[META_KEY].summaryUpdated = Date.now();

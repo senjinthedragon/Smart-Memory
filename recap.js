@@ -40,6 +40,7 @@ import { RECAP_PROMPT } from './prompts.js';
  */
 export function updateLastActive() {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].lastActive = Date.now();
   context.saveMetadataDebounced?.();

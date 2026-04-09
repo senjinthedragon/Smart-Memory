@@ -623,6 +623,7 @@ export function isFreshStart() {
  */
 export async function setFreshStart(value) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].freshStart = value;
   await context.saveMetadata();

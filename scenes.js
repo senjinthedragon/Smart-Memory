@@ -109,6 +109,7 @@ export function loadSceneHistory() {
  */
 export async function saveSceneHistory(scenes) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].sceneHistory = scenes;
   await context.saveMetadata();

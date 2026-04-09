@@ -60,6 +60,7 @@ export function loadArcs() {
  */
 export async function saveArcs(arcs) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].storyArcs = arcs;
   await context.saveMetadata();

@@ -1183,6 +1183,7 @@ function bindSettingsUI() {
   // Allow manual edits to the summary textarea to take effect immediately.
   $('#sm_current_summary').on('input', function () {
     const context = getContext();
+    if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
     const val = $(this).val();
     context.chatMetadata[META_KEY].summary = val;
@@ -1940,6 +1941,7 @@ function bindSettingsUI() {
       return;
 
     const context = getContext();
+    if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
     // Wipe short-term summary state.
     delete context.chatMetadata[META_KEY].summary;
@@ -1988,6 +1990,7 @@ function bindSettingsUI() {
 
     // Clear all chat-scoped tiers.
     const context = getContext();
+    if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
     delete context.chatMetadata[META_KEY].summary;
     delete context.chatMetadata[META_KEY].summaryEnd;

@@ -131,6 +131,7 @@ export function loadSessionMemories() {
  */
 export async function saveSessionMemories(memories) {
   const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].sessionMemories = memories;
   await context.saveMetadata();
