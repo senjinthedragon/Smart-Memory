@@ -78,6 +78,7 @@ import {
   consolidateSessionMemories,
   injectSessionMemories,
   loadSessionMemories,
+  saveSessionMemories,
   clearSessionMemories,
 } from './session.js';
 import {
@@ -770,7 +771,7 @@ function updateFreshStartUI(freshStart) {
 }
 
 /**
- * Re-renders the session memory list with per-entry delete buttons.
+ * Re-renders the session memory list with per-entry edit and delete buttons.
  * Shows a placeholder when no session memories exist yet.
  */
 function updateSessionUI() {
@@ -788,12 +789,52 @@ function updateSessionUI() {
             <div class="sm_memory_item" data-index="${idx}">
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory">
+                    <i class="fa-solid fa-pencil"></i>
+                </button>
                 <button class="sm_delete_session_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
             </div>
         `);
     $list.append($item);
+  });
+
+  $list.find('.sm_edit_session_memory').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const $item = $(this).closest('.sm_memory_item');
+    const $textSpan = $item.find('.sm_memory_text');
+    const current = loadSessionMemories();
+    if (!current[idx]) return;
+
+    // Replace text span with an inline textarea for editing.
+    const $textarea = $('<textarea class="sm_memory_edit_input">').val(current[idx].content);
+    $textSpan.replaceWith($textarea);
+    $textarea.trigger('focus');
+
+    // Swap edit/delete buttons with save/cancel.
+    $(this).hide();
+    $item.find('.sm_delete_session_memory').hide();
+    const $save = $(
+      '<button class="sm_save_session_memory menu_button" title="Save">Save</button>',
+    );
+    const $cancel = $(
+      '<button class="sm_cancel_session_memory menu_button" title="Cancel">Cancel</button>',
+    );
+    $item.append($save, $cancel);
+
+    $save.on('click', async () => {
+      const newContent = $textarea.val().trim();
+      if (!newContent) return;
+      const memories = loadSessionMemories();
+      if (!memories[idx]) return;
+      memories[idx].content = newContent;
+      await saveSessionMemories(memories);
+      await injectSessionMemories();
+      updateSessionUI();
+    });
+
+    $cancel.on('click', () => updateSessionUI());
   });
 
   $list.find('.sm_delete_session_memory').on('click', async function () {
@@ -858,7 +899,7 @@ function updateArcsUI() {
 }
 
 /**
- * Renders the long-term memories list with per-memory delete buttons.
+ * Renders the long-term memories list with per-memory edit and delete buttons.
  * Shows a placeholder message when no character is selected or no memories exist.
  */
 function renderMemoriesList(memories, characterName) {
@@ -880,12 +921,53 @@ function renderMemoriesList(memories, characterName) {
             <div class="sm_memory_item" data-index="${idx}">
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory">
+                    <i class="fa-solid fa-pencil"></i>
+                </button>
                 <button class="sm_delete_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
             </div>
         `);
     $list.append($item);
+  });
+
+  $list.find('.sm_edit_memory').on('click', function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const $item = $(this).closest('.sm_memory_item');
+    const $textSpan = $item.find('.sm_memory_text');
+    const current = loadCharacterMemories(characterName);
+    if (!current[idx]) return;
+
+    // Replace text span with an inline textarea for editing.
+    const $textarea = $('<textarea class="sm_memory_edit_input">').val(current[idx].content);
+    $textSpan.replaceWith($textarea);
+    $textarea.trigger('focus');
+
+    // Swap edit/delete buttons with save/cancel.
+    $(this).hide();
+    $item.find('.sm_delete_memory').hide();
+    const $save = $('<button class="sm_save_memory menu_button" title="Save">Save</button>');
+    const $cancel = $(
+      '<button class="sm_cancel_memory menu_button" title="Cancel">Cancel</button>',
+    );
+    $item.append($save, $cancel);
+
+    $save.on('click', () => {
+      const newContent = $textarea.val().trim();
+      if (!newContent) return;
+      const memories = loadCharacterMemories(characterName);
+      if (!memories[idx]) return;
+      memories[idx].content = newContent;
+      saveCharacterMemories(characterName, memories);
+      saveSettingsDebounced();
+      injectMemories(characterName, isFreshStart());
+      renderMemoriesList(loadCharacterMemories(characterName), characterName);
+    });
+
+    $cancel.on('click', () =>
+      renderMemoriesList(loadCharacterMemories(characterName), characterName),
+    );
   });
 
   $list.find('.sm_delete_memory').on('click', function () {

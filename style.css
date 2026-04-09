@@ -276,7 +276,10 @@
     word-break: break-word;
 }
 
+#smart_memory_settings .sm_edit_memory,
+#smart_memory_settings .sm_edit_session_memory,
 #smart_memory_settings .sm_delete_memory,
+#smart_memory_settings .sm_delete_session_memory,
 #smart_memory_settings .sm_delete_arc {
     flex-shrink: 0;
     padding: 2px 6px;
@@ -284,8 +287,48 @@
     transition: opacity 0.15s;
 }
 
+#smart_memory_settings .sm_edit_memory:hover,
+#smart_memory_settings .sm_edit_session_memory:hover,
 #smart_memory_settings .sm_delete_memory:hover,
+#smart_memory_settings .sm_delete_session_memory:hover,
 #smart_memory_settings .sm_delete_arc:hover {
+    opacity: 1;
+}
+
+#smart_memory_settings .sm_memory_edit_input {
+    flex: 1;
+    min-height: 3em;
+    background: var(--greyCAl, rgba(255,255,255,0.07));
+    border: 1px solid var(--border-color, #555);
+    border-radius: 3px;
+    color: inherit;
+    font-size: inherit;
+    line-height: 1.4;
+    padding: 2px 6px;
+    resize: vertical;
+}
+
+#smart_memory_settings .sm_save_memory,
+#smart_memory_settings .sm_save_session_memory {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    opacity: 0.85;
+}
+
+#smart_memory_settings .sm_cancel_memory,
+#smart_memory_settings .sm_cancel_session_memory {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    opacity: 0.6;
+}
+
+#smart_memory_settings .sm_save_memory:hover,
+#smart_memory_settings .sm_save_session_memory:hover {
+    opacity: 1;
+}
+
+#smart_memory_settings .sm_cancel_memory:hover,
+#smart_memory_settings .sm_cancel_session_memory:hover {
     opacity: 1;
 }
 
