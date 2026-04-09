@@ -248,6 +248,20 @@ For the full chat backlog, use **Memorize Chat** instead.
 - **Check Last Response** - runs the continuity check against the last AI response
 - **Clear** buttons on each tier - remove all stored data for that tier
 
+### Editing and Adding Memories Manually
+
+Every entry in the long-term memory, session memory, and story arc lists has two action buttons:
+
+- **Pencil (edit)** - replaces the entry text with an inline textarea. Edit the content and click **Save**, or click **Cancel** to discard changes.
+- **Trash / Checkmark (delete/resolve)** - removes the entry immediately. For story arcs the button is a checkmark to indicate resolving the thread rather than discarding it.
+
+Below each list an **Add** form lets you insert a new entry manually:
+
+- For long-term and session memories, a color-coded type picker lets you choose the entry type before adding. Each type is shown in its badge color so you can see at a glance what you are picking.
+- For story arcs, just type the thread and click **Add**.
+
+Manual edits take effect immediately and are injected into the prompt on the next message.
+
 ---
 
 ## Slash Commands

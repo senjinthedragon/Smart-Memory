@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 1.3.0
+
+### Added
+
+- **Inline memory editing**: every long-term memory, session memory, and story arc
+  entry now has a pencil button. Clicking it replaces the text in-place with an
+  editable textarea and swaps the action buttons with Save and Cancel. Useful for
+  correcting drift or fixing an extraction error without needing to delete and
+  re-add the entry.
+- **Manual memory insertion**: an Add form sits below each scrollable list (long-term
+  memories, session memories, story arcs). For typed tiers (long-term and session) a
+  custom color-coded type picker lets you choose the entry type before adding. The
+  picker shows each type in its badge color - both in the closed state and in the
+  open list - with a lighter hover tint per option.
+- **Swipe/compaction abort**: Smart Memory now listens for the `MESSAGE_SWIPED` event
+  and immediately cancels any in-flight Ollama or OpenAI-compatible memory generation
+  via `AbortController`. This prevents swipe requests from queuing behind an ongoing
+  memory extraction and being rejected by ST while the memory model is busy.
+- **Compaction toast**: when using an external LLM source (Ollama or OpenAI-compat),
+  a persistent "Updating story summary..." toast is shown while compaction runs and
+  dismissed when it completes. Main-API compaction is silent as before since it uses
+  ST's built-in quiet prompt which already has its own indicator.
+
 ## [1.2.1] - 2026-04-09
 
 ### Added
