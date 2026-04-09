@@ -646,7 +646,7 @@ const TOKEN_TIERS = [
   { key: PROMPT_KEY_LONG, label: 'Long-term', color: '#4a6fa5' },
   { key: PROMPT_KEY_SESSION, label: 'Session', color: '#8e5a8e' },
   { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
-  { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#5a8e7a' },
+  { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#a07840' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
 ];
 
