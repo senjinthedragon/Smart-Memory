@@ -40,6 +40,8 @@ import {
   extension_prompt_types,
   extension_prompt_roles,
   is_send_press,
+  callGenericPopup,
+  POPUP_TYPE,
 } from '../../../../script.js';
 import {
   getContext,
@@ -1626,6 +1628,17 @@ function bindSettingsUI() {
     if (!characterName) {
       toastr.warning('No character is active.', 'Smart Memory', { timeOut: 3000 });
       return;
+    }
+
+    // Warn if memories already exist - running catch-up again on the same chat
+    // can introduce near-duplicate entries that displace lower-importance ones.
+    const existingMemories = loadCharacterMemories(characterName);
+    if (existingMemories.length > 0) {
+      const confirmed = await callGenericPopup(
+        'Memories already exist for this character. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
+        POPUP_TYPE.CONFIRM,
+      );
+      if (!confirmed) return;
     }
 
     extractionRunning = true;
