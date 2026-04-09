@@ -229,6 +229,8 @@ ${existingSection}CONVERSATION:\n${chatHistory}
 ---
 Extract open story threads - unresolved conflicts, promises made, character goals, mysteries introduced, tensions established.
 
+CRITICAL: Each arc must be one short sentence only. No sub-clauses, no questions, no elaboration. State the unresolved thread as a plain fact.
+
 One arc per line:
 [arc] She promised to meet him at dawn but never explained why.
 [resolved] The missing letter was found - this arc is closed.

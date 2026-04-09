@@ -160,7 +160,7 @@ const defaultSettings = {
   arcs_enabled: true,
   arcs_max: 10,
   arcs_response_length: 400,
-  arcs_inject_budget: 200,
+  arcs_inject_budget: 400,
   arcs_position: extension_prompt_types.IN_CHAT,
   arcs_depth: 2,
   arcs_role: extension_prompt_roles.SYSTEM,
@@ -891,6 +891,12 @@ function loadSettings() {
   // 1500 tokens was too tight for a 9-section summary, causing truncated output.
   if (extension_settings[MODULE_NAME].compaction_response_length === 1500) {
     extension_settings[MODULE_NAME].compaction_response_length = 2000;
+  }
+
+  // Migration: raise arc injection budget from 200 to 400.
+  // 200 tokens is too tight for 10 arcs, causing the last entry to be cut mid-sentence.
+  if (extension_settings[MODULE_NAME].arcs_inject_budget === 200) {
+    extension_settings[MODULE_NAME].arcs_inject_budget = 400;
   }
 }
 
