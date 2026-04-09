@@ -156,10 +156,10 @@ ollama pull nomic-embed-text
 | --- | --- | --- |
 | Enable long-term memory | On | Extract and inject persistent character facts |
 | Auto-consolidate | On | Periodically merge near-duplicate entries |
-| Fresh start (per-chat) | Off | Suppress memory injection for this specific chat |
+| Exclude this chat from long-term memory | Off | Suppresses long-term extraction and injection for this specific chat only - stored memories for other chats are not affected |
 | Extract every N messages | 3 | How often automatic extraction runs |
 | Max memories per character | 25 | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
-| Injection token budget | 500 | Oldest memories dropped first if total would exceed this |
+| Injection token budget | 500 | Least important memories are trimmed first when the budget is exceeded - based on importance, expiration, recency, and how often a memory has been recalled |
 | Injection template | `Memories from previous conversations:\n{{memories}}` | Wrapper text |
 | Injection position | In-prompt | Where in the prompt memories appear |
 
@@ -170,7 +170,7 @@ ollama pull nomic-embed-text
 | Enable session memory | On | Extract and inject within-session details |
 | Extract every N messages | 3 | How often automatic extraction runs |
 | Max session memories | 30 | Consider lowering to ~15 on limited VRAM |
-| Injection token budget | 400 | Oldest memories dropped first if exceeded |
+| Injection token budget | 400 | Least important memories trimmed first when exceeded - based on importance, expiration, and recency |
 | Injection template | `Details from this session:\n{{session}}` | Wrapper text |
 | Injection position | In-chat @ depth 3 | Sits just above ST's default vector depth |
 
@@ -181,7 +181,7 @@ ollama pull nomic-embed-text
 | Enable scene detection | On | Detect breaks and store scene history |
 | AI detection | Off | More accurate but costs an extra model call per message |
 | Keep last N scenes | 5 | How many scene summaries to retain |
-| Injection token budget | 300 | Oldest scenes dropped first if exceeded |
+| Injection token budget | 300 | Oldest scenes dropped first when exceeded |
 | Injection position | In-chat @ depth 6 | Further back in context |
 
 ### Story Arcs
@@ -190,7 +190,7 @@ ollama pull nomic-embed-text
 | --- | --- | --- |
 | Enable arc tracking | On | Extract and inject open narrative threads |
 | Max tracked arcs | 10 | Oldest arcs dropped when limit is exceeded |
-| Injection token budget | 400 | Oldest arcs dropped first if exceeded |
+| Injection token budget | 400 | Oldest arcs trimmed first when exceeded |
 | Injection position | In-chat @ depth 2 | Near current action, alongside chat vectors |
 
 ### Away Recap Settings
@@ -244,7 +244,7 @@ For the full chat backlog, use **Memorize Chat** instead.
 ### Other Per-tier Buttons
 
 - **Summarize Now** - forces a short-term summary right now, ignoring the threshold
-- **Generate Recap Now** - generates and injects a recap on demand
+- **Generate Recap Now** - generates and shows a recap popup on demand
 - **Check Last Response** - runs the continuity check against the last AI response
 - **Clear** buttons on each tier - remove all stored data for that tier
 
@@ -257,7 +257,7 @@ For the full chat backlog, use **Memorize Chat** instead.
 | `/sm-check` | Check the last AI response for contradictions against established facts |
 | `/sm-summarize` | Force a short-term summary generation now |
 | `/sm-extract` | Run long-term, session, and arc extraction against the current chat now |
-| `/sm-recap` | Generate and inject a "Previously on..." recap now |
+| `/sm-recap` | Generate and show a "Previously on..." recap popup now |
 
 ---
 
@@ -285,7 +285,7 @@ Extraction also assigns:
   - `session` (current chat scope)
   - `permanent` (durable, keep aggressively)
 
-During trimming, Smart Memory prioritizes entries by expiration + importance + recency, with a keyword-frequency boost so repeated core terms are retained.
+During trimming, Smart Memory scores each entry across multiple dimensions: expiration weight, importance, recency, how often the memory has been recalled, confidence, and keyword frequency. Higher-scoring entries survive; lower-scoring ones are trimmed first. Protected types (relationship, preference, fact for long-term; development, scene for session) are retained more aggressively to preserve continuity.
 
 ---
 
