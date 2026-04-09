@@ -30,59 +30,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   long-term and session memory contents and avoids restating facts already
   stored at other tiers. Session extraction skips facts already captured in
   long-term memory.
-- **Ollama and OpenAI Compatible memory LLM sources**: Smart Memory can now use
-  a dedicated Ollama instance or any OpenAI-compatible API for memory work,
+- **Dedicated memory LLM sources**: Smart Memory can now use a dedicated Ollama
+  instance, any OpenAI-compatible API, or the WebLLM extension for memory work,
   keeping the main roleplay model free.
-- **Away recap popup**: the away recap is now shown as a user-facing popup on
-  return rather than silently injected into the AI context.
+- **Away recap popup**: the away recap is now shown as a dismissible modal popup
+  on return rather than silently injected into the AI context.
 - Session prompt injection now prepends a compact **Current scene state** block
   synthesized from the latest session memories.
-- Second-stage memory candidate verifier filters malformed and low-signal
-  entries before persistence.
-- Utility-decay retention scoring: confidence, persona relevance, intimacy
-  relevance, retrieval count, and last-confirmed timestamp now influence which
-  memories survive trimming.
+- Second-stage memory candidate verifier filters malformed, low-signal, and
+  uncertain entries before persistence.
+- Multi-dimensional retention scoring: confidence, persona relevance, intimacy
+  relevance, retrieval count, last-confirmed timestamp, keyword frequency, and
+  expiration weight (permanent/session/scene) all influence which memories
+  survive trimming.
 - Protected-slot injection: long-term and session injection reserve slots for
-  high-continuity types so they are not crowded out by lower-priority entries.
-- Retrieval telemetry on injected memories so frequently recalled entries are
-  retained more reliably over time.
+  high-continuity types so they cannot be crowded out by lower-priority entries.
+- Retrieval telemetry on injected memories (`retrieval_count`,
+  `last_confirmed_ts`) so frequently recalled entries are retained more
+  reliably over time.
+- Consolidation now uses `reconcileTypeEntries` to replace updated base entries
+  in-place rather than appending promoted entries as duplicates.
+- Consolidation thresholds are now configurable per type in the settings panel.
 
 ### Changed
 
 - Per-extraction limit changed from 4 total new entries to 2 per type - prevents
   a burst of similar events from flooding one type in a single pass.
-- Compaction response length raised from 1500 to 2000 tokens to prevent
-  truncation on long 9-section summaries.
-- Arc injection budget raised from 200 to 400 tokens so all 10 arcs fit without
-  truncation.
+- Arc injection budget raised from 200 to 400 tokens so all tracked arcs fit
+  without truncation.
 - All injection templates changed from bracket-wrapped (`[Story so far: ...]`)
   to plain text to prevent bracket notation bleeding into RP output.
-- Consolidation thresholds now configurable per type in the settings panel.
-- Retention ordering now uses utility-decay scoring instead of only
-  expiration/importance/keyword frequency/recency.
 - Long-term and session memory loading now auto-migrates additional metadata
   defaults for legacy entries without breaking existing stores.
 
 ### Fixed
 
-- `<analysis>` scratchpad tag no longer bleeds into stored summaries when the
-  model omits the closing tag.
-- Truncated summary responses now recover partial content from unclosed
-  `<summary>` tags rather than discarding the entire response.
 - Extraction and compaction no longer fire on swipes - only accepted messages
   are processed.
 - All manual extract and clear buttons are blocked while Memorize Chat is
   running to prevent conflicting writes.
 - Confirmation required before Memorize Chat when memories already exist, to
-  prevent accidental near-duplicate accumulation.
+  prevent accidental near-duplicate accumulation on repeat runs.
 - Scene catch-up now correctly walks all heuristic scene breaks across the full
   chat history instead of only detecting the last scene.
-- "Now X, now Y" accumulation in progressive summary updates eliminated by
-  per-section rewrite/append rules in the update prompt.
 - Consolidation now runs after each catch-up chunk rather than only at the end,
   preventing near-duplicate buildup during long processing passes.
 - Stop tokens passed explicitly in Ollama API calls to prevent the memory model
-  continuing into roleplay output.
+  from continuing into roleplay output.
 
 ## [1.1.0] - 2026-04-05
 
