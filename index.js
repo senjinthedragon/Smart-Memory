@@ -40,8 +40,6 @@ import {
   extension_prompt_types,
   extension_prompt_roles,
   is_send_press,
-  callGenericPopup,
-  POPUP_TYPE,
 } from '../../../../script.js';
 import {
   getContext,
@@ -93,6 +91,7 @@ import {
 } from './scenes.js';
 import { extractArcs, injectArcs, loadArcs, clearArcs, deleteArc } from './arcs.js';
 import { checkContinuity } from './continuity.js';
+import { clearEmbeddingCache } from './embeddings.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -175,6 +174,12 @@ const defaultSettings = {
 
   // Continuity
   continuity_response_length: 300,
+
+  // Semantic embedding deduplication
+  embedding_enabled: true,
+  embedding_url: '',
+  embedding_model: 'nomic-embed-text',
+  embedding_keep: false,
 
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
@@ -538,6 +543,7 @@ async function onChatChanged() {
   sceneBufferLastIndex = -1;
   groupChatWarningShown = false;
   lastKnownChatLength = 0;
+  clearEmbeddingCache();
 
   const settings = getSettings();
   if (!settings.enabled) return;
@@ -1664,11 +1670,12 @@ function bindSettingsUI() {
     // can introduce near-duplicate entries that displace lower-importance ones.
     const existingMemories = loadCharacterMemories(characterName);
     if (existingMemories.length > 0) {
-      const confirmed = await callGenericPopup(
-        'Memories already exist for this character. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
-        POPUP_TYPE.CONFIRM,
-      );
-      if (!confirmed) return;
+      if (
+        !confirm(
+          'Memories already exist for this character. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
+        )
+      )
+        return;
     }
 
     extractionRunning = true;
@@ -1977,6 +1984,37 @@ function bindSettingsUI() {
       positionClass: 'toast-bottom-right',
     });
   });
+
+  // ---- Embedding deduplication ----------------------------------------
+  $('#sm_embedding_enabled')
+    .prop('checked', s.embedding_enabled)
+    .on('change', function () {
+      getSettings().embedding_enabled = $(this).prop('checked');
+      $('#sm_embedding_config').toggle(getSettings().embedding_enabled);
+      saveSettingsDebounced();
+    });
+  $('#sm_embedding_config').toggle(s.embedding_enabled);
+
+  $('#sm_embedding_url')
+    .val(s.embedding_url ?? '')
+    .on('input', function () {
+      getSettings().embedding_url = $(this).val().trim();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_embedding_model')
+    .val(s.embedding_model ?? 'nomic-embed-text')
+    .on('input', function () {
+      getSettings().embedding_model = $(this).val().trim();
+      saveSettingsDebounced();
+    });
+
+  $('#sm_embedding_keep')
+    .prop('checked', s.embedding_keep)
+    .on('change', function () {
+      getSettings().embedding_keep = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
 
   // ---- Continuity checker ---------------------------------------------
   $('#sm_check_continuity').on('click', async function () {

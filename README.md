@@ -47,7 +47,7 @@ After the first summary exists, only new messages are processed and folded in - 
 
 Facts, relationship history, preferences, and significant events are extracted from your chats and stored per character. These memories survive across all sessions - when you open a new chat with a character, everything the AI has learned about them is already there waiting.
 
-Over time, memories are automatically consolidated so the same information doesn't pile up in slightly different forms. You end up with a clean, rich picture of the character rather than a cluttered list.
+Over time, memories are automatically consolidated so the same information doesn't pile up in slightly different forms. Semantic embedding comparison catches near-paraphrase duplicates before they are stored. You end up with a clean, rich picture of the character rather than a cluttered list.
 
 ### Session Memory - Within-Chat Details
 
@@ -117,6 +117,25 @@ All settings are saved automatically per profile.
 Selects which LLM handles all Smart Memory work - summarization, extraction, and recap generation. Setting this to a lighter model leaves your main roleplay LLM free for the actual story.
 
 Options: **Main API** or **WebLLM Extension**.
+
+### Memory Deduplication
+
+Smart Memory uses an embedding model to detect near-duplicate memories that differ only in wording. This catches cases that keyword matching misses - for example, "Finn is Senjin's anchor" and "Finn serves as Senjin's emotional foundation" score near-zero in word overlap but are identified as the same fact by vector similarity.
+
+When an embedding model is not available, the system falls back to word-overlap comparison automatically.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Use semantic embeddings | On | Compare memories by meaning rather than word overlap |
+| Ollama URL | *(blank, uses localhost:11434)* | Only change if your embedding model is on a different port |
+| Embedding model | `nomic-embed-text` | Ollama model tag for embedding generation |
+| Keep model in memory | Off | Keeps the embedding model loaded between calls - faster but uses VRAM |
+
+**Requirements:** The embedding model must be installed in Ollama before enabling this. If you already use SillyTavern's built-in Vector Storage extension with Ollama, you likely have `nomic-embed-text` installed already. If not:
+
+```sh
+ollama pull nomic-embed-text
+```
 
 ### Short-term Memory
 

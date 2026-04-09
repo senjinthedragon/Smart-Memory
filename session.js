@@ -49,6 +49,7 @@ import {
   SESSION_TYPES,
 } from './constants.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
+import { semanticSimilarity } from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
@@ -59,37 +60,50 @@ import {
   trimByPriority,
 } from './memory-utils.js';
 
-function verifySessionCandidates(candidates, existing) {
+/**
+ * Filters session memory candidates against existing entries, removing
+ * near-duplicates and entries that fail basic quality checks.
+ *
+ * Uses semantic (cosine) similarity when an embedding model is available,
+ * falling back to Jaccard word-overlap when it is not.
+ *   semantic=true  -> same-type 0.82, cross-type 0.88
+ *   semantic=false -> same-type 0.65, cross-type 0.75
+ *
+ * @param {Array} candidates - Newly extracted session memory objects.
+ * @param {Array} existing   - Currently stored session memories.
+ * @returns {Promise<Array>} Candidates that passed all checks.
+ */
+async function verifySessionCandidates(candidates, existing) {
   if (!Array.isArray(candidates) || candidates.length === 0) return [];
   const seen = new Set();
-  return candidates.filter((mem) => {
+  const results = [];
+
+  for (const mem of candidates) {
     const text = String(mem.content || '').trim();
-    if (text.length < 5 || text.length > 240) return false;
+    if (text.length < 5 || text.length > 240) continue;
     const key = `${mem.type}|${text.toLowerCase()}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key)) continue;
     seen.add(key);
 
     const lower = text.toLowerCase();
-    const aWords = new Set(lower.split(/\s+/));
+    let isNearDuplicate = false;
 
-    return !existing.some((ex) => {
-      const bWords = new Set(
-        String(ex.content || '')
-          .toLowerCase()
-          .split(/\s+/),
-      );
-      const overlap = [...aWords].filter((w) => bWords.has(w)).length;
-      const union = new Set([...aWords, ...bWords]).size || 1;
-      const similarity = overlap / union;
+    for (const ex of existing) {
+      const exText = String(ex.content || '');
+      const { score, semantic } = await semanticSimilarity(lower, exText.toLowerCase());
+      const sameTypeThreshold = semantic ? 0.82 : 0.65;
+      const crossTypeThreshold = semantic ? 0.88 : 0.75;
+      const threshold = ex.type === mem.type ? sameTypeThreshold : crossTypeThreshold;
+      if (score > threshold) {
+        isNearDuplicate = true;
+        break;
+      }
+    }
 
-      // Same type: flag as near-duplicate at 0.65 threshold.
-      if (ex.type === mem.type) return similarity > 0.65;
+    if (!isNearDuplicate) results.push(mem);
+  }
 
-      // Cross-type: stricter 0.75 threshold - same content filed under a
-      // different type (e.g. a detail and a revelation about the same moment).
-      return similarity > 0.75;
-    });
-  });
+  return results;
 }
 
 // ---- Storage (chatMetadata) ---------------------------------------------
@@ -250,7 +264,7 @@ export async function extractSessionMemories(recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const incoming = verifySessionCandidates(parseSessionOutput(response), existing);
+    const incoming = await verifySessionCandidates(parseSessionOutput(response), existing);
     if (incoming.length === 0) return 0;
 
     const max = settings.session_max_memories ?? 30;

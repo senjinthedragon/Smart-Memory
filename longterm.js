@@ -57,6 +57,7 @@ import {
   sortByTimeline,
   trimByPriority,
 } from './memory-utils.js';
+import { semanticSimilarity } from './embeddings.js';
 
 const MAX_NEW_LONGTERM_PER_EXTRACTION = 4;
 
@@ -72,42 +73,54 @@ function incomingPriorityScore(mem) {
   return (mem.importance ?? 2) * 100 + typeBonus + (mem.ts ?? 0) / 1e13;
 }
 
-function verifyLongtermCandidates(candidates, existing) {
+/**
+ * Filters a list of candidate memories against existing ones, removing
+ * near-duplicates and entries that fail basic quality checks.
+ *
+ * Uses semantic (cosine) similarity when an embedding model is available,
+ * falling back to Jaccard word-overlap when it is not. The `semantic` flag
+ * returned by semanticSimilarity selects the appropriate threshold:
+ *   semantic=true  -> same-type 0.82, cross-type 0.88
+ *   semantic=false -> same-type 0.65, cross-type 0.75
+ *
+ * @param {Array} candidates - Newly extracted memory objects to evaluate.
+ * @param {Array} existing   - Currently stored memories to compare against.
+ * @returns {Promise<Array>} Candidates that passed all checks.
+ */
+async function verifyLongtermCandidates(candidates, existing) {
   if (!Array.isArray(candidates) || candidates.length === 0) return [];
 
   const bannedPhrases = ['maybe', 'might be', 'possibly', 'i think', 'perhaps', 'seems like'];
   const seen = new Set();
-  return candidates.filter((mem) => {
+  const results = [];
+
+  for (const mem of candidates) {
     const text = String(mem.content || '').trim();
-    if (text.length < 8 || text.length > 280) return false;
+    if (text.length < 8 || text.length > 280) continue;
     const lower = text.toLowerCase();
-    if (bannedPhrases.some((p) => lower.includes(p))) return false;
+    if (bannedPhrases.some((p) => lower.includes(p))) continue;
     const key = `${mem.type}|${lower}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key)) continue;
     seen.add(key);
 
-    const isNearDuplicate = existing.some((ex) => {
-      const a = new Set(lower.split(/\s+/));
-      const b = new Set(
-        String(ex.content || '')
-          .toLowerCase()
-          .split(/\s+/),
-      );
-      const overlap = [...a].filter((w) => b.has(w)).length;
-      const union = new Set([...a, ...b]).size || 1;
-      const similarity = overlap / union;
+    let isNearDuplicate = false;
+    for (const ex of existing) {
+      const exText = String(ex.content || '');
+      // semanticSimilarity is sequential by design - see embeddings.js.
+      const { score, semantic } = await semanticSimilarity(lower, exText.toLowerCase());
+      const sameTypeThreshold = semantic ? 0.82 : 0.65;
+      const crossTypeThreshold = semantic ? 0.88 : 0.75;
+      const threshold = ex.type === mem.type ? sameTypeThreshold : crossTypeThreshold;
+      if (score > threshold) {
+        isNearDuplicate = true;
+        break;
+      }
+    }
 
-      // Same type: use the standard 0.65 threshold.
-      if (ex.type === mem.type) return similarity > 0.65;
+    if (!isNearDuplicate) results.push(mem);
+  }
 
-      // Cross-type: only flag as duplicate if very high overlap (0.75+).
-      // "Finn needs dual-stimulation" filed as both fact and preference is a
-      // duplicate regardless of type; "first love was my ai, second was my wife"
-      // share words but are clearly distinct and should not be merged.
-      return similarity > 0.75;
-    });
-    return !isNearDuplicate;
-  });
+  return results;
 }
 
 // ---- Storage helpers ----------------------------------------------------
@@ -302,7 +315,10 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const newMemories = verifyLongtermCandidates(parseExtractionOutput(response), existingMemories);
+    const newMemories = await verifyLongtermCandidates(
+      parseExtractionOutput(response),
+      existingMemories,
+    );
     if (newMemories.length === 0) {
       console.log('[SmartMemory] No parseable memories in response. Check format above.');
       return 0;

@@ -1,0 +1,162 @@
+/**
+ * Smart Memory - SillyTavern Extension
+ * Copyright (C) 2026 Senjin the Dragon
+ * https://github.com/senjinthedragon/Smart-Memory
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * Semantic embedding support for memory deduplication.
+ *
+ * Uses Ollama's /api/embed endpoint to produce vector representations of memory
+ * content. Cosine similarity between vectors catches near-paraphrase duplicates
+ * that word-overlap (Jaccard) misses - e.g. "Finn is Senjin's anchor" vs
+ * "Finn serves as Senjin's emotional foundation" score near-zero in Jaccard but
+ * ~0.92 in cosine space.
+ *
+ * Falls back to Jaccard automatically when embeddings are disabled, the model
+ * is not available, or the API call fails - so the system degrades gracefully
+ * for users who have not installed an embedding model.
+ *
+ * getEmbedding        - fetches a vector for a text string, with in-session cache
+ * cosineSimilarity    - computes cosine similarity between two vectors
+ * semanticSimilarity  - high-level: returns scored similarity with Jaccard fallback
+ * clearEmbeddingCache - clears the in-session cache (call on chat change)
+ */
+
+import { extension_settings } from '../../../extensions.js';
+import { MODULE_NAME } from './constants.js';
+
+// In-session embedding cache: normalized text -> vector.
+// Embeddings are deterministic for a given text + model, so caching within a
+// session avoids redundant API calls during the consolidation loop in catch-up
+// mode. The cache is cleared on chat change to keep memory usage bounded.
+const embeddingCache = new Map();
+
+/**
+ * Fetches a normalized embedding vector for the given text from Ollama's
+ * /api/embed endpoint. Returns null if embeddings are disabled, the API is
+ * unreachable, or the response is malformed - callers must handle null.
+ * @param {string} text
+ * @returns {Promise<number[]|null>}
+ */
+export async function getEmbedding(text) {
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.embedding_enabled) return null;
+
+  const normalized = String(text || '').trim();
+  if (!normalized) return null;
+
+  if (embeddingCache.has(normalized)) return embeddingCache.get(normalized);
+
+  const baseUrl = (settings.embedding_url || 'http://localhost:11434').replace(/\/$/, '');
+  const model = settings.embedding_model || 'nomic-embed-text';
+  const keep = settings.embedding_keep ?? false;
+
+  try {
+    const response = await fetch(`${baseUrl}/api/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: [normalized],
+        model,
+        keep_alive: keep ? -1 : undefined,
+        truncate: true,
+      }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const vector = data?.embeddings?.[0];
+    if (!Array.isArray(vector) || vector.length === 0) return null;
+
+    embeddingCache.set(normalized, vector);
+    return vector;
+  } catch {
+    // Network error, model not found, Ollama not running - all silently fall back.
+    return null;
+  }
+}
+
+/**
+ * Computes cosine similarity between two equal-length vectors.
+ * Returns 0 if either argument is null/empty or the lengths differ.
+ * @param {number[]|null} a
+ * @param {number[]|null} b
+ * @returns {number} Similarity in [0, 1].
+ */
+export function cosineSimilarity(a, b) {
+  if (!a || !b || a.length !== b.length || a.length === 0) return 0;
+  let dot = 0,
+    magA = 0,
+    magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(magA) * Math.sqrt(magB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+/**
+ * Jaccard word-overlap similarity between two strings. Used as a fallback when
+ * embeddings are unavailable.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number} Similarity in [0, 1].
+ */
+function jaccardSimilarity(a, b) {
+  const setA = new Set(a.toLowerCase().split(/\s+/));
+  const setB = new Set(b.toLowerCase().split(/\s+/));
+  const overlap = [...setA].filter((w) => setB.has(w)).length;
+  const union = new Set([...setA, ...setB]).size || 1;
+  return overlap / union;
+}
+
+/**
+ * Returns a similarity score and a flag indicating which method was used.
+ *
+ * When embeddings are available, uses cosine similarity on Ollama vectors.
+ * Falls back to Jaccard if embeddings are disabled or the API call fails.
+ *
+ * Callers use the `semantic` flag to pick the right threshold:
+ *   semantic=true  -> same-type: 0.82, cross-type: 0.88
+ *   semantic=false -> same-type: 0.65, cross-type: 0.75
+ *
+ * The two calls are made sequentially (not in parallel) to avoid queuing
+ * concurrent requests against Ollama on resource-constrained hardware.
+ *
+ * @param {string} textA
+ * @param {string} textB
+ * @returns {Promise<{score: number, semantic: boolean}>}
+ */
+export async function semanticSimilarity(textA, textB) {
+  const vecA = await getEmbedding(textA);
+  const vecB = await getEmbedding(textB);
+  if (vecA && vecB) {
+    return { score: cosineSimilarity(vecA, vecB), semantic: true };
+  }
+  return { score: jaccardSimilarity(textA, textB), semantic: false };
+}
+
+/**
+ * Clears the in-session embedding cache.
+ * Called on CHAT_CHANGED / CHAT_LOADED to prevent unbounded memory growth.
+ */
+export function clearEmbeddingCache() {
+  embeddingCache.clear();
+}

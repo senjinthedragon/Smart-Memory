@@ -186,6 +186,83 @@
         </div>
       </details>
 
+      <!-- ══ EMBEDDING DEDUPLICATION ══ -->
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Memory Deduplication
+          <span
+            class="sm-info"
+            data-tooltip="Uses an embedding model to detect near-duplicate memories that differ only in wording. More effective than keyword matching, which misses paraphrases like 'Finn is Senjin's anchor' vs 'Finn is Senjin's emotional foundation'. Requires a small embedding model in Ollama - nomic-embed-text is recommended and is already used by SillyTavern's Vector Storage extension."
+            >ⓘ</span
+          >
+        </summary>
+        <div class="sm-section-content">
+          <div class="sm-block">
+            <label class="checkbox_label">
+              <input id="sm_embedding_enabled" type="checkbox" />
+              <span>
+                Use semantic embeddings for deduplication
+                <span
+                  class="sm-info"
+                  data-tooltip="When enabled, memory candidates are compared using vector similarity instead of word overlap. Falls back to word overlap automatically if the embedding model is unavailable."
+                  >ⓘ</span
+                >
+              </span>
+            </label>
+          </div>
+          <div id="sm_embedding_config">
+            <div class="sm-block">
+              <label>
+                Ollama URL
+                <span
+                  class="sm-info"
+                  data-tooltip="Base URL of your Ollama instance. Leave blank to use http://localhost:11434. Only change this if your embedding model runs on a different port or host than your text generation model."
+                  >ⓘ</span
+                >
+                <input
+                  id="sm_embedding_url"
+                  type="text"
+                  class="text_pole"
+                  placeholder="http://localhost:11434 (default)"
+                />
+              </label>
+            </div>
+            <div class="sm-block">
+              <label>
+                Embedding model
+                <span
+                  class="sm-info"
+                  data-tooltip="Ollama model tag to use for embeddings. nomic-embed-text is recommended - it is small, fast, and already used by SillyTavern's Vector Storage extension."
+                  >ⓘ</span
+                >
+                <input
+                  id="sm_embedding_model"
+                  type="text"
+                  class="text_pole"
+                  placeholder="nomic-embed-text"
+                />
+              </label>
+            </div>
+            <div class="sm-block">
+              <label class="checkbox_label">
+                <input id="sm_embedding_keep" type="checkbox" />
+                <span
+                  title="When checked, the embedding model stays loaded in Ollama between calls. Speeds up repeated deduplication checks but keeps the model in VRAM."
+                  >Keep model in memory</span
+                >
+              </label>
+            </div>
+            <div class="sm-block">
+              <i
+                >The model must be installed first. Run:
+                <code>ollama pull nomic-embed-text</code></i
+              >
+            </div>
+          </div>
+        </div>
+      </details>
+
       <!-- ══ LONG-TERM ══ -->
       <details class="sm-section">
         <summary>
@@ -909,7 +986,7 @@
           Away Recap
           <span
             class="sm-info"
-            data-tooltip="When you return to a chat after being away for longer than the threshold, Smart Memory generates a short &quot;Previously on...&quot; summary and displays it as a popup so you can catch up before diving back in."
+            data-tooltip='When you return to a chat after being away for longer than the threshold, Smart Memory generates a short "Previously on..." summary and displays it as a popup so you can catch up before diving back in.'
             >ⓘ</span
           >
         </summary>
