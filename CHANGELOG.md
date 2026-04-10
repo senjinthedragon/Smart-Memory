@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Summary context overflow**: when using Ollama or an OpenAI-compatible source,
+  the summarization path sent the entire chat history as prior messages regardless
+  of length. On a long RP this easily overflows a local model's context window,
+  producing garbled or repetitive summaries. Prior messages are now trimmed to the
+  most recent content that fits within 60% of the configured context size, keeping
+  the recent tail that short-term memory is actually meant to capture.
 - **Catch-up context overflow**: catch-up chunked by message count (20 messages)
   regardless of message length. Long AI responses in active roleplays easily pushed
   a single chunk past a local model's context window, causing incoherent or

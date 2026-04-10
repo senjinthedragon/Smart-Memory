@@ -33,8 +33,9 @@
  * abortCurrentMemoryGeneration  - cancels any in-flight Ollama or OpenAI-compat fetch immediately
  */
 
-import { generateRaw, generateQuietPrompt } from '../../../../script.js';
+import { generateRaw, generateQuietPrompt, getMaxContextSize } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
+import { estimateTokens } from './constants.js';
 import { isWebLlmSupported, generateWebLlmChatPrompt } from '../../shared.js';
 import { MODULE_NAME } from './constants.js';
 
@@ -237,6 +238,26 @@ export async function generateMemoryExtract(prompt, { responseLength = 600 } = {
 }
 
 /**
+ * Trims a messages array to the most recent entries that fit within a token budget.
+ * Drops from the front (oldest messages) so the most recent context is preserved.
+ * Always keeps at least one message so the caller never receives an empty array.
+ * @param {Array<{role: string, content: string}>} messages
+ * @param {number} budget - Max tokens of message content to keep.
+ * @returns {Array<{role: string, content: string}>}
+ */
+function trimToBudget(messages, budget) {
+  let total = 0;
+  const kept = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const tokens = estimateTokens(messages[i].content);
+    if (kept.length > 0 && total + tokens > budget) break;
+    kept.unshift(messages[i]);
+    total += tokens;
+  }
+  return kept;
+}
+
+/**
  * Generate a response for summarization tasks that need the full chat context.
  *
  * For the main API this appends the instruction to the current chat context via
@@ -259,9 +280,14 @@ export async function generateMemorySummarize(
   // quiet prompt as the final user message - same approach as WebLLM.
   if (source === memory_sources.ollama || source === memory_sources.openai_compatible) {
     const context = getContext();
-    const priorMessages = (context.chat ?? [])
+    const allMessages = (context.chat ?? [])
       .filter((msg) => !msg.is_system)
       .map((msg) => ({ role: msg.is_user ? 'user' : 'assistant', content: msg.mes ?? '' }));
+
+    // Trim to the most recent messages that fit within 60% of the context window.
+    // Short-term memory is about recent context, not the entire chat history - sending
+    // all messages from a long RP would overflow a local model's context completely.
+    const priorMessages = trimToBudget(allMessages, getMaxContextSize(responseLength) * 0.6);
 
     if (source === memory_sources.ollama) {
       return generateOllama(quietPrompt, priorMessages, responseLength);
@@ -276,15 +302,16 @@ export async function generateMemorySummarize(
       );
     } else {
       const context = getContext();
-      const messages = (context.chat ?? [])
+      const allMessages = (context.chat ?? [])
         .filter((msg) => !msg.is_system)
         .map((msg) => ({
           role: msg.is_user ? 'user' : 'assistant',
           content: msg.mes ?? '',
         }));
-      messages.push({ role: 'user', content: quietPrompt });
+      const trimmed = trimToBudget(allMessages, getMaxContextSize(responseLength) * 0.6);
+      trimmed.push({ role: 'user', content: quietPrompt });
       const params = responseLength > 0 ? { max_tokens: responseLength } : {};
-      return await generateWebLlmChatPrompt(messages, params);
+      return await generateWebLlmChatPrompt(trimmed, params);
     }
   }
 
