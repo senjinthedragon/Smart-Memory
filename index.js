@@ -40,6 +40,7 @@ import {
   extension_prompt_types,
   extension_prompt_roles,
   is_send_press,
+  getMaxContextSize,
 } from '../../../../script.js';
 import {
   getContext,
@@ -1971,12 +1972,8 @@ function bindSettingsUI() {
   // are very short, so the model always has some turn-by-turn structure to work with.
   const CATCH_UP_CHUNK_SIZE = 20;
 
-  // Maximum tokens of chat content per catch-up chunk. Prevents long AI responses
-  // from blowing past the model's context window - 20 messages of 500-1000 tokens
-  // each easily exceeds an 8192 context once prompt overhead is added. This budget
-  // covers the chat content portion only; prompt overhead and response budget are
-  // additional on top of this.
-  const CATCH_UP_TOKEN_BUDGET = 2500;
+  // Token budget for chat content per catch-up chunk is computed dynamically
+  // from the configured context size at the time catch-up runs - see below.
 
   $('#sm_catch_up').on('click', async function () {
     if (extractionRunning || compactionRunning) {
@@ -2028,9 +2025,9 @@ function bindSettingsUI() {
       // Process the chat in token-limited chunks sequentially. Each extraction
       // function loads its existing results and passes them as context to the
       // model, so each chunk naturally builds on what the previous one found.
-      // Chunks are bounded by CATCH_UP_TOKEN_BUDGET (chat content tokens) rather
-      // than a fixed message count - long AI responses can push 20 messages well
-      // past a local model's 8192 context window once prompt overhead is added.
+      // Budget = 35% of the configured context size, leaving the remainder for
+      // prompt overhead (instructions, existing memories) and the model response.
+      const catchUpTokenBudget = Math.max(500, Math.floor(getMaxContextSize(0) * 0.35));
       let i = 0;
       while (i < total) {
         if (catchUpCancelled) break;
@@ -2048,7 +2045,7 @@ function bindSettingsUI() {
         for (let j = i; j < total && chunk.length < CATCH_UP_CHUNK_SIZE; j++) {
           const msg = allMessages[j];
           const msgTokens = estimateTokens(`${msg.name}: ${msg.mes}`);
-          if (chunk.length > 0 && chunkTokens + msgTokens > CATCH_UP_TOKEN_BUDGET) break;
+          if (chunk.length > 0 && chunkTokens + msgTokens > catchUpTokenBudget) break;
           chunk.push(msg);
           chunkTokens += msgTokens;
         }

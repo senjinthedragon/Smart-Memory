@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Catch-up context overflow**: catch-up chunked by message count (20 messages)
   regardless of message length. Long AI responses in active roleplays easily pushed
   a single chunk past a local model's context window, causing incoherent or
-  repetitive extraction output. Chunks are now built by token budget (2500 tokens
-  of chat content) with the message count as a hard cap, so each chunk fits
-  comfortably within an 8192 context window once prompt overhead is added.
+  repetitive extraction output. Chunks are now built by token budget (35% of the
+  configured context size) with the message count as a hard cap, so each chunk
+  fits comfortably within the available context once prompt overhead is added.
+  The budget scales automatically with the user's context size setting.
 - **Scene and recap output pollution**: the scene summary and away recap prompts
   were missing a closing directive, allowing some models to append notes or
   disclaimers after the requested text. Both prompts now explicitly instruct the
