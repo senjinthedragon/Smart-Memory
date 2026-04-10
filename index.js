@@ -614,7 +614,7 @@ async function onChatChanged() {
 
   injectMemories(characterName, freshStart);
 
-  injectSessionMemories();
+  await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
   loadAndInjectRepair();
@@ -1726,7 +1726,7 @@ function bindSettingsUI() {
       const context = getContext();
       const recentMessages = getStableExtractionWindowWithFallback(context.chat, 40);
       const count = await extractSessionMemories(recentMessages);
-      injectSessionMemories();
+      await injectSessionMemories();
       updateSessionUI();
       updateTokenDisplay();
       setStatusMessage(
@@ -2094,7 +2094,7 @@ function bindSettingsUI() {
           injectMemories(characterName, isFreshStart());
         }
         if (settings.session_enabled) {
-          injectSessionMemories();
+          await injectSessionMemories();
         }
         if (settings.arcs_enabled) {
           injectArcs();
