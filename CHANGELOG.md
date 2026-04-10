@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 1.3.0
 
+### Fixed
+
+- **Compaction firing every turn**: once a chat exceeded the configured threshold,
+  compaction was re-triggered on every single AI response because the total chat
+  token count always remained above the percentage (compaction summarizes but does
+  not delete messages). The threshold now measures only the unsummarized portion of
+  the chat (messages after `summaryEnd`) so the trigger resets after each compaction
+  and only fires again once enough new content has accumulated.
+
 ### Added
 
 - **Inline memory editing**: every long-term memory, session memory, and story arc

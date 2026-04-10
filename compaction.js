@@ -59,8 +59,11 @@ async function getChatTokenCount(chat) {
 }
 
 /**
- * Returns true if the current chat has crossed the configured compaction threshold.
- * Compares current token count against (maxContextSize - responseLength budget).
+ * Returns true if the unsummarized portion of the chat has crossed the
+ * configured compaction threshold. Only messages after summaryEnd (the last
+ * message already included in the existing summary) are counted - this prevents
+ * the threshold from firing on every message once a long chat permanently exceeds
+ * the percentage, since compaction does not delete messages.
  * @returns {Promise<boolean>}
  */
 export async function shouldCompact() {
@@ -70,7 +73,12 @@ export async function shouldCompact() {
   const context = getContext();
   if (!context.chat || context.chat.length < 4) return false;
 
-  const tokens = await getChatTokenCount(context.chat);
+  // Only measure the unsummarized tail - messages after the last compaction point.
+  const summaryEnd = context.chatMetadata?.[META_KEY]?.summaryEnd ?? 0;
+  const newMessages = context.chat.slice(summaryEnd);
+  if (newMessages.length === 0) return false;
+
+  const tokens = await getChatTokenCount(newMessages);
   const maxTokens = getMaxContextSize(settings.compaction_response_length || 0);
   if (maxTokens <= 0) return false;
 
