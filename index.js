@@ -1967,10 +1967,16 @@ function bindSettingsUI() {
 
   // ---- Catch Up -------------------------------------------------------
 
-  // Number of messages processed per extraction call. Large enough to give
-  // the model meaningful context, small enough to stay within local model
-  // context windows. Must match what users would expect for cost on paid APIs.
+  // Maximum messages per catch-up chunk. Acts as a hard cap even when messages
+  // are very short, so the model always has some turn-by-turn structure to work with.
   const CATCH_UP_CHUNK_SIZE = 20;
+
+  // Maximum tokens of chat content per catch-up chunk. Prevents long AI responses
+  // from blowing past the model's context window - 20 messages of 500-1000 tokens
+  // each easily exceeds an 8192 context once prompt overhead is added. This budget
+  // covers the chat content portion only; prompt overhead and response budget are
+  // additional on top of this.
+  const CATCH_UP_TOKEN_BUDGET = 2500;
 
   $('#sm_catch_up').on('click', async function () {
     if (extractionRunning || compactionRunning) {
@@ -2019,10 +2025,14 @@ function bindSettingsUI() {
       const allMessages = stableChat.filter((m) => m.mes && !m.is_system);
       const total = allMessages.length;
 
-      // Process the chat in fixed-size chunks sequentially. Each extraction
+      // Process the chat in token-limited chunks sequentially. Each extraction
       // function loads its existing results and passes them as context to the
       // model, so each chunk naturally builds on what the previous one found.
-      for (let i = 0; i < total; i += CATCH_UP_CHUNK_SIZE) {
+      // Chunks are bounded by CATCH_UP_TOKEN_BUDGET (chat content tokens) rather
+      // than a fixed message count - long AI responses can push 20 messages well
+      // past a local model's 8192 context window once prompt overhead is added.
+      let i = 0;
+      while (i < total) {
         if (catchUpCancelled) break;
 
         // Yield to the browser event loop at the start of each chunk so the
@@ -2030,8 +2040,19 @@ function bindSettingsUI() {
         // when individual model calls complete quickly (e.g. cached responses).
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        const chunk = allMessages.slice(i, i + CATCH_UP_CHUNK_SIZE);
-        const processed = Math.min(i + CATCH_UP_CHUNK_SIZE, total);
+        // Build the chunk by accumulating messages until the token budget or
+        // the message cap is reached. Always include at least one message so
+        // a single very long message does not stall the loop forever.
+        const chunk = [];
+        let chunkTokens = 0;
+        for (let j = i; j < total && chunk.length < CATCH_UP_CHUNK_SIZE; j++) {
+          const msg = allMessages[j];
+          const msgTokens = estimateTokens(`${msg.name}: ${msg.mes}`);
+          if (chunk.length > 0 && chunkTokens + msgTokens > CATCH_UP_TOKEN_BUDGET) break;
+          chunk.push(msg);
+          chunkTokens += msgTokens;
+        }
+        const processed = Math.min(i + chunk.length, total);
         const pct = Math.round((processed / total) * 100);
         setStatusMessage(
           `Catching up... (${i}/${total} messages, ${Math.round((i / total) * 100)}%)`,
@@ -2086,6 +2107,8 @@ function bindSettingsUI() {
         // see memories accumulating in real time rather than only at the end.
         setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
         updateTokenDisplay();
+
+        i += chunk.length;
       }
 
       if (!catchUpCancelled) {
