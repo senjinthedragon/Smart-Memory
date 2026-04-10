@@ -164,7 +164,7 @@ Write the complete updated summary inside <summary> tags using the same 9-sectio
 
 export const RECAP_PROMPT =
   NO_ACTION_PREAMBLE +
-  `You are writing a brief "Previously on..." recap for someone returning to this story after being away. Based on the conversation so far, write a short engaging recap (3-5 sentences) in a warm narrative voice, past tense, as if summarizing a story episode. Focus on the most recent developments and where things were left off. Do not list facts - tell it briefly as a story.`;
+  `You are writing a brief "Previously on..." recap for someone returning to this story after being away. Based on the conversation so far, write a short engaging recap (3-5 sentences) in a warm narrative voice, past tense, as if summarizing a story episode. Focus on the most recent developments and where things were left off. Do not list facts - tell it briefly as a story. Output only the recap text. No notes, no commentary, no disclaimers.`;
 
 // ---- Session memory -----------------------------------------------------
 
@@ -239,7 +239,7 @@ TEXT:
 
 export const SCENE_SUMMARY_PROMPT =
   NO_ACTION_PREAMBLE +
-  `Write a 2-3 sentence summary of the following scene for use as scene history. Write in past tense, narrative style. Capture what happened, where, and the emotional tone. Be concise.
+  `Write a 2-3 sentence summary of the following scene for use as scene history. Write in past tense, narrative style. Capture what happened, where, and the emotional tone. Be concise. Output only the summary text. No notes, no commentary, no disclaimers.
 
 SCENE:
 {{scene_text}}`;

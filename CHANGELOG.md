@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scene and recap output pollution**: the scene summary and away recap prompts
+  were missing a closing directive, allowing some models to append notes or
+  disclaimers after the requested text. Both prompts now explicitly instruct the
+  model to output only the summary text with no commentary.
 - **Compaction firing every turn**: once a chat exceeded the configured threshold,
   compaction was re-triggered on every single AI response because the total chat
   token count always remained above the percentage (compaction summarizes but does
