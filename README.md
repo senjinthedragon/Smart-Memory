@@ -123,6 +123,8 @@ Selects which LLM handles all Smart Memory work - summarization, extraction, and
 
 Options: **Main API**, **Ollama**, **OpenAI Compatible**, or **WebLLM Extension**.
 
+> **Note:** Some OpenAI Compatible providers (including Nvidia NIM) block direct browser connections due to CORS restrictions. If requests fail, run a local proxy such as LiteLLM and point the URL to that instead.
+
 ### Memory Deduplication
 
 Smart Memory uses an embedding model to detect near-duplicate memories that differ only in wording. This catches cases that keyword matching misses - for example, "Finn is Senjin's anchor" and "Finn serves as Senjin's emotional foundation" score near-zero in word overlap but are identified as the same fact by vector similarity.
