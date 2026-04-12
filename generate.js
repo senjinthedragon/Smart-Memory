@@ -26,16 +26,40 @@
  * roleplay - for example, a dedicated local model via Ollama while the main
  * chat uses a larger roleplay-tuned model.
  *
- * memory_sources          - enum of supported sources: 'main' | 'webllm' | 'ollama' | 'openai_compatible'
- * generateMemoryExtract   - for extraction tasks (self-contained prompt, no chat context needed)
- * generateMemorySummarize - for summarization tasks (needs the full chat context)
- * fetchOllamaModels       - returns the list of models installed in a local Ollama instance
+ * memory_sources                - enum of supported sources: 'main' | 'webllm' | 'ollama' | 'openai_compatible'
+ * generateMemoryExtract         - for extraction tasks (self-contained prompt, no chat context needed)
+ * generateMemorySummarize       - for summarization tasks (needs the full chat context)
+ * fetchOllamaModels             - returns the list of models installed in a local Ollama instance
+ * abortCurrentMemoryGeneration  - cancels any in-flight Ollama or OpenAI-compat fetch immediately
  */
 
-import { generateRaw, generateQuietPrompt } from '../../../../script.js';
+import { generateRaw, generateQuietPrompt, getMaxContextSize } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
+import { estimateTokens } from './constants.js';
 import { isWebLlmSupported, generateWebLlmChatPrompt } from '../../shared.js';
 import { MODULE_NAME } from './constants.js';
+
+/**
+ * Holds the AbortController for the currently running Ollama or OpenAI-compat
+ * fetch, or null when no external generation is in progress. This is module-level
+ * rather than per-call so index.js can cancel it from outside the call stack via
+ * abortCurrentMemoryGeneration() when a swipe is requested.
+ */
+let memoryAbortController = null;
+
+/**
+ * Cancels any in-flight Ollama or OpenAI-compat memory generation immediately.
+ * The aborted fetch returns an empty string to its caller, which the existing
+ * empty-response guards in compaction.js and the extraction functions treat as
+ * "nothing to do" - the operation is silently skipped rather than erroring.
+ * Has no effect if no external generation is currently running.
+ */
+export function abortCurrentMemoryGeneration() {
+  if (memoryAbortController) {
+    memoryAbortController.abort();
+    memoryAbortController = null;
+  }
+}
 
 /** Available LLM sources for memory operations. */
 export const memory_sources = {
@@ -96,24 +120,34 @@ async function generateOllama(prompt, priorMessages = [], responseLength = 600) 
   if (!model) throw new Error('No Ollama model selected. Choose a model in Smart Memory settings.');
 
   const messages = [...priorMessages, { role: 'user', content: prompt }];
-  const response = await fetch(`${url}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      options: {
-        num_predict: responseLength > 0 ? responseLength : -1,
-        // Cover both Llama-3.1 (<|eot_id|>) and ChatML (<|im_end|>) end-of-turn
-        // tokens explicitly. Listing both is harmless for models that only use one.
-        stop: ['<|eot_id|>', '<|im_end|>'],
-      },
-    }),
-  });
-  if (!response.ok) throw new Error(`Ollama responded with ${response.status}`);
-  const data = await response.json();
-  return data.message?.content ?? '';
+
+  memoryAbortController = new AbortController();
+  try {
+    const response = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        options: {
+          num_predict: responseLength > 0 ? responseLength : -1,
+          // Cover both Llama-3.1 (<|eot_id|>) and ChatML (<|im_end|>) end-of-turn
+          // tokens explicitly. Listing both is harmless for models that only use one.
+          stop: ['<|eot_id|>', '<|im_end|>'],
+        },
+      }),
+      signal: memoryAbortController.signal,
+    });
+    if (!response.ok) throw new Error(`Ollama responded with ${response.status}`);
+    const data = await response.json();
+    return data.message?.content ?? '';
+  } catch (err) {
+    if (err.name === 'AbortError') return '';
+    throw err;
+  } finally {
+    memoryAbortController = null;
+  }
 }
 
 /**
@@ -134,19 +168,29 @@ async function generateOpenAICompat(prompt, priorMessages = [], responseLength =
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
   const messages = [...priorMessages, { role: 'user', content: prompt }];
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: model || undefined,
-      messages,
-      max_tokens: responseLength > 0 ? responseLength : undefined,
-      stream: false,
-    }),
-  });
-  if (!response.ok) throw new Error(`OpenAI Compatible API responded with ${response.status}`);
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content ?? '';
+
+  memoryAbortController = new AbortController();
+  try {
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: model || undefined,
+        messages,
+        max_tokens: responseLength > 0 ? responseLength : undefined,
+        stream: false,
+      }),
+      signal: memoryAbortController.signal,
+    });
+    if (!response.ok) throw new Error(`OpenAI Compatible API responded with ${response.status}`);
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content ?? '';
+  } catch (err) {
+    if (err.name === 'AbortError') return '';
+    throw err;
+  } finally {
+    memoryAbortController = null;
+  }
 }
 
 /**
@@ -194,6 +238,26 @@ export async function generateMemoryExtract(prompt, { responseLength = 600 } = {
 }
 
 /**
+ * Trims a messages array to the most recent entries that fit within a token budget.
+ * Drops from the front (oldest messages) so the most recent context is preserved.
+ * Always keeps at least one message so the caller never receives an empty array.
+ * @param {Array<{role: string, content: string}>} messages
+ * @param {number} budget - Max tokens of message content to keep.
+ * @returns {Array<{role: string, content: string}>}
+ */
+function trimToBudget(messages, budget) {
+  let total = 0;
+  const kept = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const tokens = estimateTokens(messages[i].content);
+    if (kept.length > 0 && total + tokens > budget) break;
+    kept.unshift(messages[i]);
+    total += tokens;
+  }
+  return kept;
+}
+
+/**
  * Generate a response for summarization tasks that need the full chat context.
  *
  * For the main API this appends the instruction to the current chat context via
@@ -216,9 +280,14 @@ export async function generateMemorySummarize(
   // quiet prompt as the final user message - same approach as WebLLM.
   if (source === memory_sources.ollama || source === memory_sources.openai_compatible) {
     const context = getContext();
-    const priorMessages = (context.chat ?? [])
+    const allMessages = (context.chat ?? [])
       .filter((msg) => !msg.is_system)
       .map((msg) => ({ role: msg.is_user ? 'user' : 'assistant', content: msg.mes ?? '' }));
+
+    // Trim to the most recent messages that fit within 60% of the context window.
+    // Short-term memory is about recent context, not the entire chat history - sending
+    // all messages from a long RP would overflow a local model's context completely.
+    const priorMessages = trimToBudget(allMessages, getMaxContextSize(responseLength) * 0.6);
 
     if (source === memory_sources.ollama) {
       return generateOllama(quietPrompt, priorMessages, responseLength);
@@ -233,15 +302,16 @@ export async function generateMemorySummarize(
       );
     } else {
       const context = getContext();
-      const messages = (context.chat ?? [])
+      const allMessages = (context.chat ?? [])
         .filter((msg) => !msg.is_system)
         .map((msg) => ({
           role: msg.is_user ? 'user' : 'assistant',
           content: msg.mes ?? '',
         }));
-      messages.push({ role: 'user', content: quietPrompt });
+      const trimmed = trimToBudget(allMessages, getMaxContextSize(responseLength) * 0.6);
+      trimmed.push({ role: 'user', content: quietPrompt });
       const params = responseLength > 0 ? { max_tokens: responseLength } : {};
-      return await generateWebLlmChatPrompt(messages, params);
+      return await generateWebLlmChatPrompt(trimmed, params);
     }
   }
 

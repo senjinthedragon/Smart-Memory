@@ -40,6 +40,7 @@ import {
   extension_prompt_types,
   extension_prompt_roles,
   is_send_press,
+  getMaxContextSize,
 } from '../../../../script.js';
 import {
   getContext,
@@ -55,8 +56,11 @@ import {
   PROMPT_KEY_SESSION,
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
+  PROMPT_KEY_REPAIR,
+  MEMORY_TYPES,
+  SESSION_TYPES,
 } from './constants.js';
-import { memory_sources, fetchOllamaModels } from './generate.js';
+import { memory_sources, fetchOllamaModels, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
@@ -78,6 +82,7 @@ import {
   consolidateSessionMemories,
   injectSessionMemories,
   loadSessionMemories,
+  saveSessionMemories,
   clearSessionMemories,
 } from './session.js';
 import {
@@ -89,8 +94,14 @@ import {
   clearSceneHistory,
   detectSceneBreakHeuristic,
 } from './scenes.js';
-import { extractArcs, injectArcs, loadArcs, clearArcs, deleteArc } from './arcs.js';
-import { checkContinuity } from './continuity.js';
+import { extractArcs, injectArcs, loadArcs, saveArcs, clearArcs, deleteArc } from './arcs.js';
+import {
+  checkContinuity,
+  generateRepair,
+  injectRepair,
+  clearRepair,
+  loadAndInjectRepair,
+} from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
 
 // ---- Default settings ---------------------------------------------------
@@ -174,6 +185,7 @@ const defaultSettings = {
 
   // Continuity
   continuity_response_length: 300,
+  continuity_auto_repair: false,
 
   // Semantic embedding deduplication
   embedding_enabled: true,
@@ -280,6 +292,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_SESSION, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_SCENES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_ARCS, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_REPAIR, '', none, 0);
   updateTokenDisplay();
 }
 
@@ -388,7 +401,19 @@ async function onCharacterMessageRendered() {
       const needed = await shouldCompact();
       if (needed) {
         setStatusMessage('Updating story summary...');
+        // Only toast for external sources - with the main API, ST's own pipeline
+        // blocks swipes with its own message so a second toast would be redundant.
+        const source = extension_settings[MODULE_NAME]?.source ?? memory_sources.main;
+        let compactionToast = null;
+        if (source !== memory_sources.main) {
+          compactionToast = toastr.info('Updating story summary...', 'Smart Memory', {
+            timeOut: 0,
+            extendedTimeOut: 0,
+            positionClass: 'toast-bottom-right',
+          });
+        }
         const summary = await runCompaction();
+        if (compactionToast) toastr.clear(compactionToast);
         if (summary) {
           injectSummary(summary);
           updateShortTermUI(summary);
@@ -548,7 +573,11 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 4: update lastActive so the away recap threshold stays accurate.
+  // Step 4: clear any pending continuity repair - it was injected for this
+  // response turn and should not carry over to the next message.
+  clearRepair();
+
+  // Step 5: update lastActive so the away recap threshold stays accurate.
   updateLastActive();
 }
 
@@ -585,9 +614,10 @@ async function onChatChanged() {
 
   injectMemories(characterName, freshStart);
 
-  injectSessionMemories();
+  await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
+  loadAndInjectRepair();
 
   updateLongTermUI(characterName);
   updateFreshStartUI(freshStart);
@@ -631,7 +661,7 @@ const TOKEN_TIERS = [
   { key: PROMPT_KEY_LONG, label: 'Long-term', color: '#4a6fa5' },
   { key: PROMPT_KEY_SESSION, label: 'Session', color: '#8e5a8e' },
   { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
-  { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#5a8e7a' },
+  { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#a07840' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
 ];
 
@@ -752,13 +782,68 @@ function updateLongTermUI(characterName) {
   renderMemoriesList(memories, characterName);
 }
 
+/**
+ * Builds a custom type-picker widget to replace the native <select>.
+ * Native selects don't allow reliable per-option background styling in
+ * Chromium/Electron because the select's own background bleeds into the
+ * open dropdown, overriding option colors inconsistently.
+ *
+ * The returned element exposes its current value via $(el).data('value').
+ * Clicking outside any open picker collapses it - register the document
+ * handler once at init via initTypePickers().
+ *
+ * @param {string[]} types - ordered list of type values
+ * @returns {jQuery} div.sm-type-picker
+ */
+function buildTypePicker(types) {
+  const initial = types[0];
+  const $picker = $('<div class="sm-type-picker">').attr('data-value', initial);
+  const $current = $('<div class="sm-type-picker-current">')
+    .attr('data-value', initial)
+    .text(initial);
+  const $list = $('<div class="sm-type-picker-list">');
+
+  types.forEach((t) => {
+    $list.append($('<div class="sm-type-option">').attr('data-value', t).text(t));
+  });
+
+  $picker.append($current, $list);
+
+  $current.on('click', (e) => {
+    e.stopPropagation();
+    // Close any other open pickers first.
+    $('.sm-type-picker').not($picker).removeClass('open');
+    $picker.toggleClass('open');
+  });
+
+  $list.on('click', '.sm-type-option', function () {
+    const val = $(this).data('value');
+    $picker.attr('data-value', val).removeClass('open');
+    $current.attr('data-value', val).text(val);
+  });
+
+  return $picker;
+}
+
+/**
+ * Registers a single document-level click handler that closes all open
+ * type pickers when the user clicks outside them. Called once at init.
+ */
+function initTypePickers() {
+  $(document).on('click.smTypePicker', (e) => {
+    if (!$(e.target).closest('.sm-type-picker').length) {
+      $('.sm-type-picker').removeClass('open');
+    }
+  });
+}
+
 /** Syncs the Fresh Start checkbox state. */
 function updateFreshStartUI(freshStart) {
   $('#sm_fresh_start').prop('checked', !!freshStart);
 }
 
 /**
- * Re-renders the session memory list with per-entry delete buttons.
+ * Re-renders the session memory list with per-entry edit and delete buttons.
  * Shows a placeholder when no session memories exist yet.
  */
 function updateSessionUI() {
@@ -776,12 +861,52 @@ function updateSessionUI() {
             <div class="sm_memory_item" data-index="${idx}">
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory">
+                    <i class="fa-solid fa-pencil"></i>
+                </button>
                 <button class="sm_delete_session_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
             </div>
         `);
     $list.append($item);
+  });
+
+  $list.find('.sm_edit_session_memory').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const $item = $(this).closest('.sm_memory_item');
+    const $textSpan = $item.find('.sm_memory_text');
+    const current = loadSessionMemories();
+    if (!current[idx]) return;
+
+    // Replace text span with an inline textarea for editing.
+    const $textarea = $('<textarea class="sm_memory_edit_input">').val(current[idx].content);
+    $textSpan.replaceWith($textarea);
+    $textarea.trigger('focus');
+
+    // Swap edit/delete buttons with save/cancel.
+    $(this).hide();
+    $item.find('.sm_delete_session_memory').hide();
+    const $save = $(
+      '<button class="sm_save_session_memory menu_button" title="Save">Save</button>',
+    );
+    const $cancel = $(
+      '<button class="sm_cancel_session_memory menu_button" title="Cancel">Cancel</button>',
+    );
+    $item.append($save, $cancel);
+
+    $save.on('click', async () => {
+      const newContent = $textarea.val().trim();
+      if (!newContent) return;
+      const memories = loadSessionMemories();
+      if (!memories[idx]) return;
+      memories[idx].content = newContent;
+      await saveSessionMemories(memories);
+      await injectSessionMemories();
+      updateSessionUI();
+    });
+
+    $cancel.on('click', () => updateSessionUI());
   });
 
   $list.find('.sm_delete_session_memory').on('click', async function () {
@@ -792,6 +917,40 @@ function updateSessionUI() {
     meta.sessionMemories.splice(idx, 1);
     await context.saveMetadata();
     injectSessionMemories();
+    updateSessionUI();
+  });
+
+  // Add memory form at the bottom of the list.
+  $list.next('.sm_add_memory_form').remove();
+  const $addForm = $(`
+    <div class="sm_add_memory_form">
+      <input type="text" class="sm_add_memory_input" placeholder="New session memory...">
+      <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
+    </div>
+  `);
+  $addForm.prepend(buildTypePicker(SESSION_TYPES));
+  $list.after($addForm);
+
+  $addForm.find('.sm_add_memory_btn').on('click', async () => {
+    const type = $addForm.find('.sm-type-picker').data('value');
+    const content = $addForm.find('.sm_add_memory_input').val().trim();
+    if (!content) return;
+    const memories = loadSessionMemories();
+    memories.push({
+      type,
+      content,
+      importance: 2,
+      expiration: 'session',
+      ts: Date.now(),
+      consolidated: true,
+      confidence: 1.0,
+      persona_relevance: 1,
+      intimacy_relevance: 1,
+      retrieval_count: 0,
+      last_confirmed_ts: Date.now(),
+    });
+    await saveSessionMemories(memories);
+    await injectSessionMemories();
     updateSessionUI();
   });
 }
@@ -814,7 +973,7 @@ function updateScenesUI() {
   });
 }
 
-/** Re-renders the story arcs list with per-arc resolve buttons. */
+/** Re-renders the story arcs list with per-arc edit, resolve, and add buttons. */
 function updateArcsUI() {
   const arcs = loadArcs();
   const $list = $('#sm_arcs_list');
@@ -822,13 +981,15 @@ function updateArcsUI() {
 
   if (arcs.length === 0) {
     $list.append('<div class="sm_no_char">No open story threads.</div>');
-    return;
   }
 
   arcs.forEach((arc, idx) => {
     const $item = $(`
             <div class="sm_arc_item" data-index="${idx}">
                 <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
+                <button class="sm_edit_arc menu_button" data-index="${idx}" title="Edit this arc">
+                    <i class="fa-solid fa-pencil"></i>
+                </button>
                 <button class="sm_delete_arc menu_button" data-index="${idx}" title="Resolve / remove this arc">
                     <i class="fa-solid fa-check"></i>
                 </button>
@@ -837,16 +998,67 @@ function updateArcsUI() {
     $list.append($item);
   });
 
+  $list.find('.sm_edit_arc').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const $item = $(this).closest('.sm_arc_item');
+    const $textSpan = $item.find('.sm_arc_text');
+    const current = loadArcs();
+    if (!current[idx]) return;
+
+    const $textarea = $('<textarea class="sm_memory_edit_input">').val(current[idx].content);
+    $textSpan.replaceWith($textarea);
+    $textarea.trigger('focus');
+
+    $(this).hide();
+    $item.find('.sm_delete_arc').hide();
+    const $save = $('<button class="sm_save_arc menu_button" title="Save">Save</button>');
+    const $cancel = $('<button class="sm_cancel_arc menu_button" title="Cancel">Cancel</button>');
+    $item.append($save, $cancel);
+
+    $save.on('click', async () => {
+      const newContent = $textarea.val().trim();
+      if (!newContent) return;
+      const arcs = loadArcs();
+      if (!arcs[idx]) return;
+      arcs[idx].content = newContent;
+      await saveArcs(arcs);
+      injectArcs();
+      updateArcsUI();
+    });
+
+    $cancel.on('click', () => updateArcsUI());
+  });
+
   $list.find('.sm_delete_arc').on('click', async function () {
     const idx = parseInt($(this).data('index'), 10);
     await deleteArc(idx);
     injectArcs();
     updateArcsUI();
   });
+
+  // Add arc form at the bottom of the list.
+  $list.next('.sm_add_memory_form').remove();
+  const $addForm = $(`
+    <div class="sm_add_memory_form">
+      <input type="text" class="sm_add_memory_input" placeholder="New story thread...">
+      <button class="sm_add_memory_btn menu_button" title="Add arc">Add</button>
+    </div>
+  `);
+  $list.after($addForm);
+
+  $addForm.find('.sm_add_memory_btn').on('click', async () => {
+    const content = $addForm.find('.sm_add_memory_input').val().trim();
+    if (!content) return;
+    const arcs = loadArcs();
+    arcs.push({ content, ts: Date.now() });
+    await saveArcs(arcs);
+    injectArcs();
+    updateArcsUI();
+  });
 }
 
 /**
- * Renders the long-term memories list with per-memory delete buttons.
+ * Renders the long-term memories list with per-memory edit and delete buttons.
  * Shows a placeholder message when no character is selected or no memories exist.
  */
 function renderMemoriesList(memories, characterName) {
@@ -868,12 +1080,53 @@ function renderMemoriesList(memories, characterName) {
             <div class="sm_memory_item" data-index="${idx}">
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory">
+                    <i class="fa-solid fa-pencil"></i>
+                </button>
                 <button class="sm_delete_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
             </div>
         `);
     $list.append($item);
+  });
+
+  $list.find('.sm_edit_memory').on('click', function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const $item = $(this).closest('.sm_memory_item');
+    const $textSpan = $item.find('.sm_memory_text');
+    const current = loadCharacterMemories(characterName);
+    if (!current[idx]) return;
+
+    // Replace text span with an inline textarea for editing.
+    const $textarea = $('<textarea class="sm_memory_edit_input">').val(current[idx].content);
+    $textSpan.replaceWith($textarea);
+    $textarea.trigger('focus');
+
+    // Swap edit/delete buttons with save/cancel.
+    $(this).hide();
+    $item.find('.sm_delete_memory').hide();
+    const $save = $('<button class="sm_save_memory menu_button" title="Save">Save</button>');
+    const $cancel = $(
+      '<button class="sm_cancel_memory menu_button" title="Cancel">Cancel</button>',
+    );
+    $item.append($save, $cancel);
+
+    $save.on('click', () => {
+      const newContent = $textarea.val().trim();
+      if (!newContent) return;
+      const memories = loadCharacterMemories(characterName);
+      if (!memories[idx]) return;
+      memories[idx].content = newContent;
+      saveCharacterMemories(characterName, memories);
+      saveSettingsDebounced();
+      injectMemories(characterName, isFreshStart());
+      renderMemoriesList(loadCharacterMemories(characterName), characterName);
+    });
+
+    $cancel.on('click', () =>
+      renderMemoriesList(loadCharacterMemories(characterName), characterName),
+    );
   });
 
   $list.find('.sm_delete_memory').on('click', function () {
@@ -883,6 +1136,41 @@ function renderMemoriesList(memories, characterName) {
     saveCharacterMemories(characterName, current);
     saveSettingsDebounced();
     renderMemoriesList(current, characterName);
+  });
+
+  // Add memory form at the bottom of the list.
+  $list.next('.sm_add_memory_form').remove();
+  const $addForm = $(`
+    <div class="sm_add_memory_form">
+      <input type="text" class="sm_add_memory_input" placeholder="New memory...">
+      <button class="sm_add_memory_btn menu_button" title="Add memory">Add</button>
+    </div>
+  `);
+  $addForm.prepend(buildTypePicker(MEMORY_TYPES));
+  $list.after($addForm);
+
+  $addForm.find('.sm_add_memory_btn').on('click', () => {
+    const type = $addForm.find('.sm-type-picker').data('value');
+    const content = $addForm.find('.sm_add_memory_input').val().trim();
+    if (!content) return;
+    const memories = loadCharacterMemories(characterName);
+    memories.push({
+      type,
+      content,
+      importance: 2,
+      expiration: 'permanent',
+      ts: Date.now(),
+      consolidated: true,
+      confidence: 1.0,
+      persona_relevance: type === 'relationship' ? 3 : 1,
+      intimacy_relevance: type === 'preference' ? 3 : 1,
+      retrieval_count: 0,
+      last_confirmed_ts: Date.now(),
+    });
+    saveCharacterMemories(characterName, memories);
+    saveSettingsDebounced();
+    injectMemories(characterName, isFreshStart());
+    renderMemoriesList(loadCharacterMemories(characterName), characterName);
   });
 }
 
@@ -1438,7 +1726,7 @@ function bindSettingsUI() {
       const context = getContext();
       const recentMessages = getStableExtractionWindowWithFallback(context.chat, 40);
       const count = await extractSessionMemories(recentMessages);
-      injectSessionMemories();
+      await injectSessionMemories();
       updateSessionUI();
       updateTokenDisplay();
       setStatusMessage(
@@ -1680,10 +1968,12 @@ function bindSettingsUI() {
 
   // ---- Catch Up -------------------------------------------------------
 
-  // Number of messages processed per extraction call. Large enough to give
-  // the model meaningful context, small enough to stay within local model
-  // context windows. Must match what users would expect for cost on paid APIs.
+  // Maximum messages per catch-up chunk. Acts as a hard cap even when messages
+  // are very short, so the model always has some turn-by-turn structure to work with.
   const CATCH_UP_CHUNK_SIZE = 20;
+
+  // Token budget for chat content per catch-up chunk is computed dynamically
+  // from the configured context size at the time catch-up runs - see below.
 
   $('#sm_catch_up').on('click', async function () {
     if (extractionRunning || compactionRunning) {
@@ -1732,10 +2022,14 @@ function bindSettingsUI() {
       const allMessages = stableChat.filter((m) => m.mes && !m.is_system);
       const total = allMessages.length;
 
-      // Process the chat in fixed-size chunks sequentially. Each extraction
+      // Process the chat in token-limited chunks sequentially. Each extraction
       // function loads its existing results and passes them as context to the
       // model, so each chunk naturally builds on what the previous one found.
-      for (let i = 0; i < total; i += CATCH_UP_CHUNK_SIZE) {
+      // Budget = 35% of the configured context size, leaving the remainder for
+      // prompt overhead (instructions, existing memories) and the model response.
+      const catchUpTokenBudget = Math.max(500, Math.floor(getMaxContextSize(0) * 0.35));
+      let i = 0;
+      while (i < total) {
         if (catchUpCancelled) break;
 
         // Yield to the browser event loop at the start of each chunk so the
@@ -1743,8 +2037,19 @@ function bindSettingsUI() {
         // when individual model calls complete quickly (e.g. cached responses).
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        const chunk = allMessages.slice(i, i + CATCH_UP_CHUNK_SIZE);
-        const processed = Math.min(i + CATCH_UP_CHUNK_SIZE, total);
+        // Build the chunk by accumulating messages until the token budget or
+        // the message cap is reached. Always include at least one message so
+        // a single very long message does not stall the loop forever.
+        const chunk = [];
+        let chunkTokens = 0;
+        for (let j = i; j < total && chunk.length < CATCH_UP_CHUNK_SIZE; j++) {
+          const msg = allMessages[j];
+          const msgTokens = estimateTokens(`${msg.name}: ${msg.mes}`);
+          if (chunk.length > 0 && chunkTokens + msgTokens > catchUpTokenBudget) break;
+          chunk.push(msg);
+          chunkTokens += msgTokens;
+        }
+        const processed = Math.min(i + chunk.length, total);
         const pct = Math.round((processed / total) * 100);
         setStatusMessage(
           `Catching up... (${i}/${total} messages, ${Math.round((i / total) * 100)}%)`,
@@ -1789,7 +2094,7 @@ function bindSettingsUI() {
           injectMemories(characterName, isFreshStart());
         }
         if (settings.session_enabled) {
-          injectSessionMemories();
+          await injectSessionMemories();
         }
         if (settings.arcs_enabled) {
           injectArcs();
@@ -1799,6 +2104,8 @@ function bindSettingsUI() {
         // see memories accumulating in real time rather than only at the end.
         setStatusMessage(`Catching up... (${processed}/${total} messages, ${pct}%)`);
         updateTokenDisplay();
+
+        i += chunk.length;
       }
 
       if (!catchUpCancelled) {
@@ -2059,6 +2366,13 @@ function bindSettingsUI() {
     });
 
   // ---- Continuity checker ---------------------------------------------
+  $('#sm_auto_repair')
+    .prop('checked', s.continuity_auto_repair)
+    .on('change', function () {
+      getSettings().continuity_auto_repair = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
   $('#sm_check_continuity').on('click', async function () {
     const characterName = getCurrentCharacterName();
     $(this).prop('disabled', true);
@@ -2085,6 +2399,24 @@ function bindSettingsUI() {
         setStatusMessage(
           `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found.`,
         );
+
+        // If auto-repair is on, generate a corrective note and inject it for
+        // the next AI turn. The note is cleared automatically once that response
+        // is rendered by onCharacterMessageRendered.
+        if (getSettings().continuity_auto_repair) {
+          setStatusMessage('Generating repair...');
+          try {
+            const note = await generateRepair(contradictions, characterName);
+            injectRepair(note);
+            $result.append(
+              $('<p class="sm_repair_queued">').text('Correction queued for next response.'),
+            );
+            setStatusMessage('Correction queued.');
+          } catch (repairErr) {
+            console.error('[SmartMemory] Repair generation failed:', repairErr);
+            setStatusMessage('Repair failed - see console.');
+          }
+        }
       }
     } catch (err) {
       showError('Continuity check', err);
@@ -2107,6 +2439,7 @@ jQuery(async function () {
 
   bindSettingsUI();
   initTooltips();
+  initTypePickers();
   updateTokenDisplay();
 
   // makeLast ensures Smart Memory processes the message after all other
@@ -2114,6 +2447,16 @@ jQuery(async function () {
   eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
   eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
+
+  // When the user swipes, immediately abort any in-flight Ollama or
+  // OpenAI-compat memory generation. Without this, the swipe generation request
+  // queues behind the memory model on the same Ollama instance and ST aborts it
+  // before the memory model finishes, reverting the swipe counter. The aborted
+  // memory operation returns an empty response and is skipped cleanly - it will
+  // retry on the next accepted message.
+  eventSource.on(event_types.MESSAGE_SWIPED, () => {
+    abortCurrentMemoryGeneration();
+  });
 
   // When a message is deleted, trim the scene buffer to only messages that
   // still exist in the chat. Without this, a deleted message would remain in

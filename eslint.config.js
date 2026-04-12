@@ -20,6 +20,7 @@ export default [
         confirm: 'readonly',
         alert: 'readonly',
         fetch: 'readonly',
+        AbortController: 'readonly',
         // jQuery and toastr - provided by SillyTavern host page
         $: 'readonly',
         jQuery: 'readonly',

@@ -71,6 +71,8 @@ Come back after a long break and not quite remember where you left off? Smart Me
 
 A manual tool you can reach for when something feels off. Click **Check Last Response** (or use `/sm-check`) and Smart Memory asks the AI whether the last response contradicts anything in your established facts. Useful for catching drift in long stories - the AI suddenly forgetting a character detail, reversing a decision that was made, that kind of thing.
 
+Enable **Auto-repair contradictions** to go one step further: when contradictions are found, Smart Memory makes a second model call to generate a brief corrective note and injects it into the next AI response turn. The note is cleared automatically after that response - it is a one-shot nudge, not a persistent injection. This costs one extra model call per check, so it is disabled by default.
+
 > **Note:** The continuity checker is only as good as the model doing the checking, and it only knows what is stored in Smart Memory - not what is on the character card by heart. Think of it as a sanity check, not a guarantee.
 
 ### Token Usage Display
@@ -120,6 +122,8 @@ All settings are saved automatically per profile.
 Selects which LLM handles all Smart Memory work - summarization, extraction, and recap generation. Setting this to a lighter model leaves your main roleplay LLM free for the actual story.
 
 Options: **Main API**, **Ollama**, **OpenAI Compatible**, or **WebLLM Extension**.
+
+> **Note:** Some OpenAI Compatible providers (including Nvidia NIM) block direct browser connections due to CORS restrictions. If requests fail, run a local proxy such as LiteLLM and point the URL to that instead.
 
 ### Memory Deduplication
 
@@ -247,6 +251,20 @@ For the full chat backlog, use **Memorize Chat** instead.
 - **Generate Recap Now** - generates and shows a recap popup on demand
 - **Check Last Response** - runs the continuity check against the last AI response
 - **Clear** buttons on each tier - remove all stored data for that tier
+
+### Editing and Adding Memories Manually
+
+Every entry in the long-term memory, session memory, and story arc lists has two action buttons:
+
+- **Pencil (edit)** - replaces the entry text with an inline textarea. Edit the content and click **Save**, or click **Cancel** to discard changes.
+- **Trash / Checkmark (delete/resolve)** - removes the entry immediately. For story arcs the button is a checkmark to indicate resolving the thread rather than discarding it.
+
+Below each list an **Add** form lets you insert a new entry manually:
+
+- For long-term and session memories, a color-coded type picker lets you choose the entry type before adding. Each type is shown in its badge color so you can see at a glance what you are picking.
+- For story arcs, just type the thread and click **Add**.
+
+Manual edits take effect immediately and are injected into the prompt on the next message.
 
 ---
 

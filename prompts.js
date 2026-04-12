@@ -33,6 +33,7 @@
  * ARC_EXTRACTION_SYSTEM        - system role string for arc extraction
  * buildArcExtractionPrompt     - assembles the arc extraction prompt
  * buildContinuityPrompt        - assembles the continuity check prompt
+ * buildRepairPrompt            - assembles the corrective note prompt from a contradiction list
  * EXTRACTION_SYSTEM_PROMPT     - system role string for long-term extraction
  * buildExtractionPrompt        - assembles the long-term memory extraction prompt
  * buildLongtermConsolidationPrompt - evaluates a batch of unprocessed long-term entries against the consolidated base for one type
@@ -163,7 +164,7 @@ Write the complete updated summary inside <summary> tags using the same 9-sectio
 
 export const RECAP_PROMPT =
   NO_ACTION_PREAMBLE +
-  `You are writing a brief "Previously on..." recap for someone returning to this story after being away. Based on the conversation so far, write a short engaging recap (3-5 sentences) in a warm narrative voice, past tense, as if summarizing a story episode. Focus on the most recent developments and where things were left off. Do not list facts - tell it briefly as a story.`;
+  `You are writing a brief "Previously on..." recap for someone returning to this story after being away. Based on the conversation so far, write a short engaging recap (3-5 sentences) in a warm narrative voice, past tense, as if summarizing a story episode. Focus on the most recent developments and where things were left off. Do not list facts - tell it briefly as a story. Output only the recap text. No notes, no commentary, no disclaimers.`;
 
 // ---- Session memory -----------------------------------------------------
 
@@ -238,7 +239,7 @@ TEXT:
 
 export const SCENE_SUMMARY_PROMPT =
   NO_ACTION_PREAMBLE +
-  `Write a 2-3 sentence summary of the following scene for use as scene history. Write in past tense, narrative style. Capture what happened, where, and the emotional tone. Be concise.
+  `Write a 2-3 sentence summary of the following scene for use as scene history. Write in past tense, narrative style. Capture what happened, where, and the emotional tone. Be concise. Output only the summary text. No notes, no commentary, no disclaimers.
 
 SCENE:
 {{scene_text}}`;
@@ -298,6 +299,32 @@ ${latestResponse}
 
 ---
 Does the latest response contradict or conflict with any established fact? List each contradiction precisely and briefly. If there are none, output: NONE`
+  );
+}
+
+// ---- Continuity repair --------------------------------------------------
+
+/**
+ * Assembles the prompt that turns a list of detected contradictions into a
+ * short corrective context note, ready to inject before the next AI turn.
+ * @param {string[]} contradictions - Array of contradiction descriptions from parseContradictions.
+ * @param {string} establishedFacts - Combined summary + memories as a text block.
+ * @returns {string} The complete prompt string.
+ */
+export function buildRepairPrompt(contradictions, establishedFacts) {
+  const numbered = contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+  return (
+    NO_ACTION_PREAMBLE +
+    `[CONTINUITY REPAIR TASK - Do NOT roleplay. Write a corrective context note only.]
+
+The following contradictions were found in the last AI response:
+${numbered}
+
+Established facts for reference:
+${establishedFacts}
+
+---
+Write a brief, direct correction note (2-4 sentences) to be injected as a system reminder before the next response. Use second person ("Note:" or "Correction:"). State only the facts that were wrong and what the correct information is. Do not narrate or continue the story.`
   );
 }
 

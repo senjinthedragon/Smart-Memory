@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-04-12
+
+### Fixed
+
+- **Summary context overflow**: when using Ollama or an OpenAI-compatible source,
+  the summarization path sent the entire chat history as prior messages regardless
+  of length. On a long RP this easily overflows a local model's context window,
+  producing garbled or repetitive summaries. Prior messages are now trimmed to the
+  most recent content that fits within 60% of the configured context size, keeping
+  the recent tail that short-term memory is actually meant to capture.
+- **Catch-up context overflow**: catch-up chunked by message count (20 messages)
+  regardless of message length. Long AI responses in active roleplays easily pushed
+  a single chunk past a local model's context window, causing incoherent or
+  repetitive extraction output. Chunks are now built by token budget (35% of the
+  configured context size) with the message count as a hard cap, so each chunk
+  fits comfortably within the available context once prompt overhead is added.
+  The budget scales automatically with the user's context size setting.
+- **Scene and recap output pollution**: the scene summary and away recap prompts
+  were missing a closing directive, allowing some models to append notes or
+  disclaimers after the requested text. Both prompts now explicitly instruct the
+  model to output only the summary text with no commentary.
+- **Compaction firing every turn**: once a chat exceeded the configured threshold,
+  compaction was re-triggered on every single AI response because the total chat
+  token count always remained above the percentage (compaction summarizes but does
+  not delete messages). The threshold now measures only the unsummarized portion of
+  the chat (messages after `summaryEnd`) so the trigger resets after each compaction
+  and only fires again once enough new content has accumulated.
+
+### Added
+
+- **Inline memory editing**: every long-term memory, session memory, and story arc
+  entry now has a pencil button. Clicking it replaces the text in-place with an
+  editable textarea and swaps the action buttons with Save and Cancel. Useful for
+  correcting drift or fixing an extraction error without needing to delete and
+  re-add the entry.
+- **Manual memory insertion**: an Add form sits below each scrollable list (long-term
+  memories, session memories, story arcs). For typed tiers (long-term and session) a
+  custom color-coded type picker lets you choose the entry type before adding. The
+  picker shows each type in its badge color - both in the closed state and in the
+  open list - with a lighter hover tint per option.
+- **Swipe/compaction abort**: Smart Memory now listens for the `MESSAGE_SWIPED` event
+  and immediately cancels any in-flight Ollama or OpenAI-compatible memory generation
+  via `AbortController`. This prevents swipe requests from queuing behind an ongoing
+  memory extraction and being rejected by ST while the memory model is busy.
+- **Continuity auto-repair**: the continuity checker now has an optional
+  auto-repair mode. When enabled and contradictions are found, a second model
+  call generates a brief corrective note that is automatically injected into the
+  next AI response turn and then cleared. Disabled by default.
+- **Token bar readability**: the Scenes segment color changed from teal-green to
+  amber so it is clearly distinct from the adjacent Short-term green segment.
+- **Compaction toast**: when using an external LLM source (Ollama or OpenAI-compat),
+  a persistent "Updating story summary..." toast is shown while compaction runs and
+  dismissed when it completes. Main-API compaction is silent as before since it uses
+  ST's built-in quiet prompt which already has its own indicator.
+
 ## [1.2.1] - 2026-04-09
 
 ### Added
