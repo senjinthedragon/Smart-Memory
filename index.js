@@ -2767,6 +2767,7 @@ function bindSettingsUI() {
     )
       return;
 
+    const characterName = getCurrentCharacterName();
     const context = getContext();
     if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
@@ -2789,11 +2790,14 @@ function bindSettingsUI() {
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
+    injectProfiles();
 
     updateShortTermUI(null);
     updateSessionUI();
     updateScenesUI();
     updateArcsUI();
+    updateProfilesUI(null);
+    updateEntityPanel(characterName);
     updateTokenDisplay();
     sceneMessageBuffer = [];
     sceneBufferLastIndex = -1;
