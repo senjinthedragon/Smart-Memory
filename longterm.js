@@ -329,12 +329,19 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const newMemories = await verifyLongtermCandidates(
-      parseExtractionOutput(response),
-      existingMemories,
-    );
+    const parsed = parseExtractionOutput(response);
+    if (parsed.length === 0) {
+      console.log(
+        '[SmartMemory] Extraction response produced no parseable lines. Check format above.',
+      );
+      return 0;
+    }
+
+    const newMemories = await verifyLongtermCandidates(parsed, existingMemories);
     if (newMemories.length === 0) {
-      console.log('[SmartMemory] No parseable memories in response. Check format above.');
+      console.log(
+        `[SmartMemory] All ${parsed.length} extracted candidates were duplicates of existing memories.`,
+      );
       return 0;
     }
 
@@ -354,6 +361,21 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
       }
     }
+    // DEBUG - remove before release
+    console.log(
+      `[SmartMemory] Entity registry for "${characterName}" (${entityRegistry.length} entities):`,
+      entityRegistry.map((e) => `${e.name} (${e.type}, ${e.memory_ids.length} memories)`),
+    );
+    const memoriesWithEntities = merged.filter((m) => m.entities?.length > 0);
+    if (memoriesWithEntities.length > 0) {
+      console.log(
+        `[SmartMemory] Memories with entity links:`,
+        memoriesWithEntities.map(
+          (m) => `[${m.type}] ${m.content.slice(0, 60)} -> [${m.entities.join(', ')}]`,
+        ),
+      );
+    }
+    // END DEBUG
     if (entityRegistry.length > 0) {
       saveCharacterEntityRegistry(characterName, entityRegistry);
     }
