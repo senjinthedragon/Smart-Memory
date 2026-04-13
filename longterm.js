@@ -55,6 +55,7 @@ import {
   loadCharacterEntityRegistry,
   saveCharacterEntityRegistry,
   resolveEntityNames,
+  reconcileEntityRegistry,
 } from './graph-migration.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
 import { parseExtractionOutput } from './parsers.js';
@@ -586,6 +587,15 @@ export async function consolidateMemories(characterName, force = false) {
   const maxMemories = settings.longterm_max_memories || 25;
   const finalMemories = sortByTimeline(trimByPriority(memories, maxMemories));
   if (dirty || finalMemories.length !== memories.length) {
+    // Repair entity registry links after consolidation - consolidation replaces
+    // memories with new IDs, leaving the registry with stale memory_id refs.
+    // reconcileEntityRegistry prunes those stale IDs and re-links by name match.
+    const entityRegistry = loadCharacterEntityRegistry(characterName);
+    if (entityRegistry.length > 0) {
+      reconcileEntityRegistry(entityRegistry, finalMemories);
+      saveCharacterEntityRegistry(characterName, entityRegistry);
+    }
+
     saveCharacterMemories(characterName, finalMemories);
   }
 

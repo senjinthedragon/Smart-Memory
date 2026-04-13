@@ -27,6 +27,7 @@
  * saveSessionEntityRegistry    - persists the session-scoped entity registry to chatMetadata
  * clearSessionEntityRegistry   - empties the session-scoped entity registry in chatMetadata
  * resolveEntityNames           - maps raw extracted name strings to entity ids, upserting new entities
+ * reconcileEntityRegistry      - repairs entity registry links after memories are replaced (e.g. post-consolidation)
  * runGraphMigration            - one-shot migration pass: assigns IDs and graph fields to all
  *                                existing memories, initialises entity registries, writes version marker
  */
@@ -201,9 +202,9 @@ function findEntityByName(rawName, registry) {
  */
 // Keywords that suggest non-character entity types.
 const PLACE_PATTERNS =
-  /\b(city|town|village|castle|forest|mountain|river|sea|ocean|room|hall|inn|tavern|dungeon|kingdom|realm|world|island|house|building|tower|temple|shrine|camp|cave|ruins|road|street|district|region|country|territory|land|valley|lake|bay|port|market|quarter|website|server|platform|system|network|database|space|station|base|facility|lab|school|hospital|shop|store|office|academy|guild|manor|estate|garden|park)\b/i;
+  /\b(city|town|village|castle|forest|mountain|river|sea|ocean|room|hall|inn|tavern|dungeon|kingdom|realm|world|island|house|building|tower|temple|shrine|camp|cave|ruins|road|street|district|region|country|territory|land|valley|lake|bay|port|market|quarter|website|server|platform|network|database|space|station|base|facility|lab|school|hospital|shop|store|office|academy|guild|manor|estate|garden|park)\b/i;
 const OBJECT_PATTERNS =
-  /\b(sword|blade|staff|wand|ring|amulet|book|scroll|map|key|gem|stone|artifact|relic|device|machine|tool|weapon|shield|armor|helm|cloak|potion|letter|contract|token|seal|orb|crystal|vr|headset|console|app|file|document|report|code|program|system)\b/i;
+  /\b(sword|blade|staff|wand|ring|amulet|book|scroll|map|key|gem|stone|artifact|relic|device|machine|tool|weapon|shield|armor|helm|cloak|potion|letter|contract|token|seal|orb|crystal|vr|headset|console|app|file|document|report|code|program|remote|controller|camera|tripod|collar|leash|toy|drone|gadget|vehicle|car|truck|bike|phone|tablet|computer|monitor|screen|cable|rope|chain|cuffs|blindfold|harness)\b/i;
 const FACTION_PATTERNS =
   /\b(guild|order|faction|clan|tribe|army|company|organization|group|party|council|court|empire|union|alliance|brotherhood|sisterhood|cult|church|institution|corporation|team)\b/i;
 
@@ -287,6 +288,74 @@ export function resolveEntityNames(mem, rawNames, messageIndex, registry) {
 
   mem.entities = ids;
   delete mem._raw_entity_names;
+}
+
+// ---- Entity registry reconciliation ----------------------------------------
+
+/**
+ * Repairs entity registry links after memory IDs change (e.g. after consolidation
+ * replaces old memories with new ones that have fresh IDs).
+ *
+ * Two-pass repair:
+ * 1. Prune - remove any memory_ids in the registry that no longer exist in the
+ *    current memory list (stale refs from memories that were replaced).
+ * 2. Re-link - for each entity, scan current memories whose content contains the
+ *    entity's canonical name or any of its aliases, and add those memory IDs.
+ *    Also updates the memory's own entities array so both sides stay consistent.
+ *
+ * Re-linking uses simple substring matching on lowercased content. Names shorter
+ * than 3 characters are skipped to avoid spurious matches (e.g. "a", "an").
+ *
+ * Mutates the registry and memory objects in place. Caller is responsible for
+ * persisting both the registry and the memories after this call.
+ *
+ * @param {Array<Object>} entityRegistry - Entity registry to repair (mutated in place).
+ * @param {Array<Object>} currentMemories - Current full memory list (mutated in place).
+ */
+export function reconcileEntityRegistry(entityRegistry, currentMemories) {
+  if (!Array.isArray(entityRegistry) || entityRegistry.length === 0) return;
+  if (!Array.isArray(currentMemories) || currentMemories.length === 0) {
+    // No current memories - clear all memory_ids but keep the entity entries.
+    for (const entity of entityRegistry) {
+      entity.memory_ids = [];
+    }
+    return;
+  }
+
+  const currentIdSet = new Set(currentMemories.map((m) => m.id).filter(Boolean));
+
+  for (const entity of entityRegistry) {
+    // Pass 1: prune stale IDs.
+    entity.memory_ids = (entity.memory_ids ?? []).filter((id) => currentIdSet.has(id));
+
+    // Pass 2: re-link by name/alias substring match.
+    const names = [entity.name, ...(entity.aliases ?? [])]
+      .map((n) => n.toLowerCase().trim())
+      .filter((n) => n.length >= 3);
+
+    if (names.length === 0) continue;
+
+    for (const mem of currentMemories) {
+      if (entity.memory_ids.includes(mem.id)) continue; // already linked
+
+      const contentLower = (mem.content ?? '').toLowerCase();
+      if (names.some((n) => contentLower.includes(n))) {
+        entity.memory_ids.push(mem.id);
+
+        // Keep the memory's own entities array in sync.
+        if (!Array.isArray(mem.entities)) mem.entities = [];
+        if (!mem.entities.includes(entity.id)) {
+          mem.entities.push(entity.id);
+        }
+      }
+    }
+
+    // Update last_seen to the highest valid_from/ts among still-linked memories.
+    if (entity.memory_ids.length > 0) {
+      const linked = currentMemories.filter((m) => entity.memory_ids.includes(m.id));
+      entity.last_seen = Math.max(...linked.map((m) => m.valid_from ?? m.ts ?? 0));
+    }
+  }
 }
 
 // ---- One-shot migration pass -----------------------------------------------

@@ -2697,16 +2697,32 @@ function bindSettingsUI() {
         }
       }
 
+      // Generate character & world profiles once at the end of a completed run.
+      // Skipped on cancel - partial data may produce low-quality profiles.
+      if (!catchUpCancelled && settings.profiles_enabled && characterName) {
+        setStatusMessage('Generating character & world profiles...');
+        const profiles = await generateProfiles(characterName).catch((err) => {
+          console.error('[SmartMemory] Catch-up profile generation failed:', err);
+          return null;
+        });
+        if (profiles) {
+          injectProfiles();
+          updateProfilesUI(profiles);
+        }
+      }
+
       // Re-inject and refresh UI for everything processed so far, whether the
       // run completed or was cancelled partway through.
       injectMemories(characterName, isFreshStart());
       injectSessionMemories();
       injectSceneHistory();
       injectArcs();
+      injectProfiles();
       updateLongTermUI(characterName);
       updateSessionUI();
       updateScenesUI();
       updateArcsUI();
+      updateEntityPanel(characterName);
       updateTokenDisplay();
       saveSettingsDebounced();
 
