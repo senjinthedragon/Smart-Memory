@@ -64,8 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Supersession indicators in UI**: retired memories are hidden by default in both
   the session and long-term memory lists. A "Show retired memories" toggle reveals
-  them. Each retired entry shows a "retired" badge; the edit button is hidden for
-  retired entries (delete still permitted for manual cleanup).
+  them. Each retired entry shows a "retired" badge and a "→ superseded by" link
+  that scrolls to and highlights the replacement memory. The edit button is hidden
+  for retired entries (delete still permitted for manual cleanup).
 - **Contradiction warning badges**: memories with unresolved `contradicts` links now
   show a yellow warning indicator with a tooltip directing the user to run the
   continuity checker. Applies to both session and long-term memory lists.
