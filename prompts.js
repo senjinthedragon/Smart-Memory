@@ -38,6 +38,7 @@
  * buildExtractionPrompt        - assembles the long-term memory extraction prompt
  * buildLongtermConsolidationPrompt - evaluates a batch of unprocessed long-term entries against the consolidated base for one type
  * buildSessionConsolidationPrompt  - same as above but for session memory types (scene, revelation, development, detail)
+ * buildProfileGenerationPrompt     - generates character_state, world_state, and relationship_matrix from stored memories
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -440,6 +441,76 @@ Output ONLY the entries to ADD or UPDATE in the base, one per line:
 
 FINAL RULE: Output ONLY [${type}:score:expiration] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
+  );
+}
+
+// ---- Profile generation -------------------------------------------------
+
+/**
+ * Assembles the profile generation prompt.
+ *
+ * Asks the model to produce three sections from stored memories:
+ *   character_state  - current goals, emotional posture, fears, loyalties
+ *   world_state      - current location, threats, unresolved events, time context
+ *   relationship_matrix - one line per named entity with directional state + confidence
+ *
+ * All three sections are requested in one call to avoid extra model round-trips
+ * on local hardware. Output uses XML-style tags so the parser can locate each
+ * section independently even if the model adds surrounding text.
+ *
+ * @param {string} characterName - Active character name.
+ * @param {string} longtermMemories - Active long-term memories as [type] content lines.
+ * @param {string} sessionMemories  - Active session memories as [type] content lines (may be empty).
+ * @param {Array<{name: string, type: string}>} [entities] - Known entities for the relationship matrix.
+ * @returns {string} The complete prompt string.
+ */
+export function buildProfileGenerationPrompt(
+  characterName,
+  longtermMemories,
+  sessionMemories,
+  entities = [],
+) {
+  const ltSection = longtermMemories
+    ? `LONG-TERM MEMORIES:\n${longtermMemories}\n\n`
+    : 'LONG-TERM MEMORIES: (none yet)\n\n';
+
+  const sessSection = sessionMemories
+    ? `SESSION MEMORIES:\n${sessionMemories}\n\n`
+    : 'SESSION MEMORIES: (none yet)\n\n';
+
+  const entitySection =
+    entities.length > 0
+      ? `KNOWN ENTITIES: ${entities.map((e) => `${e.name} (${e.type})`).join(', ')}\n\n`
+      : '';
+
+  const charLabel = characterName || 'the character';
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `[PROFILE GENERATION TASK - Do NOT roleplay. Output structured data only.]
+
+${ltSection}${sessSection}${entitySection}Generate a compact state snapshot for the active roleplay character "${charLabel}". Base everything strictly on the memories above - do not invent facts not in the source material. If a field cannot be determined from the memories, write "unknown".
+
+Output exactly three sections using these tags. Keep every field to one line. Write factually:
+
+<character_state>
+Goals: [current goals and motivations]
+Emotional posture: [current emotional state - e.g. stable, anxious, in love, grieving]
+Active fears: [active fears or unresolved tensions, or "none identified"]
+Loyalties: [current loyalties and commitments]
+</character_state>
+
+<world_state>
+Location: [current location and atmosphere]
+Threats: [active threats or pressures, or "none identified"]
+Unresolved: [unresolved events or open situations, or "none identified"]
+Time: [time context - time of day, season, elapsed time since a key event, or "unknown"]
+</world_state>
+
+<relationship_matrix>
+[EntityName] ([type]): [directional one-line state] [confidence: 0.X]
+(one line per entity from the KNOWN ENTITIES list; omit this section entirely if no entities are known)
+</relationship_matrix>`
   );
 }
 
