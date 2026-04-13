@@ -228,12 +228,12 @@ EXPIRATION CLASS (choose one):
 - permanent  - should persist as a durable memory
 
 ENTITY TAGGING (optional but encouraged):
-If the memory involves specific named characters, places, or objects, append :entity=Name1,Name2 inside the bracket. Use the exact names as they appear in the conversation. Omit this field entirely if no named entities are relevant - do not invent names.
+If the memory involves specific named characters, places, or objects, append :entity=Name/type pairs inside the bracket. Use the exact names as they appear in the conversation. Classify each entity as one of: character, place, object, faction, concept. Omit this field entirely if no named entities are relevant - do not invent names.
 
 One item per line, exact format:
 [scene:2:scene] We are in a candlelit tavern, late evening, rain outside.
-[detail:3:permanent:entity=Ember] The character's horse is named Ember, a chestnut mare.
-[revelation:3:permanent:entity=Senjin,Kael] Senjin revealed that Kael is his estranged brother.
+[detail:3:permanent:entity=Ember/character] The character's horse is named Ember, a chestnut mare.
+[revelation:3:permanent:entity=Senjin/character,Kael/character] Senjin revealed that Kael is his estranged brother.
 [revelation:1:session] He mentioned in passing that it rained last week.
 
 FINAL RULE: Output ONLY [type:score:expiration] or [type:score:expiration:entity=...] lines. No headers. No intros. No explanations.
@@ -589,12 +589,12 @@ Also classify expiration:
 - permanent  - durable fact that should persist long-term
 
 ENTITY TAGGING (optional but encouraged):
-If the memory involves specific named characters, places, or objects, append :entity=Name1,Name2 inside the bracket. Use the exact names as they appear in the conversation. Omit this field entirely if no named entities are relevant - do not invent names.
+If the memory involves specific named characters, places, or objects, append :entity=Name/type pairs inside the bracket. Use the exact names as they appear in the conversation. Classify each entity as one of: character, place, object, faction, concept. Omit this field entirely if no named entities are relevant - do not invent names.
 
 Output ONLY one memory per line using this exact format (nothing else):
 [fact:2:permanent] The character's name is Elara and she works as a blacksmith.
-[relationship:3:permanent:entity=Elara] We have developed a close friendship after helping each other escape the dungeon.
-[event:2:permanent:entity=Elara,Kael] Elara and Kael fought side by side at the bridge.
+[relationship:3:permanent:entity=Elara/character] We have developed a close friendship after helping each other escape the dungeon.
+[event:2:permanent:entity=Elara/character,Kael/character] Elara and Kael fought side by side at the bridge.
 [preference:2:session] The user enjoys slow-burn romance and witty banter.
 [event:1:scene] They briefly discussed the weather near the harbour.
 

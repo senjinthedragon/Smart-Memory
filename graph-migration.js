@@ -203,8 +203,12 @@ function findEntityByName(rawName, registry) {
 // Keywords that suggest non-character entity types.
 const PLACE_PATTERNS =
   /\b(city|town|village|castle|forest|mountain|river|sea|ocean|room|hall|inn|tavern|dungeon|kingdom|realm|world|island|house|building|tower|temple|shrine|camp|cave|ruins|road|street|district|region|country|territory|land|valley|lake|bay|port|market|quarter|website|server|platform|network|database|space|station|base|facility|lab|school|hospital|shop|store|office|academy|guild|manor|estate|garden|park)\b/i;
+// Keyword heuristic is a last resort - the model classifies types directly
+// via the Name/type format in the extraction prompt. These patterns only fire
+// when the model omits a type classification, so keep them minimal and focused
+// on unambiguous structural words rather than scenario-specific props.
 const OBJECT_PATTERNS =
-  /\b(sword|blade|staff|wand|ring|amulet|book|scroll|map|key|gem|stone|artifact|relic|device|machine|tool|weapon|shield|armor|helm|cloak|potion|letter|contract|token|seal|orb|crystal|vr|headset|console|app|file|document|report|code|program|remote|controller|camera|tripod|collar|leash|toy|drone|gadget|vehicle|car|truck|bike|phone|tablet|computer|monitor|screen|cable|rope|chain|cuffs|blindfold|harness)\b/i;
+  /\b(sword|blade|staff|wand|ring|amulet|book|scroll|map|key|gem|stone|artifact|relic|device|machine|tool|weapon|shield|armor|helm|cloak|potion|letter|contract|token|seal|orb|crystal|vr|headset|console|app|file|document|report|code|program)\b/i;
 const FACTION_PATTERNS =
   /\b(guild|order|faction|clan|tribe|army|company|organization|group|party|council|court|empire|union|alliance|brotherhood|sisterhood|cult|church|institution|corporation|team)\b/i;
 
@@ -222,7 +226,27 @@ function inferEntityType(name) {
   return 'character';
 }
 
-function upsertEntity(rawName, memoryId, messageIndex, registry) {
+/**
+ * Parses a raw entity token from the extraction output into a name and an
+ * optional pre-classified type. Tokens may be plain names ("Alex") or
+ * name/type pairs ("Alex/character") when the model provides classification.
+ *
+ * @param {string} token - Raw token string from _raw_entity_names.
+ * @returns {{name: string, classifiedType: string|null}}
+ */
+function parseEntityToken(token) {
+  const slashIdx = token.indexOf('/');
+  if (slashIdx < 0) return { name: token, classifiedType: null };
+  const name = token.slice(0, slashIdx).trim();
+  const type = token
+    .slice(slashIdx + 1)
+    .trim()
+    .toLowerCase();
+  const VALID_TYPES = ['character', 'place', 'object', 'faction', 'concept'];
+  return { name, classifiedType: VALID_TYPES.includes(type) ? type : null };
+}
+
+function upsertEntity(rawName, memoryId, messageIndex, registry, classifiedType = null) {
   const existing = findEntityByName(rawName, registry);
 
   if (existing) {
@@ -244,12 +268,12 @@ function upsertEntity(rawName, memoryId, messageIndex, registry) {
     return existing.id;
   }
 
-  // New entity - infer a rough type from the name. This is a lightweight
-  // heuristic; the model does not tag types in the extraction output.
+  // New entity. Use the model-provided type when available; fall back to the
+  // keyword heuristic only when the model did not classify it.
   const entity = {
     id: generateMemoryId(),
     name: rawName,
-    type: inferEntityType(rawName),
+    type: classifiedType ?? inferEntityType(rawName),
     aliases: [],
     first_seen: messageIndex,
     last_seen: messageIndex,
@@ -284,7 +308,10 @@ export function resolveEntityNames(mem, rawNames, messageIndex, registry) {
 
   const ids = rawNames
     .filter((n) => n && n.trim().length > 0)
-    .map((n) => upsertEntity(n.trim(), mem.id, messageIndex, registry));
+    .map((n) => {
+      const { name, classifiedType } = parseEntityToken(n.trim());
+      return upsertEntity(name, mem.id, messageIndex, registry, classifiedType);
+    });
 
   mem.entities = ids;
   delete mem._raw_entity_names;
