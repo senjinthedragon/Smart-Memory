@@ -48,6 +48,7 @@ import {
   PROMPT_KEY_SESSION,
   SESSION_TYPES,
 } from './constants.js';
+import { applyGraphDefaults } from './graph-migration.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import { parseSessionOutput } from './parsers.js';
 import { batchVerify } from './embeddings.js';
@@ -111,19 +112,24 @@ export function loadSessionMemories() {
   const memories = context.chatMetadata?.[META_KEY]?.sessionMemories ?? [];
   // Migrate: entries without the consolidated flag are pre-existing stable memories.
   // Entries without an importance score default to 2 (medium).
-  return memories.map((m) => ({
-    ...m,
-    consolidated: m.consolidated ?? true,
-    importance: m.importance ?? 2,
-    expiration: m.expiration ?? 'session',
-    confidence: m.confidence ?? 0.7,
-    persona_relevance: m.persona_relevance ?? (m.type === 'development' ? 2 : 1),
-    intimacy_relevance: m.intimacy_relevance ?? (m.type === 'development' ? 2 : 1),
-    retrieval_count: m.retrieval_count ?? 0,
-    // Fall back to 0 (not Date.now()) when both fields are absent so legacy
-    // entries don't receive an artificial recency boost in memoryUtilityScore.
-    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? 0,
-  }));
+  // applyGraphDefaults is a safety net for entries that predate the one-shot
+  // migration pass. It is non-destructive and only generates a new id when one
+  // is truly absent.
+  return memories.map((m) =>
+    applyGraphDefaults({
+      ...m,
+      consolidated: m.consolidated ?? true,
+      importance: m.importance ?? 2,
+      expiration: m.expiration ?? 'session',
+      confidence: m.confidence ?? 0.7,
+      persona_relevance: m.persona_relevance ?? (m.type === 'development' ? 2 : 1),
+      intimacy_relevance: m.intimacy_relevance ?? (m.type === 'development' ? 2 : 1),
+      retrieval_count: m.retrieval_count ?? 0,
+      // Fall back to 0 (not Date.now()) when both fields are absent so legacy
+      // entries don't receive an artificial recency boost in memoryUtilityScore.
+      last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? 0,
+    }),
+  );
 }
 
 /**

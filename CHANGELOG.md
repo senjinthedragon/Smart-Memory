@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Graph schema foundation**: every memory (long-term and session) now carries a
+  full set of graph fields alongside the existing content fields. New fields:
+  `id` (stable UUID), `source_messages` (chat message ids that evidence the
+  memory), `entities` (entity ids referenced), `time_scope` (scene/session/arc/global),
+  `valid_from` / `valid_to` (message indices marking when the memory became and
+  stopped being true), `supersedes` / `superseded_by` (links to replaced and
+  replacement memories), and `contradicts` (ids of unresolved conflicting memories).
+  These fields are the foundation for supersession tracking, entity linking, hybrid
+  retrieval, and the timeline view - none of that logic is active yet, but the
+  schema is in place for all of it.
+- **Entity registry storage**: two entity registries introduced following the schema
+  from the memory graph design. Persistent entities live in
+  `extension_settings.smart_memory.characters[name].entities`; session-scoped
+  entities live in `chatMetadata.smartMemory.entities`. Both are initialised as
+  empty arrays during migration and managed via helpers in `graph-migration.js`.
+- **graph-migration.js**: new module owning the migration pass and entity registry
+  CRUD. `runGraphMigration()` is version-gated (`graph_schema_version` in
+  extension_settings) and runs once on the first chat load after upgrade. It
+  backfills all graph fields on existing memories non-destructively, initialises
+  entity registries, and writes the version marker. Subsequent loads are a fast
+  no-op.
+
+### Changed
+
+- **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
+  spreads the existing character object before writing the memories array, so the
+  entity registry and any future per-character fields stored alongside memories are
+  preserved across saves.
+
+---
+
 ## [1.3.0] - 2026-04-12
 
 ### Fixed

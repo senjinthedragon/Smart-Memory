@@ -50,6 +50,7 @@ import {
   MEMORY_TYPES,
   META_KEY,
 } from './constants.js';
+import { applyGraphDefaults } from './graph-migration.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
 import { parseExtractionOutput } from './parsers.js';
 import {
@@ -136,19 +137,24 @@ export function loadCharacterMemories(characterName) {
   const memories = chars?.[characterName]?.memories ?? [];
   // Migrate: entries without the consolidated flag are pre-existing stable memories.
   // Entries without an importance score default to 2 (medium).
-  return memories.map((m) => ({
-    ...m,
-    consolidated: m.consolidated ?? true,
-    importance: m.importance ?? 2,
-    expiration: m.expiration ?? 'permanent',
-    confidence: m.confidence ?? 0.7,
-    persona_relevance: m.persona_relevance ?? (m.type === 'relationship' ? 3 : 1),
-    intimacy_relevance: m.intimacy_relevance ?? (m.type === 'preference' ? 3 : 1),
-    retrieval_count: m.retrieval_count ?? 0,
-    // Fall back to 0 (not Date.now()) when both fields are absent so legacy
-    // entries don't receive an artificial recency boost in memoryUtilityScore.
-    last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? 0,
-  }));
+  // applyGraphDefaults is a safety net for entries that predate the one-shot
+  // migration pass. It is non-destructive and only generates a new id when one
+  // is truly absent (e.g. a rollback/downgrade scenario).
+  return memories.map((m) =>
+    applyGraphDefaults({
+      ...m,
+      consolidated: m.consolidated ?? true,
+      importance: m.importance ?? 2,
+      expiration: m.expiration ?? 'permanent',
+      confidence: m.confidence ?? 0.7,
+      persona_relevance: m.persona_relevance ?? (m.type === 'relationship' ? 3 : 1),
+      intimacy_relevance: m.intimacy_relevance ?? (m.type === 'preference' ? 3 : 1),
+      retrieval_count: m.retrieval_count ?? 0,
+      // Fall back to 0 (not Date.now()) when both fields are absent so legacy
+      // entries don't receive an artificial recency boost in memoryUtilityScore.
+      last_confirmed_ts: m.last_confirmed_ts ?? m.ts ?? 0,
+    }),
+  );
 }
 
 /**
@@ -162,7 +168,11 @@ export function saveCharacterMemories(characterName, memories) {
   if (!extension_settings[MODULE_NAME].characters) {
     extension_settings[MODULE_NAME].characters = {};
   }
+  // Spread the existing character object so the entity registry and any other
+  // fields stored alongside memories (e.g. entities, canon) are preserved.
+  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
   extension_settings[MODULE_NAME].characters[characterName] = {
+    ...existing,
     memories,
     lastUpdated: Date.now(),
   };

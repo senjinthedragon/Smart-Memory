@@ -32,9 +32,15 @@
  * parseContradictions       - parses contradiction lines from a continuity check response
  * formatSummary             - strips model analysis scaffolding and extracts the summary text
  * detectSceneBreakHeuristic - pattern-based scene break check, no model call required
+ *
+ * All new memory objects produced by the parse functions carry the full graph
+ * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
+ * supersedes, superseded_by, contradicts) so callers never need to add them
+ * separately. IDs are generated fresh here; supersession links are populated
+ * later by the verifier pass in graph-migration.js.
  */
 
-import { MEMORY_TYPES, SESSION_TYPES } from './constants.js';
+import { MEMORY_TYPES, SESSION_TYPES, generateMemoryId } from './constants.js';
 
 // ---- Long-term extraction -----------------------------------------------
 
@@ -70,7 +76,25 @@ export function parseExtractionOutput(text) {
     if (MEMORY_TYPES.includes(type) && content.length > 5) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
+      results.push({
+        type,
+        content,
+        importance,
+        expiration,
+        ts: Date.now(),
+        consolidated: false,
+        // Graph fields - populated going forward; supersession links are
+        // added by the verifier pass once the candidate is confirmed.
+        id: generateMemoryId(),
+        source_messages: [],
+        entities: [],
+        time_scope: 'global',
+        valid_from: null,
+        valid_to: null,
+        supersedes: [],
+        superseded_by: null,
+        contradicts: [],
+      });
     }
   }
 
@@ -107,7 +131,25 @@ export function parseSessionOutput(text) {
     if (SESSION_TYPES.includes(type) && content.length > 3) {
       // New entries start as unprocessed - they will be evaluated against the
       // consolidated base before being promoted.
-      results.push({ type, content, importance, expiration, ts: Date.now(), consolidated: false });
+      results.push({
+        type,
+        content,
+        importance,
+        expiration,
+        ts: Date.now(),
+        consolidated: false,
+        // Graph fields - session memories use 'session' scope by default.
+        // Supersession links are added by the verifier pass if confirmed.
+        id: generateMemoryId(),
+        source_messages: [],
+        entities: [],
+        time_scope: 'session',
+        valid_from: null,
+        valid_to: null,
+        supersedes: [],
+        superseded_by: null,
+        contradicts: [],
+      });
     }
   }
   return results;

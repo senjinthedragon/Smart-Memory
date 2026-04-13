@@ -103,6 +103,7 @@ import {
   loadAndInjectRepair,
 } from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
+import { runGraphMigration } from './graph-migration.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -595,6 +596,11 @@ async function onChatChanged() {
   lastWarnedGroupId = null;
   lastKnownChatLength = 0;
   clearEmbeddingCache();
+
+  // Run the one-shot graph schema migration. This is a fast no-op after the
+  // first run (version-gated). Runs here rather than at init so both long-term
+  // and session memories are accessible when the migration executes.
+  await runGraphMigration();
 
   const settings = getSettings();
   if (!settings.enabled) return;

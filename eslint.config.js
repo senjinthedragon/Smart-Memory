@@ -21,6 +21,8 @@ export default [
         alert: 'readonly',
         fetch: 'readonly',
         AbortController: 'readonly',
+        // Web Crypto API - available in all modern browsers and Electron
+        crypto: 'readonly',
         // jQuery and toastr - provided by SillyTavern host page
         $: 'readonly',
         jQuery: 'readonly',
