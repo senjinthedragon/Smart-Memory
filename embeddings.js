@@ -18,7 +18,7 @@
  */
 
 /**
- * Semantic embedding support for memory deduplication.
+ * Semantic embedding support for memory deduplication and supersession detection.
  *
  * Uses Ollama's /api/embed endpoint to produce vector representations of memory
  * content. Cosine similarity between vectors catches near-paraphrase duplicates
@@ -33,7 +33,9 @@
  * getEmbeddingBatch   - fetches vectors for multiple texts in one API call
  * getEmbedding        - single-text wrapper around getEmbeddingBatch
  * cosineSimilarity    - computes cosine similarity between two vectors
- * batchVerify         - compares a list of candidates against existing vectors
+ * batchVerify         - compares candidates against existing memories; returns
+ *                       passed (new), superseded (state-change updates), and
+ *                       rejected (duplicates)
  * clearEmbeddingCache - clears the in-session cache (call on chat change)
  */
 
@@ -145,6 +147,41 @@ export function cosineSimilarity(a, b) {
   return denom === 0 ? 0 : dot / denom;
 }
 
+// Patterns that signal a memory is describing a state change rather than
+// restating an existing fact. Used to distinguish supersession from duplication:
+// two memories about the same topic where the new one contains a state-change
+// marker are treated as supersession (old fact retired), not duplication (rejected).
+//
+// Deliberately conservative - false negatives (missing a supersession) are
+// handled by later consolidation; false positives (wrongly retiring a valid
+// memory) are harder to recover from.
+const STATE_CHANGE_PATTERNS = [
+  /\bno longer\b/i,
+  /\bnot anymore\b/i,
+  /\bno more\b/i,
+  /\bstopped\b/i,
+  /\bmoved (?:to|away|from|out)\b/i,
+  /\bbroke up\b/i,
+  /\bformerly\b/i,
+  /\bused to\b/i,
+  /\bbecame\b/i,
+  /\bswitched (?:to|from)\b/i,
+  /\bnow (?:lives?|works?|is|has)\b/i,
+  /\breconciled\b/i,
+  /\bseparated\b/i,
+  /\bended the\b/i,
+];
+
+/**
+ * Returns true if the text contains a word or phrase that signals a change
+ * in state rather than a restatement of an existing fact.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function hasStateChangeMarker(text) {
+  return STATE_CHANGE_PATTERNS.some((p) => p.test(text));
+}
+
 /**
  * Jaccard word-overlap similarity between two strings. Used as a fallback when
  * embeddings are unavailable.
@@ -161,31 +198,43 @@ function jaccardSimilarity(a, b) {
 }
 
 /**
- * Batch-verifies a list of candidate memory texts against existing memory texts.
+ * Batch-verifies a list of candidate memories against existing memories,
+ * classifying each candidate into one of three buckets:
  *
- * All unique texts (candidates + existing) are embedded in a single API call,
- * then cosine similarity is computed locally - one nomic call per verification
- * pass instead of one call per candidate. Falls back to Jaccard per-pair when
- * embeddings are unavailable.
+ *   passed     - genuinely new information, should be added
+ *   superseded - same topic as an existing memory but state has changed;
+ *                the existing memory should be retired and this one added
+ *   (neither)  - near-duplicate with no state change; silently dropped
  *
- * Returns a Set of candidate texts that are NOT near-duplicates of any existing
- * entry. Callers use this set to filter their candidate arrays.
+ * All unique texts are embedded in a single API call, then cosine similarity
+ * is computed locally. Falls back to Jaccard when embeddings are unavailable.
  *
- * Thresholds:
- *   semantic=true  -> same-type: 0.82, cross-type: 0.88
- *   semantic=false -> same-type: 0.65, cross-type: 0.75
+ * Supersession heuristic (Profile A - no model call):
+ *   When a candidate scores above the "same-topic" lower threshold against an
+ *   existing memory of the same type, AND the candidate text contains a
+ *   state-change marker (e.g. "no longer", "moved to", "became"), it is
+ *   classified as superseding the best-matching existing memory rather than
+ *   being rejected as a duplicate.
  *
- * @param {Array<{content: string, type: string}>} candidates
- * @param {Array<{content: string, type: string}>} existing
- * @returns {Promise<{passed: Set<string>, semantic: boolean}>}
- *   passed  - Set of candidate content strings that are not near-duplicates
- *   semantic - true if cosine was used, false if Jaccard fallback was used
+ * Thresholds (semantic / Jaccard fallback):
+ *   duplicate threshold  0.82 / 0.65  - above this, same-type = duplicate
+ *   same-topic threshold 0.55 / 0.40  - above this, same-topic check applies
+ *   cross-type duplicate 0.88 / 0.75
+ *
+ * @param {Array<{content: string, type: string, id?: string}>} candidates
+ * @param {Array<{content: string, type: string, id?: string}>} existing
+ * @returns {Promise<{passed: Set<string>, superseded: Map<string, string>, semantic: boolean}>}
+ *   passed     - Set of candidate content strings (lowercase) that are new
+ *   superseded - Map from candidate content string to the id of the existing
+ *                memory it replaces (only present when ex.id is available)
+ *   semantic   - true if cosine similarity was used, false if Jaccard
  */
 export async function batchVerify(candidates, existing) {
   const passed = new Set();
-  if (!candidates || candidates.length === 0) return { passed, semantic: false };
+  const superseded = new Map(); // candContent -> existingId
+  if (!candidates || candidates.length === 0) return { passed, superseded, semantic: false };
 
-  // Collect all unique texts needed and embed them in one call.
+  // Embed all unique texts in one call.
   const allTexts = [
     ...candidates.map((m) =>
       String(m.content || '')
@@ -206,43 +255,69 @@ export async function batchVerify(candidates, existing) {
       .toLowerCase()
       .trim();
     const candVec = anyEmbeddings ? (vectorMap.get(candText) ?? null) : null;
+    const candHasStateChange = hasStateChangeMarker(candText);
 
     let isDuplicate = false;
+    let bestSupersessionScore = 0;
+    let bestSupersessionId = null;
+
     for (const ex of existing) {
       const exText = String(ex.content || '')
         .toLowerCase()
         .trim();
-
-      // Select threshold and scoring method per pair. Fall back to Jaccard
-      // with Jaccard thresholds when either vector is missing - using a
-      // semantic threshold against a Jaccard score would give wrong results.
-      let score;
-      let sameThreshold;
-      let crossThreshold;
       const exVec = anyEmbeddings ? (vectorMap.get(exText) ?? null) : null;
+
+      // Choose scoring method and thresholds. Fall back to Jaccard with its
+      // own thresholds when either vector is missing - mixing methods and
+      // thresholds produces wrong results.
+      let score, dupThreshold, crossDupThreshold, sameTopicThreshold;
       if (candVec && exVec) {
         score = cosineSimilarity(candVec, exVec);
-        sameThreshold = 0.82;
-        crossThreshold = 0.88;
+        dupThreshold = 0.82;
+        crossDupThreshold = 0.88;
+        sameTopicThreshold = 0.55;
       } else {
         score = jaccardSimilarity(candText, exText);
-        sameThreshold = 0.65;
-        crossThreshold = 0.75;
+        dupThreshold = 0.65;
+        crossDupThreshold = 0.75;
+        sameTopicThreshold = 0.4;
       }
 
-      const threshold = ex.type === cand.type ? sameThreshold : crossThreshold;
-      if (score > threshold) {
-        isDuplicate = true;
-        break;
+      const isSameType = ex.type === cand.type;
+      const effectiveDupThreshold = isSameType ? dupThreshold : crossDupThreshold;
+
+      if (score >= effectiveDupThreshold) {
+        // High similarity: would normally be a duplicate. If the candidate
+        // contains a state-change marker it is superseding this fact instead.
+        if (isSameType && candHasStateChange && ex.id && score > bestSupersessionScore) {
+          bestSupersessionScore = score;
+          bestSupersessionId = ex.id;
+        } else {
+          isDuplicate = true;
+          break;
+        }
+      } else if (isSameType && score >= sameTopicThreshold && candHasStateChange && ex.id) {
+        // Medium similarity on same topic + state-change marker: likely supersession
+        // even though the wording has changed enough that it didn't hit the dup threshold.
+        if (score > bestSupersessionScore) {
+          bestSupersessionScore = score;
+          bestSupersessionId = ex.id;
+        }
       }
     }
 
-    if (!isDuplicate) passed.add(candText);
+    if (isDuplicate) continue; // silently drop
+
+    if (bestSupersessionId !== null) {
+      // Supersession: candidate replaces an existing memory.
+      superseded.set(candText, bestSupersessionId);
+      passed.add(candText); // still added to the store, just linked
+    } else {
+      passed.add(candText);
+    }
   }
 
-  const useSemantic = anyEmbeddings;
-
-  return { passed, semantic: useSemantic };
+  return { passed, superseded, semantic: anyEmbeddings };
 }
 
 /**
