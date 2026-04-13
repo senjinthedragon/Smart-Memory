@@ -940,12 +940,36 @@ function updateSessionUI() {
     return;
   }
 
+  const hasRetiredSession = memories.some((m) => m.superseded_by);
+
+  if (hasRetiredSession) {
+    const $toggle = $(
+      '<button class="sm_toggle_retired menu_button" style="margin-bottom:6px;font-size:0.8em;">' +
+        '<i class="fa-solid fa-eye-slash"></i> Show retired memories</button>',
+    );
+    $list.append($toggle);
+    $toggle.on('click', function () {
+      const showing = $list.find('.sm_memory_item.sm_memory_retired').first().is(':visible');
+      $list.find('.sm_memory_item.sm_memory_retired').toggle(!showing);
+      $(this).html(
+        `<i class="fa-solid ${showing ? 'fa-eye-slash' : 'fa-eye'}"></i> ${showing ? 'Show' : 'Hide'} retired memories`,
+      );
+    });
+  }
+
   memories.forEach((mem, idx) => {
+    const isRetired = Boolean(mem.superseded_by);
+    const retiredClass = isRetired ? ' sm_memory_retired' : '';
+    const retiredBadge = isRetired
+      ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
+      : '';
+
     const $item = $(`
-            <div class="sm_memory_item" data-index="${idx}">
+            <div class="sm_memory_item${retiredClass}" data-index="${idx}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
+                ${retiredBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
-                <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory">
+                <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
                 </button>
                 <button class="sm_delete_session_memory menu_button" data-index="${idx}" title="Delete this memory">
@@ -1193,12 +1217,39 @@ function renderMemoriesList(memories, characterName) {
     return;
   }
 
+  const hasRetired = memories.some((m) => m.superseded_by);
+
+  // "Show retired" toggle - only rendered when retired memories exist.
+  if (hasRetired) {
+    const $toggle = $(
+      '<button class="sm_toggle_retired menu_button" style="margin-bottom:6px;font-size:0.8em;">' +
+        '<i class="fa-solid fa-eye-slash"></i> Show retired memories</button>',
+    );
+    $list.append($toggle);
+    $toggle.on('click', function () {
+      const showing = $list.find('.sm_memory_item.sm_memory_retired').first().is(':visible');
+      $list.find('.sm_memory_item.sm_memory_retired').toggle(!showing);
+      $(this).find('i').toggleClass('fa-eye-slash', !showing).toggleClass('fa-eye', !showing);
+      $(this).find('i').toggleClass('fa-eye-slash fa-eye');
+      $(this).html(
+        `<i class="fa-solid ${showing ? 'fa-eye-slash' : 'fa-eye'}"></i> ${showing ? 'Show' : 'Hide'} retired memories`,
+      );
+    });
+  }
+
   memories.forEach((mem, idx) => {
+    const isRetired = Boolean(mem.superseded_by);
+    const retiredClass = isRetired ? ' sm_memory_retired' : '';
+    const retiredBadge = isRetired
+      ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
+      : '';
+
     const $item = $(`
-            <div class="sm_memory_item" data-index="${idx}">
+            <div class="sm_memory_item${retiredClass}" data-index="${idx}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
+                ${retiredBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
-                <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory">
+                <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
                 </button>
                 <button class="sm_delete_memory menu_button" data-index="${idx}" title="Delete this memory">

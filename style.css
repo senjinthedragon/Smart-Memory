@@ -645,6 +645,28 @@
   margin-top: 0;
 }
 
+/* ── Supersession indicators ─────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_memory_retired {
+  opacity: 0.45;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+#smart_memory_settings .sm_memory_retired_badge {
+  display: inline-block;
+  font-size: 0.7em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
 /* ── Shared helpers ──────────────────────────────────────────────────────── */
 
 #smart_memory_settings .sm_no_char {
