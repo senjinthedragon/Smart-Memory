@@ -53,6 +53,7 @@ import {
   loadSessionEntityRegistry,
   saveSessionEntityRegistry,
   resolveEntityNames,
+  reconcileEntityRegistry,
 } from './graph-migration.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import { parseSessionOutput } from './parsers.js';
@@ -445,6 +446,14 @@ export async function consolidateSessionMemories(force = false) {
   const max = settings.session_max_memories ?? 30;
   const finalMemories = sortByTimeline(trimByPriority(memories, max));
   if (dirty || finalMemories.length !== memories.length) {
+    // Repair session entity registry links - same stale-ID problem as long-term:
+    // consolidation replaces memories with new IDs, orphaning the registry.
+    const entityRegistry = loadSessionEntityRegistry();
+    if (entityRegistry.length > 0) {
+      reconcileEntityRegistry(entityRegistry, finalMemories);
+      await saveSessionEntityRegistry(entityRegistry);
+    }
+
     await saveSessionMemories(finalMemories);
   }
 
