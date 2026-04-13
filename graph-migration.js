@@ -25,6 +25,7 @@
  * saveCharacterEntityRegistry  - persists the entity registry for a character
  * loadSessionEntityRegistry    - returns the session-scoped entity registry from chatMetadata
  * saveSessionEntityRegistry    - persists the session-scoped entity registry to chatMetadata
+ * resolveEntityNames           - maps raw extracted name strings to entity ids, upserting new entities
  * runGraphMigration            - one-shot migration pass: assigns IDs and graph fields to all
  *                                existing memories, initialises entity registries, writes version marker
  */
@@ -133,6 +134,122 @@ export async function saveSessionEntityRegistry(entities) {
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].entities = entities;
   await context.saveMetadata();
+}
+
+// ---- Entity normalizer ------------------------------------------------------
+
+/**
+ * Looks up an entity in the registry by name.
+ *
+ * Matching priority:
+ * 1. Case-insensitive exact match against the canonical name.
+ * 2. Case-insensitive exact match against any recorded alias.
+ *
+ * Fuzzy matching is intentionally not used here - entity names are short and
+ * near-exact matches are likely coincidental rather than genuine aliases
+ * (e.g. "Alex" and "Alexa" should not collapse automatically). Alias
+ * accumulation over time handles genuine variant spellings organically.
+ *
+ * @param {string} rawName - Name as it appeared in the extraction output.
+ * @param {Array<Object>} registry - Current entity registry array.
+ * @returns {Object|null} The matching entity, or null if not found.
+ */
+function findEntityByName(rawName, registry) {
+  const lower = rawName.toLowerCase().trim();
+  return (
+    registry.find(
+      (e) =>
+        e.name.toLowerCase() === lower || (e.aliases ?? []).some((a) => a.toLowerCase() === lower),
+    ) ?? null
+  );
+}
+
+/**
+ * Finds or creates an entity for a raw name, then links the given memory id
+ * and message index to it. Mutates the registry in place.
+ *
+ * If the name matches an existing entity the entity is updated in place:
+ * - memoryId is added to memory_ids if not already present.
+ * - last_seen is advanced to messageIndex if higher.
+ * - The raw name is added to aliases if it differs from the canonical name
+ *   and is not already recorded (preserves spelling variants seen in chat).
+ *
+ * If no match is found a new entity is created with type 'character' as the
+ * default. Entity type inference (character vs place vs object vs faction) is
+ * planned for a later pass; defaulting to 'character' is correct for the vast
+ * majority of names that appear in roleplay extraction output.
+ *
+ * @param {string} rawName - Name as it appeared in the extraction output.
+ * @param {string} memoryId - Stable id of the memory that references this entity.
+ * @param {number} messageIndex - Index of the latest message triggering this extraction.
+ * @param {Array<Object>} registry - Entity registry array to mutate.
+ * @returns {string} The entity id (existing or newly created).
+ */
+function upsertEntity(rawName, memoryId, messageIndex, registry) {
+  const existing = findEntityByName(rawName, registry);
+
+  if (existing) {
+    if (!existing.memory_ids.includes(memoryId)) {
+      existing.memory_ids.push(memoryId);
+    }
+    existing.last_seen = Math.max(existing.last_seen, messageIndex);
+
+    // Record new spelling variants as aliases.
+    const lower = rawName.toLowerCase().trim();
+    const alreadyKnown =
+      existing.name.toLowerCase() === lower ||
+      (existing.aliases ?? []).some((a) => a.toLowerCase() === lower);
+    if (!alreadyKnown) {
+      existing.aliases = existing.aliases ?? [];
+      existing.aliases.push(rawName);
+    }
+
+    return existing.id;
+  }
+
+  // New entity - default type is 'character'.
+  const entity = {
+    id: generateMemoryId(),
+    name: rawName,
+    type: 'character',
+    aliases: [],
+    first_seen: messageIndex,
+    last_seen: messageIndex,
+    memory_ids: [memoryId],
+  };
+  registry.push(entity);
+  return entity.id;
+}
+
+/**
+ * Resolves an array of raw entity names extracted from a memory's
+ * _raw_entity_names field into entity ids, upserting new entities into the
+ * registry as needed.
+ *
+ * After calling this function:
+ * - mem.entities is populated with the resolved ids.
+ * - The registry is updated in place (caller is responsible for persisting it).
+ * - mem._raw_entity_names is deleted (transient field, not stored).
+ *
+ * Safe to call with an empty rawNames list - produces no side effects in that case.
+ *
+ * @param {Object} mem - Memory object (mutated in place).
+ * @param {Array<string>} rawNames - Raw entity name strings from _raw_entity_names.
+ * @param {number} messageIndex - Message index at extraction time, used for first_seen/last_seen.
+ * @param {Array<Object>} registry - Entity registry to upsert into (mutated in place).
+ */
+export function resolveEntityNames(mem, rawNames, messageIndex, registry) {
+  if (!Array.isArray(rawNames) || rawNames.length === 0) {
+    delete mem._raw_entity_names;
+    return;
+  }
+
+  const ids = rawNames
+    .filter((n) => n && n.trim().length > 0)
+    .map((n) => upsertEntity(n.trim(), mem.id, messageIndex, registry));
+
+  mem.entities = ids;
+  delete mem._raw_entity_names;
 }
 
 // ---- One-shot migration pass -----------------------------------------------
