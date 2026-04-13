@@ -104,7 +104,11 @@ import {
   loadAndInjectRepair,
 } from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
-import { runGraphMigration } from './graph-migration.js';
+import {
+  runGraphMigration,
+  loadCharacterEntityRegistry,
+  loadSessionEntityRegistry,
+} from './graph-migration.js';
 import {
   generateProfiles,
   injectProfiles,
@@ -617,6 +621,8 @@ async function onCharacterMessageRendered() {
             .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
         }
 
+        // Refresh entity panel after extraction since new entities may have been linked.
+        updateEntityPanel(characterName);
         updateTokenDisplay();
         setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
       } catch (err) {
@@ -860,10 +866,11 @@ function updateShortTermUI(summary) {
   $('#sm_current_summary').val(summary || '');
 }
 
-/** Re-renders the long-term memories list for the given character. */
+/** Re-renders the long-term memories list and entity panel for the given character. */
 function updateLongTermUI(characterName) {
   const memories = characterName ? loadCharacterMemories(characterName) : [];
   renderMemoriesList(memories, characterName);
+  updateEntityPanel(characterName);
 }
 
 /**
@@ -1200,6 +1207,134 @@ function updateProfilesUI(profiles) {
 
   if (!hasContent) {
     $display.append('<span class="sm-muted">No profiles generated yet.</span>');
+  }
+}
+
+/**
+ * Renders the entity registry panel, combining long-term (extension_settings)
+ * and session-scoped (chatMetadata) entities. Each entity row shows its type
+ * badge, canonical name, memory count, and last-seen message index. Clicking
+ * an entity row opens its timeline view.
+ *
+ * @param {string|null} characterName - Current character name for long-term registry lookup.
+ */
+function updateEntityPanel(characterName) {
+  const $panel = $('#sm_entity_panel');
+  $panel.empty();
+
+  const ltEntities = characterName ? loadCharacterEntityRegistry(characterName) : [];
+  const sessionEntities = loadSessionEntityRegistry();
+
+  // Merge: long-term keyed by id, session entities fill in gaps.
+  const byId = new Map();
+  for (const e of ltEntities) byId.set(e.id, e);
+  for (const e of sessionEntities) {
+    if (!byId.has(e.id)) byId.set(e.id, e);
+  }
+
+  const entities = [...byId.values()].sort((a, b) => (b.last_seen ?? 0) - (a.last_seen ?? 0));
+
+  if (entities.length === 0) {
+    $panel.append('<span class="sm-muted">No entities extracted yet.</span>');
+    return;
+  }
+
+  const TYPE_ICONS = {
+    character: 'fa-user',
+    place: 'fa-location-dot',
+    object: 'fa-cube',
+    faction: 'fa-users',
+    concept: 'fa-lightbulb',
+  };
+
+  for (const entity of entities) {
+    const icon = TYPE_ICONS[entity.type] ?? 'fa-tag';
+    const memCount = Array.isArray(entity.memory_ids) ? entity.memory_ids.length : 0;
+    const lastSeen = entity.last_seen != null ? `msg #${entity.last_seen}` : 'unknown';
+
+    const $row = $(`
+      <div class="sm_entity_row" data-entity-id="${entity.id}">
+        <span class="sm_entity_type_badge sm_entity_type_${entity.type}">
+          <i class="fa-solid ${icon}"></i> ${entity.type}
+        </span>
+        <span class="sm_entity_name">${$('<div>').text(entity.name).html()}</span>
+        <span class="sm_entity_meta">${memCount} ${memCount === 1 ? 'memory' : 'memories'} &middot; last seen ${lastSeen}</span>
+        <button class="sm_entity_timeline_btn menu_button" title="View timeline for this entity">
+          <i class="fa-solid fa-timeline"></i>
+        </button>
+      </div>
+    `);
+
+    $row.find('.sm_entity_timeline_btn').on('click', (e) => {
+      e.stopPropagation();
+      showEntityTimeline(entity, characterName);
+    });
+
+    $panel.append($row);
+  }
+}
+
+/**
+ * Shows a CSS-only vertical timeline of memories involving a specific entity.
+ * Memories are ordered by valid_from (falling back to ts), with retired entries
+ * shown in muted style. Renders inline below the entity row.
+ *
+ * @param {Object} entity - The entity object from the registry.
+ * @param {string|null} characterName - Current character name.
+ */
+function showEntityTimeline(entity, characterName) {
+  const $panel = $('#sm_entity_panel');
+
+  // Remove any existing timeline (toggle if same entity).
+  const existingEntityId = $panel.find('.sm_entity_timeline').data('entity-id');
+  $panel.find('.sm_entity_timeline').remove();
+  if (existingEntityId === entity.id) return;
+
+  const ltMemories = characterName ? loadCharacterMemories(characterName) : [];
+  const sessionMems = loadSessionMemories();
+  const allMemories = [...ltMemories, ...sessionMems];
+
+  const memIds = new Set(Array.isArray(entity.memory_ids) ? entity.memory_ids : []);
+  const linked = allMemories
+    .filter((m) => m.id && memIds.has(m.id))
+    .sort((a, b) => (a.valid_from ?? a.ts ?? 0) - (b.valid_from ?? b.ts ?? 0));
+
+  const $timeline = $('<div class="sm_entity_timeline">').attr('data-entity-id', entity.id);
+  $timeline.append(
+    $(`<div class="sm_entity_timeline_header">`).text(
+      `Timeline: ${entity.name} (${linked.length} ${linked.length === 1 ? 'memory' : 'memories'})`,
+    ),
+  );
+
+  if (linked.length === 0) {
+    $timeline.append('<div class="sm_timeline_empty sm-muted">No linked memories found.</div>');
+  } else {
+    const $list = $('<div class="sm_timeline_list">');
+    for (const mem of linked) {
+      const isRetired = Boolean(mem.superseded_by);
+      const when = mem.valid_from != null ? `msg #${mem.valid_from}` : 'unknown';
+      const $entry = $(`
+        <div class="sm_timeline_entry${isRetired ? ' sm_timeline_entry_retired' : ''}">
+          <div class="sm_timeline_dot"></div>
+          <div class="sm_timeline_body">
+            <span class="sm_timeline_when">${when}</span>
+            <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
+            ${isRetired ? '<span class="sm_memory_retired_badge">retired</span>' : ''}
+            <span class="sm_timeline_text">${$('<div>').text(mem.content).html()}</span>
+          </div>
+        </div>
+      `);
+      $list.append($entry);
+    }
+    $timeline.append($list);
+  }
+
+  // Insert the timeline after the entity row for this entity.
+  const $entityRow = $panel.find(`.sm_entity_row[data-entity-id="${entity.id}"]`);
+  if ($entityRow.length) {
+    $entityRow.after($timeline);
+  } else {
+    $panel.append($timeline);
   }
 }
 

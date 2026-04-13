@@ -652,6 +652,161 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* ── Entity panel ────────────────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_entity_panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#smart_memory_settings .sm_entity_row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.875em;
+  flex-wrap: wrap;
+}
+
+#smart_memory_settings .sm_entity_type_badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+#smart_memory_settings .sm_entity_type_character {
+  color: #7ecfff;
+  background: rgba(126, 207, 255, 0.1);
+  border: 1px solid rgba(126, 207, 255, 0.25);
+}
+
+#smart_memory_settings .sm_entity_type_place {
+  color: #a8d88f;
+  background: rgba(168, 216, 143, 0.1);
+  border: 1px solid rgba(168, 216, 143, 0.25);
+}
+
+#smart_memory_settings .sm_entity_type_object {
+  color: #d4b97a;
+  background: rgba(212, 185, 122, 0.1);
+  border: 1px solid rgba(212, 185, 122, 0.25);
+}
+
+#smart_memory_settings .sm_entity_type_faction {
+  color: #c49de8;
+  background: rgba(196, 157, 232, 0.1);
+  border: 1px solid rgba(196, 157, 232, 0.25);
+}
+
+#smart_memory_settings .sm_entity_type_concept {
+  color: #f0a0a0;
+  background: rgba(240, 160, 160, 0.1);
+  border: 1px solid rgba(240, 160, 160, 0.25);
+}
+
+#smart_memory_settings .sm_entity_name {
+  font-weight: 600;
+  color: var(--SmartReplyColor, #ddd);
+  flex: 1;
+  min-width: 80px;
+}
+
+#smart_memory_settings .sm_entity_meta {
+  font-size: 0.8em;
+  color: var(--SmartReplyColor, #999);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+#smart_memory_settings .sm_entity_timeline_btn {
+  padding: 2px 6px;
+  font-size: 0.75em;
+  flex-shrink: 0;
+}
+
+/* ── Entity timeline ─────────────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_entity_timeline {
+  margin: 2px 0 6px 12px;
+  padding: 8px 10px;
+  border-left: 2px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 0 4px 4px 0;
+}
+
+#smart_memory_settings .sm_entity_timeline_header {
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--SmartReplyColor, #bbb);
+  margin-bottom: 8px;
+}
+
+#smart_memory_settings .sm_timeline_empty {
+  font-size: 0.85em;
+  padding: 4px 0;
+}
+
+#smart_memory_settings .sm_timeline_list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#smart_memory_settings .sm_timeline_entry {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+#smart_memory_settings .sm_timeline_entry_retired {
+  opacity: 0.4;
+}
+
+#smart_memory_settings .sm_timeline_dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+#smart_memory_settings .sm_timeline_entry_retired .sm_timeline_dot {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+#smart_memory_settings .sm_timeline_body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  font-size: 0.85em;
+}
+
+#smart_memory_settings .sm_timeline_when {
+  font-size: 0.75em;
+  color: var(--SmartReplyColor, #999);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+#smart_memory_settings .sm_timeline_text {
+  color: var(--SmartReplyColor, #ccc);
+  line-height: 1.4;
+  width: 100%;
+}
+
 #smart_memory_settings .sm_memory_conflict_badge {
   display: inline-flex;
   align-items: center;
