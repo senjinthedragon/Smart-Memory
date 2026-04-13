@@ -105,7 +105,13 @@ import {
 } from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
 import { runGraphMigration } from './graph-migration.js';
-import { generateProfiles, injectProfiles, clearProfiles, areProfilesStale } from './profiles.js';
+import {
+  generateProfiles,
+  injectProfiles,
+  clearProfiles,
+  loadProfiles,
+  areProfilesStale,
+} from './profiles.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -581,7 +587,10 @@ async function onCharacterMessageRendered() {
         if (settings.profiles_enabled && characterName) {
           await generateProfiles(characterName)
             .then((profiles) => {
-              if (profiles) injectProfiles();
+              if (profiles) {
+                injectProfiles();
+                updateProfilesUI(profiles);
+              }
             })
             .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
         }
@@ -654,6 +663,7 @@ async function onChatChanged() {
   updateSessionUI();
   updateScenesUI();
   updateArcsUI();
+  updateProfilesUI(loadProfiles());
   updateTokenDisplay();
 
   // Regenerate profiles in the background if they are stale. Non-blocking -
@@ -664,7 +674,10 @@ async function onChatChanged() {
     if (areProfilesStale(thresholdMs)) {
       generateProfiles(characterName)
         .then((profiles) => {
-          if (profiles) injectProfiles();
+          if (profiles) {
+            injectProfiles();
+            updateProfilesUI(profiles);
+          }
         })
         .catch((err) =>
           console.error('[SmartMemory] Background profile regeneration failed:', err),
@@ -1101,6 +1114,40 @@ function updateArcsUI() {
     injectArcs();
     updateArcsUI();
   });
+}
+
+/**
+ * Updates the profiles display panel with the current stored profiles.
+ * Shows a placeholder when no profiles exist yet.
+ * @param {{character_state: string, world_state: string, relationship_matrix: string}|null} profiles
+ */
+function updateProfilesUI(profiles) {
+  const $display = $('#sm_profiles_display');
+  $display.empty();
+
+  if (!profiles) {
+    $display.append('<span class="sm-muted">No profiles generated yet.</span>');
+    return;
+  }
+
+  const sections = [
+    { key: 'character_state', label: 'Character state' },
+    { key: 'world_state', label: 'World state' },
+    { key: 'relationship_matrix', label: 'Relationships' },
+  ];
+
+  let hasContent = false;
+  for (const { key, label } of sections) {
+    const text = profiles[key];
+    if (!text) continue;
+    $display.append($('<span class="sm_profiles_section-label">').text(label + ':'));
+    $display.append($('<div>').text(text));
+    hasContent = true;
+  }
+
+  if (!hasContent) {
+    $display.append('<span class="sm-muted">No profiles generated yet.</span>');
+  }
 }
 
 /**
@@ -2412,6 +2459,62 @@ function bindSettingsUI() {
       getSettings().embedding_keep = $(this).prop('checked');
       saveSettingsDebounced();
     });
+
+  // ---- Profiles -------------------------------------------------------
+  $('#sm_profiles_enabled')
+    .prop('checked', s.profiles_enabled)
+    .on('change', function () {
+      getSettings().profiles_enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+      if (!getSettings().profiles_enabled) {
+        setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
+        updateTokenDisplay();
+      } else {
+        injectProfiles();
+      }
+    });
+
+  const $profilesThresholdVal = $('#sm_profiles_stale_threshold_value');
+  const formatProfilesThreshold = (v) => (v >= 60 ? `${Math.round(v / 60)}h` : `${v}m`);
+  $profilesThresholdVal.text(formatProfilesThreshold(s.profiles_stale_threshold_minutes ?? 30));
+  $('#sm_profiles_stale_threshold')
+    .val(s.profiles_stale_threshold_minutes ?? 30)
+    .on('input', function () {
+      const v = Number($(this).val());
+      $profilesThresholdVal.text(formatProfilesThreshold(v));
+      getSettings().profiles_stale_threshold_minutes = v;
+      saveSettingsDebounced();
+    });
+
+  $('#sm_profiles_regenerate').on('click', async function () {
+    const characterName = getCurrentCharacterName();
+    if (!characterName) {
+      toastr.warning('No active character - profiles need a character.', 'Smart Memory', {
+        timeOut: 3000,
+        positionClass: 'toast-bottom-right',
+      });
+      return;
+    }
+    $(this).prop('disabled', true);
+    setStatusMessage('Generating profiles...');
+    try {
+      const profiles = await generateProfiles(characterName);
+      if (profiles) {
+        injectProfiles();
+        updateProfilesUI(profiles);
+        setStatusMessage('Profiles updated.');
+      } else {
+        setStatusMessage('Profile generation returned no output.');
+      }
+    } catch (err) {
+      showError('Profile generation', err);
+      setStatusMessage('');
+    } finally {
+      $(this).prop('disabled', false);
+    }
+  });
+
+  updateProfilesUI(loadProfiles());
 
   // ---- Continuity checker ---------------------------------------------
   $('#sm_auto_repair')

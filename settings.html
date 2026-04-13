@@ -1063,6 +1063,55 @@
         </div>
       </details>
 
+      <!-- ══ CHARACTER & WORLD PROFILES ══ -->
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          Character &amp; World Profiles
+          <span
+            class="sm-info"
+            data-tooltip="Compact state snapshots (current goals, emotional posture, world state, relationships) generated from stored memories and injected every turn as a stable anchor for the AI. Regenerated automatically after each extraction pass and on chat load when stale."
+            >ⓘ</span
+          >
+        </summary>
+        <div class="sm-section-content">
+          <div class="sm-block">
+            <label class="checkbox_label">
+              <input id="sm_profiles_enabled" type="checkbox" />
+              <span>Enable profiles</span>
+            </label>
+          </div>
+
+          <p class="sm-section-title">Generation</p>
+          <div class="sm-block">
+            <label
+              >Regenerate when older than:
+              <b><span id="sm_profiles_stale_threshold_value"></span></b
+            ></label>
+            <input
+              id="sm_profiles_stale_threshold"
+              type="range"
+              min="5"
+              max="120"
+              step="5"
+              value="{{defaultSettings.profiles_stale_threshold_minutes}}"
+            />
+          </div>
+
+          <div class="sm-block" style="margin-top: 4px">
+            <button id="sm_profiles_regenerate" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-rotate"></i>
+              <span>Regenerate Profiles Now</span>
+            </button>
+          </div>
+
+          <p class="sm-section-title">Current Profiles</p>
+          <div id="sm_profiles_display" class="sm_profiles_display">
+            <span class="sm-muted">No profiles generated yet.</span>
+          </div>
+        </div>
+      </details>
+
       <hr class="sysHR" />
     </div>
   </div>

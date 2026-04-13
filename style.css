@@ -615,6 +615,36 @@
   color: #a0b8cc;
 }
 
+/* ── Profiles display ────────────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_profiles_display {
+  font-size: 0.875em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--SmartReplyColor, #ccc);
+  min-height: 32px;
+}
+
+#smart_memory_settings .sm_profiles_display .sm-muted {
+  color: var(--SmartReplyColor, #aaa);
+  font-style: italic;
+}
+
+#smart_memory_settings .sm_profiles_section-label {
+  font-weight: 600;
+  color: var(--SmartReplyColor, #ddd);
+  margin-top: 8px;
+  display: block;
+}
+
+#smart_memory_settings .sm_profiles_section-label:first-child {
+  margin-top: 0;
+}
+
 /* ── Shared helpers ──────────────────────────────────────────────────────── */
 
 #smart_memory_settings .sm_no_char {
