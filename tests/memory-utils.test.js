@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  adaptiveBudgets,
   buildCurrentSceneStateBlock,
+  classifyTurn,
+  hybridScore,
   memoryUtilityScore,
   prioritizeMemories,
   reconcileTypeEntries,
@@ -177,4 +180,81 @@ test('buildCurrentSceneStateBlock keeps newest scene-oriented memories', () => {
   assert.match(block, /coat is still wet/);
   assert.match(block, /letter was forged/);
   assert.doesNotMatch(block, /Old tavern room/);
+});
+
+test('hybridScore boosts memories with entity overlap and arc relevance', () => {
+  const focused = {
+    type: 'event',
+    content: 'Alex reveals the hidden key at the old tower.',
+    importance: 2,
+    expiration: 'session',
+    ts: 1000,
+    entities: ['e1'],
+    time_scope: 'session',
+    contradicts: [],
+  };
+  const unfocused = {
+    type: 'event',
+    content: 'The weather stayed calm through the afternoon.',
+    importance: 2,
+    expiration: 'session',
+    ts: 1000,
+    entities: ['e2'],
+    time_scope: 'global',
+    contradicts: [],
+  };
+
+  const context = {
+    turnMentions: new Set(['alex', 'tower']),
+    entityRegistry: [
+      { id: 'e1', name: 'Alex', aliases: [] },
+      { id: 'e2', name: 'Harbor', aliases: [] },
+    ],
+    arcs: [{ content: 'Find the hidden key in the old tower.' }],
+  };
+
+  assert.ok(hybridScore(focused, context) > hybridScore(unfocused, context));
+});
+
+test('hybridScore penalizes unresolved contradictions', () => {
+  const clean = {
+    type: 'fact',
+    content: 'She lives in Berlin now.',
+    importance: 3,
+    expiration: 'permanent',
+    ts: 1000,
+    entities: [],
+    time_scope: 'global',
+    contradicts: [],
+  };
+  const contradicted = {
+    ...clean,
+    contradicts: ['m-older'],
+  };
+  assert.ok(hybridScore(clean, {}) > hybridScore(contradicted, {}));
+});
+
+test('classifyTurn detects intimate, transition, action, then dialogue fallback', () => {
+  assert.equal(classifyTurn('He leans in to kiss her and gently caresses her cheek.'), 'intimate');
+  assert.equal(classifyTurn('Hours later, they returned to the cabin before dawn.'), 'transition');
+  assert.equal(classifyTurn('She dodged, then lunged forward to attack again.'), 'action');
+  assert.equal(classifyTurn('They talk quietly about their plans for tomorrow.'), 'dialogue');
+});
+
+test('adaptiveBudgets preserves total budget while reallocating by turn type', () => {
+  const settings = {
+    longterm_inject_budget: 500,
+    session_inject_budget: 400,
+    scene_inject_budget: 300,
+    arcs_inject_budget: 400,
+    profiles_inject_budget: 200,
+  };
+  const baseTotal = 1800;
+
+  const action = adaptiveBudgets(settings, 'action');
+  const actionTotal = Object.values(action).reduce((sum, v) => sum + v, 0);
+
+  assert.equal(actionTotal, baseTotal);
+  assert.ok(action.session > settings.session_inject_budget);
+  assert.ok(action.longterm < settings.longterm_inject_budget);
 });
