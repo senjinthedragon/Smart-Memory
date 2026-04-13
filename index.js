@@ -112,6 +112,7 @@ import {
   loadProfiles,
   areProfilesStale,
 } from './profiles.js';
+import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -514,8 +515,29 @@ async function onCharacterMessageRendered() {
       // Awaiting here also prevents compaction/scene detection on the next
       // message from racing against an ongoing extraction and corrupting
       // ST's TempResponseLength singleton (the same hazard fixed in 1.0.1).
+      // Capture original budgets before entering try/finally so the finally
+      // block can restore them regardless of where the error occurred.
+      const originalBudgets = {
+        longterm_inject_budget: settings.longterm_inject_budget,
+        session_inject_budget: settings.session_inject_budget,
+        scene_inject_budget: settings.scene_inject_budget,
+        arcs_inject_budget: settings.arcs_inject_budget,
+        profiles_inject_budget: settings.profiles_inject_budget,
+      };
       try {
         let total = 0;
+
+        // Classify the current turn and apply adaptive per-tier token budgets.
+        // The last AI message drives the classifier; budgets are patched directly
+        // into settings so injection calls pick them up without signature changes.
+        const lastAiMessage = context.chat?.at(-1)?.mes ?? '';
+        const turnType = classifyTurn(lastAiMessage);
+        const budgets = adaptiveBudgets(settings, turnType);
+        settings.longterm_inject_budget = budgets.longterm;
+        settings.session_inject_budget = budgets.session;
+        settings.scene_inject_budget = budgets.scenes;
+        settings.arcs_inject_budget = budgets.arcs;
+        settings.profiles_inject_budget = budgets.profiles;
 
         if (settings.session_enabled && sessionWindow.length > 0) {
           const count = await extractSessionMemories(sessionWindow).catch((err) => {
@@ -601,6 +623,9 @@ async function onCharacterMessageRendered() {
         console.error('[SmartMemory] Extraction error:', err);
         setStatusMessage('');
       } finally {
+        // Restore original budget settings so chat-load / settings-change injection
+        // paths use the user's configured values, not this turn's adapted values.
+        Object.assign(settings, originalBudgets);
         extractionRunning = false;
       }
     }

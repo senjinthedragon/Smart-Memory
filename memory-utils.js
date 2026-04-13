@@ -27,6 +27,8 @@
  * extractTurnEntityMentions - lightweight regex extraction of proper-noun candidates from last messages
  * hybridScore               - weighted blend of utility, entity overlap, arc relevance, and temporal proximity
  * hybridPrioritize          - sorts a memory array by hybridScore given current-turn context
+ * classifyTurn              - heuristic turn-type classifier (dialogue/action/transition/intimate)
+ * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
  */
 
 function tokenSet(text) {
@@ -548,4 +550,107 @@ export function hybridPrioritize(memories, context = {}) {
     if (sa !== sb) return sb - sa;
     return numberOr(b.ts, 0) - numberOr(a.ts, 0) || 0;
   });
+}
+
+// ---- Adaptive token budget ----------------------------------------------
+
+// Keywords that signal each turn type. Grouped by increasing specificity
+// so the classifier can return early on a clear match.
+const INTIMATE_PATTERNS = [
+  /\b(kiss(?:es|ed)?|caress(?:es|ed)?|embrace[sd]?|moan(?:s|ed)?|whisper(?:s|ed)?|tender(?:ly)?|gentle(?:ly)?|touch(?:es|ed)?|stroke[sd]?)\b/i,
+  /\b(blush(?:es|ed)?|heart (races?|pounds?|flutters?)|pulse quicken|breath(?:es|ing)? (quicken|catch|hitch))\b/i,
+];
+
+const ACTION_PATTERNS = [
+  /\b(stab(?:s|bed)?|slash(?:es|ed)?|shoot[s]?|shot|explod(?:es|ed)?|punch(?:es|ed)?|run(?:s|ning)?|flee[s]?|fled|dodge[sd]?|dodge[sd]?|charge[sd]?|attack(?:s|ed)?|fight(?:s|ing)?|battle[sd]?)\b/i,
+  /\b(blood(?:y)?|wound(?:s|ed)?|injur(?:es|ed|y)?|sweat(?:s|ing)?|adrenaline|chaos|panic(?:s|ked)?|urgent(?:ly)?)\b/i,
+];
+
+const TRANSITION_PATTERNS = [
+  /\b(hours? later|days? later|weeks? later|the next (day|morning|night)|after (a while|some time)|meanwhile|time (passed?|skip(?:ped)?)|some time later|later that)\b/i,
+  /\b(arrived? (at|in)|returned? (to|home)|left (the|a)|moved? (to|out|away)|journey(?:ed)?|travelled?|woke up)\b/i,
+];
+
+/**
+ * Classifies the current AI response turn into one of four categories using
+ * lightweight pattern matching. No model call - heuristic only.
+ *
+ * Categories:
+ *   dialogue    - conversation-heavy, few scene changes (default)
+ *   action      - physical events, fast-paced, high detail
+ *   transition  - timeskip, location change, scene boundary
+ *   intimate    - relationship/ERP-focused content
+ *
+ * @param {string} lastMessage - The most recent AI message text.
+ * @returns {'dialogue'|'action'|'transition'|'intimate'}
+ */
+export function classifyTurn(lastMessage) {
+  if (!lastMessage) return 'dialogue';
+  // Intimate and transition are checked first - they are the most distinctive
+  // and should override the action classifier when both apply.
+  if (INTIMATE_PATTERNS.some((p) => p.test(lastMessage))) return 'intimate';
+  if (TRANSITION_PATTERNS.some((p) => p.test(lastMessage))) return 'transition';
+  if (ACTION_PATTERNS.some((p) => p.test(lastMessage))) return 'action';
+  return 'dialogue';
+}
+
+// Budget multiplier table per turn type and tier.
+// Multipliers > 1.0 shift tokens toward that tier; < 1.0 shift away.
+// Total budget is capped at the user's configured maximum so this only
+// redistributes the existing budget rather than inflating it.
+const BUDGET_MULTIPLIERS = {
+  //            longterm  session  scenes  arcs  profiles
+  dialogue: { longterm: 1.2, session: 0.8, scenes: 0.7, arcs: 1.0, profiles: 1.2 },
+  action: { longterm: 0.8, session: 1.3, scenes: 1.2, arcs: 1.0, profiles: 0.8 },
+  transition: { longterm: 1.0, session: 0.9, scenes: 1.0, arcs: 1.3, profiles: 1.0 },
+  intimate: { longterm: 0.9, session: 1.2, scenes: 1.0, arcs: 0.8, profiles: 1.3 },
+};
+
+/**
+ * Returns adjusted token budgets for each injection tier based on the
+ * current turn type. Base budgets come from the user's settings; multipliers
+ * shift allocation without increasing the total.
+ *
+ * Total is preserved: if shifting would exceed the sum of all base budgets,
+ * all tiers are scaled down proportionally so the total stays constant.
+ *
+ * @param {{
+ *   longterm_inject_budget?: number,
+ *   session_inject_budget?: number,
+ *   scene_inject_budget?: number,
+ *   arcs_inject_budget?: number,
+ *   profiles_inject_budget?: number,
+ * }} settings - The extension settings object.
+ * @param {'dialogue'|'action'|'transition'|'intimate'} turnType
+ * @returns {{ longterm: number, session: number, scenes: number, arcs: number, profiles: number }}
+ */
+export function adaptiveBudgets(settings, turnType) {
+  const base = {
+    longterm: settings.longterm_inject_budget ?? 500,
+    session: settings.session_inject_budget ?? 400,
+    scenes: settings.scene_inject_budget ?? 300,
+    arcs: settings.arcs_inject_budget ?? 400,
+    profiles: settings.profiles_inject_budget ?? 200,
+  };
+
+  const multipliers = BUDGET_MULTIPLIERS[turnType] ?? BUDGET_MULTIPLIERS.dialogue;
+  const totalBase = Object.values(base).reduce((s, v) => s + v, 0);
+
+  const adjusted = {};
+  let totalAdjusted = 0;
+  for (const [key, val] of Object.entries(base)) {
+    adjusted[key] = Math.round(val * multipliers[key]);
+    totalAdjusted += adjusted[key];
+  }
+
+  // If the adjusted total exceeds the original total, scale all tiers down
+  // proportionally so reallocation never creates tokens from nothing.
+  if (totalAdjusted > totalBase) {
+    const scale = totalBase / totalAdjusted;
+    for (const key of Object.keys(adjusted)) {
+      adjusted[key] = Math.round(adjusted[key] * scale);
+    }
+  }
+
+  return adjusted;
 }
