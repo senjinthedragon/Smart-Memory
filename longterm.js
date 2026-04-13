@@ -50,7 +50,12 @@ import {
   MEMORY_TYPES,
   META_KEY,
 } from './constants.js';
-import { applyGraphDefaults } from './graph-migration.js';
+import {
+  applyGraphDefaults,
+  loadCharacterEntityRegistry,
+  saveCharacterEntityRegistry,
+  resolveEntityNames,
+} from './graph-migration.js';
 import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
 import { parseExtractionOutput } from './parsers.js';
 import {
@@ -335,9 +340,26 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
     const maxMemories = settings.longterm_max_memories || 25;
     const merged = mergeMemories(existingMemories, newMemories, maxMemories);
+
+    // Resolve entity names to ids for any new memories that carried
+    // _raw_entity_names through the pipeline. The entity registry is loaded,
+    // updated in place, then persisted alongside the memories. messageIndex is
+    // the current chat tail - a best approximation of when this memory was created.
+    const context = getContext();
+    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+    const entityRegistry = loadCharacterEntityRegistry(characterName);
+    const existingKeys = new Set(existingMemories.map((m) => `${m.type}|${m.content}`));
+    for (const mem of merged) {
+      if (Array.isArray(mem._raw_entity_names)) {
+        resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
+      }
+    }
+    if (entityRegistry.length > 0) {
+      saveCharacterEntityRegistry(characterName, entityRegistry);
+    }
+
     // Count how many of the new candidates actually survived dedup and made it
     // into the merged set, regardless of whether older entries were displaced.
-    const existingKeys = new Set(existingMemories.map((m) => `${m.type}|${m.content}`));
     const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
     saveCharacterMemories(characterName, merged);
 

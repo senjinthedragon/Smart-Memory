@@ -48,7 +48,12 @@ import {
   PROMPT_KEY_SESSION,
   SESSION_TYPES,
 } from './constants.js';
-import { applyGraphDefaults } from './graph-migration.js';
+import {
+  applyGraphDefaults,
+  loadSessionEntityRegistry,
+  saveSessionEntityRegistry,
+  resolveEntityNames,
+} from './graph-migration.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import { parseSessionOutput } from './parsers.js';
 import { batchVerify } from './embeddings.js';
@@ -241,7 +246,23 @@ export async function extractSessionMemories(recentMessages) {
 
     const max = settings.session_max_memories ?? 30;
     const merged = deduplicateSession(existing, incoming, max);
+
+    // Resolve entity names to ids for any new memories that carried
+    // _raw_entity_names through the pipeline. The session entity registry is
+    // loaded from chatMetadata, updated in place, then persisted.
+    const context = getContext();
+    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+    const entityRegistry = loadSessionEntityRegistry();
     const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
+    for (const mem of merged) {
+      if (Array.isArray(mem._raw_entity_names)) {
+        resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
+      }
+    }
+    if (entityRegistry.length > 0) {
+      await saveSessionEntityRegistry(entityRegistry);
+    }
+
     const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
     await saveSessionMemories(merged);
 
