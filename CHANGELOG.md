@@ -62,6 +62,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slider, a manual "Regenerate Profiles Now" button, and a read-only display
   of the current profiles.
 
+- **Supersession indicators in UI**: retired memories are hidden by default in both
+  the session and long-term memory lists. A "Show retired memories" toggle reveals
+  them. Each retired entry shows a "retired" badge; the edit button is hidden for
+  retired entries (delete still permitted for manual cleanup).
+- **Contradiction warning badges**: memories with unresolved `contradicts` links now
+  show a yellow warning indicator with a tooltip directing the user to run the
+  continuity checker. Applies to both session and long-term memory lists.
+- **Entity registry panel**: a new collapsible "Entity Registry" section in the
+  settings panel lists all extracted entities (character, place, object, faction,
+  concept) with type badges, memory counts, and last-seen message index. Combined
+  from both the long-term (extension_settings) and session (chatMetadata) registries.
+- **Per-entity timeline view**: clicking the timeline button on any entity row opens
+  a CSS-only vertical timeline of memories involving that entity, ordered by
+  `valid_from`, with retired entries shown in muted style. The timeline toggles - a
+  second click collapses it.
+- **Hardware profile override setting**: a new "Hardware profile" select lets users
+  override the auto-detected profile. Auto-detection uses the configured memory
+  source: Ollama or WebLLM select Profile A (minimal model calls, heuristic-only
+  retrieval signals); Main API or OpenAI Compatible select Profile B (richer
+  extraction, all retrieval signals active). A descriptive label shows the active
+  profile and updates when the source changes.
+- **Three-layer summarization**:
+  - Layer 1: each scene entry now carries `source_memory_ids`. After session
+    extraction, newly-created memory ids are linked to the most recent scene via
+    `linkMemoriesToLastScene()` in `scenes.js`.
+  - Layer 2: when arc extraction marks an arc as resolved, `generateArcSummary()`
+    is called before removing the arc. It generates a 3-5 sentence narrative
+    paragraph from the arc content, recent scene summaries, and linked session
+    memories. Arc summaries are stored in `chatMetadata.arcSummaries` with
+    `source_scene_ids` and `source_memory_ids` fields for layer 3 use.
+  - Layer 3: a new `canon.js` module generates a stable per-character narrative
+    document (who they are, what has happened, current state) from resolved arc
+    summaries and high-importance long-term memories. Canon is stored in
+    `extension_settings` and persists across sessions. Once at least 2 arc
+    summaries exist, canon replaces the compaction summary in the short-term
+    injection slot. A "Generate Canon" button appears in the short-term panel.
+    Manual trigger only on local hardware.
+
 ### Changed
 
 - **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
