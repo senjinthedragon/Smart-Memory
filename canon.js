@@ -39,9 +39,10 @@ import {
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
+  saveSettingsDebounced,
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
-import { extension_settings, saveSettingsDebounced } from '../../../extensions.js';
+import { extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT } from './constants.js';
 import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
