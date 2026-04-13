@@ -104,6 +104,7 @@ import {
   clearArcs,
   deleteArc,
   clearArcSummaries,
+  loadArcSummaries,
 } from './arcs.js';
 import {
   checkContinuity,
@@ -113,6 +114,7 @@ import {
   loadAndInjectRepair,
 } from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
+import { clearCanon, generateCanon, injectCanon } from './canon.js';
 import {
   runGraphMigration,
   loadCharacterEntityRegistry,
@@ -201,6 +203,7 @@ const defaultSettings = {
   arcs_depth: 2,
   arcs_role: extension_prompt_roles.SYSTEM,
   arc_summary_response_length: 300,
+  canon_response_length: 600,
 
   // Away recap
   recap_enabled: true,
@@ -478,6 +481,8 @@ async function onCharacterMessageRendered() {
         if (compactionToast) toastr.clear(compactionToast);
         if (summary) {
           injectSummary(summary);
+          // Canon overwrites the slot when active.
+          injectCanon(characterName);
           updateShortTermUI(summary);
           updateTokenDisplay();
           setStatusMessage('Summary updated.');
@@ -736,7 +741,11 @@ async function onChatChanged() {
   const freshStart = isFreshStart();
 
   // Restore all injected context from the previous session.
+  // loadAndInjectSummary() writes the compaction summary to the short-term slot
+  // and returns the text for the UI. Canon then overwrites the slot when active
+  // (canon wins once enough arc summaries exist).
   const summary = loadAndInjectSummary();
+  injectCanon(characterName);
   updateShortTermUI(summary);
 
   injectMemories(characterName, freshStart);
@@ -1862,6 +1871,43 @@ function bindSettingsUI() {
     }
   });
 
+  $('#sm_generate_canon').on('click', async function () {
+    if (isCatchUpRunning()) return;
+    const characterName = getCurrentCharacterName();
+    if (!characterName) {
+      toastr.warning('No character loaded.', 'Smart Memory');
+      return;
+    }
+    if (loadArcSummaries().length < 2) {
+      toastr.warning(
+        'Canon requires at least 2 resolved arc summaries. Resolve more story arcs first.',
+        'Smart Memory',
+      );
+      return;
+    }
+    $(this).prop('disabled', true);
+    setStatusMessage('Generating canon summary...');
+    try {
+      const text = await generateCanon(characterName);
+      if (text) {
+        injectCanon(characterName);
+        $('#sm_canon_status').text(
+          `Canon updated: ${estimateTokens(text)} tokens, sourced from ${loadArcSummaries().length} arc summaries.`,
+        );
+        updateTokenDisplay();
+        setStatusMessage('Canon summary updated.');
+      } else {
+        setStatusMessage('');
+        toastr.warning('Canon generation returned no output.', 'Smart Memory');
+      }
+    } catch (err) {
+      showError('Canon generation', err);
+      setStatusMessage('');
+    } finally {
+      $(this).prop('disabled', false);
+    }
+  });
+
   // Allow manual edits to the summary textarea to take effect immediately.
   $('#sm_current_summary').on('input', function () {
     const context = getContext();
@@ -2030,6 +2076,7 @@ function bindSettingsUI() {
     if (!characterName) return;
     if (!confirm(`Clear all memories for "${characterName}"?`)) return;
     clearCharacterMemories(characterName);
+    clearCanon(characterName);
     saveSettingsDebounced();
     updateLongTermUI(characterName);
     injectMemories(null, true);
@@ -2685,9 +2732,10 @@ function bindSettingsUI() {
     )
       return;
 
-    // Clear long-term memories for the character.
+    // Clear long-term memories and canon for the character.
     if (characterName) {
       clearCharacterMemories(characterName);
+      clearCanon(characterName);
       saveSettingsDebounced();
     }
 

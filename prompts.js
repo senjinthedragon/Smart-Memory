@@ -40,6 +40,7 @@
  * buildLongtermConsolidationPrompt - evaluates a batch of unprocessed long-term entries against the consolidated base for one type
  * buildSessionConsolidationPrompt  - same as above but for session memory types (scene, revelation, development, detail)
  * buildProfileGenerationPrompt     - generates character_state, world_state, and relationship_matrix from stored memories
+ * buildCanonSummaryPrompt          - generates a stable per-character canon narrative from arc summaries and memories
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -599,5 +600,49 @@ Output ONLY one memory per line using this exact format (nothing else):
 
 FINAL RULE: Output ONLY [type:score:expiration] or [type:score:expiration:entity=...] lines. No headers. No intros. No explanations.
 If there is nothing new worth preserving, output exactly: NONE`
+  );
+}
+
+// ---- Canon summary ------------------------------------------------------
+
+/**
+ * Assembles the canon summary prompt for a character.
+ * Canon is a stable multi-paragraph narrative document covering who the
+ * character is, what has happened, and the current state of key relationships.
+ * It is sourced from arc summaries and high-importance long-term memories.
+ *
+ * @param {string} characterName - Active character name.
+ * @param {string[]} arcSummaries - Resolved arc summary paragraphs.
+ * @param {string} longtermMemories - High-importance long-term memories as [type] content lines.
+ * @returns {string} The complete prompt string.
+ */
+export function buildCanonSummaryPrompt(characterName, arcSummaries, longtermMemories) {
+  const charLabel = characterName || 'the character';
+  const arcSection =
+    arcSummaries.length > 0
+      ? `RESOLVED ARC SUMMARIES:\n${arcSummaries.map((s, i) => `Arc ${i + 1}: ${s}`).join('\n\n')}\n\n`
+      : 'RESOLVED ARC SUMMARIES: (none)\n\n';
+  const memSection = longtermMemories
+    ? `KEY MEMORIES:\n${longtermMemories}\n\n`
+    : 'KEY MEMORIES: (none)\n\n';
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `[CANON SUMMARY TASK - Do NOT roleplay. Write a narrative document only.]
+
+${arcSection}${memSection}Write a canon summary for "${charLabel}". This is a stable narrative document that captures the essential truth of what has happened in the story so far and who the character is now. Base everything strictly on the source material above - do not invent facts. Write in past tense, narrative style.
+
+Structure the output as three paragraphs with these headings:
+
+WHO THEY ARE:
+[A paragraph on the character's identity, core traits, relationships, and current emotional state based on what has happened]
+
+WHAT HAS HAPPENED:
+[A paragraph summarising the key events and arcs in the story so far]
+
+CURRENT STATE:
+[A paragraph on where things stand now - unresolved tensions, active goals, and where the story is heading]
+
+Output only the three labelled paragraphs. No preamble, no disclaimers.`
   );
 }

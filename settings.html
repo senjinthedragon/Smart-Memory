@@ -771,12 +771,21 @@
               placeholder="No summary yet. One will be generated automatically when the context threshold is reached."
             ></textarea>
           </div>
-          <div class="sm-block">
+          <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap">
             <button id="sm_summarize_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-brain"></i>
               <span>Summarize Now</span>
             </button>
+            <button
+              id="sm_generate_canon"
+              class="menu_button menu_button_icon"
+              title="Generate a stable canon narrative from resolved arc summaries and high-importance memories. Replaces the compaction summary once at least 2 arcs have been resolved."
+            >
+              <i class="fa-solid fa-book-open"></i>
+              <span>Generate Canon</span>
+            </button>
           </div>
+          <div id="sm_canon_status" class="sm_canon_status"></div>
         </div>
       </details>
 
