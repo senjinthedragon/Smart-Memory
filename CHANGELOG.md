@@ -45,6 +45,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional fields rather than failing silently when the order doesn't match a fixed
   regex pattern.
 
+- **Supersession detection**: when a new memory candidate describes a state
+  change on the same topic as an existing memory ("no longer", "moved to",
+  "became", etc.) rather than just paraphrasing it, the old memory is now
+  retired rather than treating the new one as a duplicate. Retired memories
+  are kept in storage for history but excluded from injection and extraction
+  context. The superseding memory records which old entry it replaced via
+  `supersedes` / `superseded_by` links.
+
+- **Character and world profiles**: a new `profiles.js` module generates
+  compact state snapshots (character goals and emotional state, world context,
+  relationship matrix) from stored memories in a single model call after each
+  extraction pass. Profiles are stored in `chatMetadata` and injected via a
+  dedicated slot. Stale profiles are regenerated non-blocking on chat load.
+  The settings panel includes an enable/disable toggle, a staleness threshold
+  slider, a manual "Regenerate Profiles Now" button, and a read-only display
+  of the current profiles.
+
 ### Changed
 
 - **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
