@@ -96,7 +96,15 @@ import {
   detectSceneBreakHeuristic,
   linkMemoriesToLastScene,
 } from './scenes.js';
-import { extractArcs, injectArcs, loadArcs, saveArcs, clearArcs, deleteArc } from './arcs.js';
+import {
+  extractArcs,
+  injectArcs,
+  loadArcs,
+  saveArcs,
+  clearArcs,
+  deleteArc,
+  clearArcSummaries,
+} from './arcs.js';
 import {
   checkContinuity,
   generateRepair,
@@ -192,6 +200,7 @@ const defaultSettings = {
   arcs_position: extension_prompt_types.IN_CHAT,
   arcs_depth: 2,
   arcs_role: extension_prompt_roles.SYSTEM,
+  arc_summary_response_length: 300,
 
   // Away recap
   recap_enabled: true,
@@ -2644,6 +2653,7 @@ function bindSettingsUI() {
     await clearSessionMemories();
     await clearSceneHistory();
     await clearArcs();
+    await clearArcSummaries();
     await clearProfiles();
     await context.saveMetadata();
 
@@ -2692,6 +2702,7 @@ function bindSettingsUI() {
     await clearSessionMemories();
     await clearSceneHistory();
     await clearArcs();
+    await clearArcSummaries();
     await clearProfiles();
     // Dismiss any open recap modal.
     $('#sm_recap_overlay').remove();

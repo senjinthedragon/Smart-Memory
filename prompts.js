@@ -32,6 +32,7 @@
  * SCENE_SUMMARY_PROMPT         - scene mini-summary prompt
  * ARC_EXTRACTION_SYSTEM        - system role string for arc extraction
  * buildArcExtractionPrompt     - assembles the arc extraction prompt
+ * buildArcSummaryPrompt        - assembles the arc resolution summary prompt
  * buildContinuityPrompt        - assembles the continuity check prompt
  * buildRepairPrompt            - assembles the corrective note prompt from a contradiction list
  * EXTRACTION_SYSTEM_PROMPT     - system role string for long-term extraction
@@ -291,6 +292,29 @@ If no significant arcs exist or nothing new, output: NONE`
 }
 
 // ---- Continuity check ---------------------------------------------------
+
+/**
+ * Assembles the arc summary prompt for a resolved story arc.
+ * The summary covers the full thread from opening through resolution.
+ *
+ * @param {string} arcContent - The resolved arc's content string.
+ * @param {string} sceneSummaries - Joined scene summaries that occurred during the arc.
+ * @param {string} memories - Key memories from the arc (formatted as [type] content lines).
+ * @returns {string} The complete prompt string.
+ */
+export function buildArcSummaryPrompt(arcContent, sceneSummaries, memories) {
+  const memSection = memories ? `\nKEY MEMORIES FROM THIS ARC:\n${memories}\n` : '';
+  const sceneSection = sceneSummaries ? `\nSCENE SUMMARIES:\n${sceneSummaries}\n` : '';
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `[ARC SUMMARY - Do NOT roleplay. Write a summary paragraph only.]
+
+Write a single paragraph summarising the story arc below from opening to resolution. Write in past tense, narrative style. Cover what happened, who was involved, and how it resolved. Be concise - aim for 3-5 sentences. Output only the paragraph, no labels or commentary.
+
+ARC: ${arcContent}${sceneSection}${memSection}`
+  );
+}
 
 /**
  * Assembles the continuity check prompt.
