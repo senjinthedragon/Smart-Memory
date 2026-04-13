@@ -118,6 +118,24 @@
         </label>
       </div>
 
+      <!-- Hardware profile override -->
+      <div class="sm-block">
+        <label>
+          Hardware profile
+          <span
+            class="sm-info"
+            data-tooltip="Profile A (local) minimizes model calls - entity extraction and profiles are bundled into existing passes. Profile B (hosted) enables richer extraction with separate passes. Auto detects based on your memory source: Ollama or WebLLM use A, Main API or OpenAI Compatible use B."
+            >ⓘ</span
+          >
+        </label>
+        <select id="sm_hardware_profile" class="text_pole">
+          <option value="auto">Auto-detect (recommended)</option>
+          <option value="a">Profile A - Local / Low-VRAM</option>
+          <option value="b">Profile B - Hosted / High-performance</option>
+        </select>
+        <div id="sm_hardware_profile_label" class="sm_hardware_profile_label"></div>
+      </div>
+
       <!-- Catch Up / Reset buttons -->
       <div class="sm-block" style="display: flex; gap: 6px; align-items: center">
         <button id="sm_catch_up" class="menu_button menu_button_icon" style="flex: 1">

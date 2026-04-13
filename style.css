@@ -652,6 +652,16 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* ── Hardware profile label ──────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_hardware_profile_label {
+  font-size: 0.8em;
+  color: var(--SmartReplyColor, #999);
+  opacity: 0.75;
+  margin-top: 4px;
+  font-style: italic;
+}
+
 /* ── Entity panel ────────────────────────────────────────────────────────── */
 
 #smart_memory_settings .sm_entity_panel {

@@ -217,6 +217,12 @@ const defaultSettings = {
   profiles_role: extension_prompt_roles.SYSTEM,
   profiles_template: '{{profiles}}',
 
+  // Hardware profile - 'auto' | 'a' | 'b'
+  // 'auto': detect from memory source (ollama/webllm -> A, main/openai_compat -> B)
+  // 'a': force Profile A (local/low-VRAM behaviour)
+  // 'b': force Profile B (hosted/high-performance behaviour)
+  hardware_profile: 'auto',
+
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
 };
@@ -295,6 +301,27 @@ let sceneBufferLastIndex = -1;
 /** Returns the settings object for this extension. */
 function getSettings() {
   return extension_settings[MODULE_NAME];
+}
+
+/**
+ * Returns the active hardware profile: 'a' (local/low-VRAM) or 'b' (hosted).
+ *
+ * When set to 'auto', detection is based on the configured memory source:
+ *   - ollama or webllm -> Profile A
+ *   - main or openai_compatible -> Profile B
+ *
+ * Can be overridden by the user in settings (hardware_profile: 'a' | 'b').
+ *
+ * @returns {'a'|'b'}
+ */
+export function getHardwareProfile() {
+  const s = getSettings();
+  const override = s.hardware_profile ?? 'auto';
+  if (override === 'a') return 'a';
+  if (override === 'b') return 'b';
+  // Auto-detect from source.
+  const source = s.source ?? memory_sources.main;
+  return source === memory_sources.ollama || source === memory_sources.webllm ? 'a' : 'b';
 }
 
 /** Returns the active character name, or null if no character is loaded. */
@@ -1652,6 +1679,8 @@ function bindSettingsUI() {
       if (source === memory_sources.ollama && !getSettings().ollama_model) {
         refreshOllamaModels();
       }
+      // Re-evaluate auto-detected hardware profile label when source changes.
+      updateProfileLabel();
     });
 
   updateSourceSections(currentSource);
@@ -1701,6 +1730,28 @@ function bindSettingsUI() {
       getSettings().openai_compat_model = $(this).val().trim();
       saveSettingsDebounced();
     });
+
+  // Hardware profile override
+  const PROFILE_LABELS = {
+    a: 'Profile A: local / low-VRAM - minimal model calls, heuristic-only signals.',
+    b: 'Profile B: hosted / high-performance - richer extraction, all retrieval signals active.',
+  };
+
+  /** Updates the descriptive label below the hardware profile select. */
+  function updateProfileLabel() {
+    const active = getHardwareProfile();
+    $('#sm_hardware_profile_label').text(PROFILE_LABELS[active] ?? '');
+  }
+
+  $('#sm_hardware_profile')
+    .val(s.hardware_profile ?? 'auto')
+    .on('change', function () {
+      getSettings().hardware_profile = $(this).val();
+      saveSettingsDebounced();
+      updateProfileLabel();
+    });
+
+  updateProfileLabel();
 
   // ---- Short-term (compaction) ----------------------------------------
   $('#sm_compaction_enabled')
