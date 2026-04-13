@@ -1038,14 +1038,17 @@ function updateSessionUI() {
     const retiredBadge = isRetired
       ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
       : '';
+    const supersededByLink = isRetired
+      ? `<button class="sm_superseded_by_link menu_button" data-superseded-by="${mem.superseded_by}" title="Jump to the memory that replaced this one">→ superseded by</button>`
+      : '';
     const conflictBadge = hasConflict
       ? `<span class="sm_memory_conflict_badge" title="This memory conflicts with ${mem.contradicts.length} other ${mem.contradicts.length === 1 ? 'memory' : 'memories'} - run the continuity checker to review"><i class="fa-solid fa-triangle-exclamation"></i></span>`
       : '';
 
     const $item = $(`
-            <div class="sm_memory_item${retiredClass}" data-index="${idx}" ${isRetired ? 'style="display:none"' : ''}>
+            <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${mem.id || ''}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
-                ${retiredBadge}${conflictBadge}
+                ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
                 <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
@@ -1056,6 +1059,24 @@ function updateSessionUI() {
             </div>
         `);
     $list.append($item);
+  });
+
+  // Jump-to-replacement handler for "→ superseded by" links.
+  $list.find('.sm_superseded_by_link').on('click', function () {
+    const targetId = $(this).data('superseded-by');
+    if (!targetId) return;
+    const $target = $list.find(`.sm_memory_item[data-memory-id="${targetId}"]`);
+    if (!$target.length) return;
+    // Ensure the target is visible - if it is also retired, make sure retired items are shown.
+    if (!$target.is(':visible')) {
+      $list.find('.sm_memory_item.sm_memory_retired').show();
+      $list
+        .find('.sm_toggle_retired')
+        .html('<i class="fa-solid fa-eye"></i> Hide retired memories');
+    }
+    $target[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $target.addClass('sm_memory_highlight');
+    setTimeout(() => $target.removeClass('sm_memory_highlight'), 1500);
   });
 
   $list.find('.sm_edit_session_memory').on('click', async function () {
@@ -1450,14 +1471,17 @@ function renderMemoriesList(memories, characterName) {
     const retiredBadge = isRetired
       ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
       : '';
+    const supersededByLink = isRetired
+      ? `<button class="sm_superseded_by_link menu_button" data-superseded-by="${mem.superseded_by}" title="Jump to the memory that replaced this one">→ superseded by</button>`
+      : '';
     const conflictBadge = hasConflict
       ? `<span class="sm_memory_conflict_badge" title="This memory conflicts with ${mem.contradicts.length} other ${mem.contradicts.length === 1 ? 'memory' : 'memories'} - run the continuity checker to review"><i class="fa-solid fa-triangle-exclamation"></i></span>`
       : '';
 
     const $item = $(`
-            <div class="sm_memory_item${retiredClass}" data-index="${idx}" ${isRetired ? 'style="display:none"' : ''}>
+            <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${mem.id || ''}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
-                ${retiredBadge}${conflictBadge}
+                ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
                 <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
@@ -1468,6 +1492,25 @@ function renderMemoriesList(memories, characterName) {
             </div>
         `);
     $list.append($item);
+  });
+
+  // Jump-to-replacement handler for "→ superseded by" links.
+  $list.find('.sm_superseded_by_link').on('click', function () {
+    const targetId = $(this).data('superseded-by');
+    if (!targetId) return;
+    const $target = $list.find(`.sm_memory_item[data-memory-id="${targetId}"]`);
+    if (!$target.length) return;
+    // Target is an active (non-retired) memory, so it should already be visible.
+    // If it happens to be retired too, show retired entries first.
+    if (!$target.is(':visible')) {
+      $list.find('.sm_memory_item.sm_memory_retired').show();
+      $list
+        .find('.sm_toggle_retired')
+        .html('<i class="fa-solid fa-eye"></i> Hide retired memories');
+    }
+    $target[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $target.addClass('sm_memory_highlight');
+    setTimeout(() => $target.removeClass('sm_memory_highlight'), 1500);
   });
 
   $list.find('.sm_edit_memory').on('click', function () {

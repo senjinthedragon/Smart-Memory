@@ -837,6 +837,32 @@
   cursor: help;
 }
 
+#smart_memory_settings .sm_superseded_by_link {
+  display: inline-block;
+  font-size: 0.7em;
+  font-weight: 500;
+  color: #7ecfff;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  margin-right: 2px;
+  cursor: pointer;
+  vertical-align: middle;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.8;
+}
+
+#smart_memory_settings .sm_superseded_by_link:hover {
+  opacity: 1;
+}
+
+#smart_memory_settings .sm_memory_highlight {
+  outline: 2px solid rgba(126, 207, 255, 0.6);
+  border-radius: 4px;
+  transition: outline 0.2s ease;
+}
+
 #smart_memory_settings .sm_memory_retired_badge {
   display: inline-block;
   font-size: 0.7em;
