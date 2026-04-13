@@ -26,8 +26,8 @@
  * The consuming modules (arcs.js, compaction.js, continuity.js, longterm.js,
  * scenes.js, session.js) import from here rather than defining their own copies.
  *
- * parseExtractionOutput     - parses [type:score:expiration] tagged lines from long-term extraction
- * parseSessionOutput        - parses [type:score:expiration] tagged lines from session extraction
+ * parseExtractionOutput     - parses [type:score:expiration:entity=...] tagged lines from long-term extraction
+ * parseSessionOutput        - parses [type:score:expiration:entity=...] tagged lines from session extraction
  * parseArcOutput            - parses [arc] / [resolved] tagged lines from arc extraction
  * parseContradictions       - parses contradiction lines from a continuity check response
  * formatSummary             - strips model analysis scaffolding and extracts the summary text
@@ -61,41 +61,60 @@ export function parseExtractionOutput(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
 
   const results = [];
-  // Matches lines like: [fact:2:permanent] The character is tall.
-  // Accepts optional spaces around ":" and after "]" for parser resilience.
-  // The importance score and expiration tag are optional.
-  const linePattern =
-    /^\[(fact|relationship|preference|event)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
+  // Capture type and all modifier fields as a single string, then parse them
+  // separately. This is resilient to local models reordering optional fields
+  // (score, expiration, entity=) or omitting some of them.
+  const linePattern = /^\[(fact|relationship|preference|event)([^\]]*)\]\s*(.+)$/gim;
   let match;
 
   while ((match = linePattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
-    const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const expiration = match[3] ? match[3].toLowerCase() : 'permanent';
-    const content = match[4].trim();
-    if (MEMORY_TYPES.includes(type) && content.length > 5) {
-      // New entries start as unprocessed - they will be evaluated against the
-      // consolidated base before being promoted.
-      results.push({
-        type,
-        content,
-        importance,
-        expiration,
-        ts: Date.now(),
-        consolidated: false,
-        // Graph fields - populated going forward; supersession links are
-        // added by the verifier pass once the candidate is confirmed.
-        id: generateMemoryId(),
-        source_messages: [],
-        entities: [],
-        time_scope: 'global',
-        valid_from: null,
-        valid_to: null,
-        supersedes: [],
-        superseded_by: null,
-        contradicts: [],
-      });
-    }
+    const modifiers = match[2]; // e.g. ":2:permanent" or ":2:permanent:entity=Senjin,Alex"
+    const content = match[3].trim();
+
+    if (!MEMORY_TYPES.includes(type) || content.length <= 5) continue;
+
+    // Extract optional score (first standalone 1/2/3 preceded by colon).
+    const importanceMatch = modifiers.match(/:\s*([123])\b/);
+    const importance = importanceMatch ? parseInt(importanceMatch[1], 10) : 2;
+
+    // Extract optional expiration keyword.
+    const expirationMatch = modifiers.match(/:\s*(scene|session|permanent)\b/i);
+    const expiration = expirationMatch ? expirationMatch[1].toLowerCase() : 'permanent';
+
+    // Extract optional entity names list. Stops at the next colon so reordering
+    // does not bleed into other fields.
+    const entityMatch = modifiers.match(/entity=([^:[\]]*)/i);
+    const rawEntityNames = entityMatch
+      ? entityMatch[1]
+          .split(',')
+          .map((n) => n.trim())
+          .filter((n) => n.length > 0)
+      : [];
+
+    // New entries start as unprocessed - they will be evaluated against the
+    // consolidated base before being promoted.
+    // _raw_entity_names is a transient pipeline field: resolved to entity ids
+    // and stripped before the memory reaches storage.
+    results.push({
+      type,
+      content,
+      importance,
+      expiration,
+      ts: Date.now(),
+      consolidated: false,
+      _raw_entity_names: rawEntityNames,
+      // Graph fields - supersession links are added by the verifier pass.
+      id: generateMemoryId(),
+      source_messages: [],
+      entities: [],
+      time_scope: 'global',
+      valid_from: null,
+      valid_to: null,
+      supersedes: [],
+      superseded_by: null,
+      contradicts: [],
+    });
   }
 
   return results;
@@ -119,38 +138,53 @@ export function parseExtractionOutput(text) {
 export function parseSessionOutput(text) {
   if (!text || text.trim().toUpperCase() === 'NONE') return [];
   const results = [];
-  // Matches lines like: [scene:2] Candlelit tavern, late evening.
-  const pattern =
-    /^\[(scene|revelation|development|detail)(?:\s*:\s*([123]))?(?:\s*:\s*(scene|session|permanent))?\]\s*(.+)$/gim;
+  // Same flexible bracket-content approach as parseExtractionOutput.
+  const pattern = /^\[(scene|revelation|development|detail)([^\]]*)\]\s*(.+)$/gim;
   let match;
   while ((match = pattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
-    const importance = match[2] ? parseInt(match[2], 10) : 2;
-    const expiration = match[3] ? match[3].toLowerCase() : 'session';
-    const content = match[4].trim();
-    if (SESSION_TYPES.includes(type) && content.length > 3) {
-      // New entries start as unprocessed - they will be evaluated against the
-      // consolidated base before being promoted.
-      results.push({
-        type,
-        content,
-        importance,
-        expiration,
-        ts: Date.now(),
-        consolidated: false,
-        // Graph fields - session memories use 'session' scope by default.
-        // Supersession links are added by the verifier pass if confirmed.
-        id: generateMemoryId(),
-        source_messages: [],
-        entities: [],
-        time_scope: 'session',
-        valid_from: null,
-        valid_to: null,
-        supersedes: [],
-        superseded_by: null,
-        contradicts: [],
-      });
-    }
+    const modifiers = match[2];
+    const content = match[3].trim();
+
+    if (!SESSION_TYPES.includes(type) || content.length <= 3) continue;
+
+    const importanceMatch = modifiers.match(/:\s*([123])\b/);
+    const importance = importanceMatch ? parseInt(importanceMatch[1], 10) : 2;
+
+    const expirationMatch = modifiers.match(/:\s*(scene|session|permanent)\b/i);
+    const expiration = expirationMatch ? expirationMatch[1].toLowerCase() : 'session';
+
+    const entityMatch = modifiers.match(/entity=([^:[\]]*)/i);
+    const rawEntityNames = entityMatch
+      ? entityMatch[1]
+          .split(',')
+          .map((n) => n.trim())
+          .filter((n) => n.length > 0)
+      : [];
+
+    // New entries start as unprocessed - they will be evaluated against the
+    // consolidated base before being promoted.
+    // _raw_entity_names is a transient pipeline field: resolved to entity ids
+    // and stripped before the memory reaches storage.
+    results.push({
+      type,
+      content,
+      importance,
+      expiration,
+      ts: Date.now(),
+      consolidated: false,
+      _raw_entity_names: rawEntityNames,
+      // Graph fields - session memories use 'session' scope by default.
+      id: generateMemoryId(),
+      source_messages: [],
+      entities: [],
+      time_scope: 'session',
+      valid_from: null,
+      valid_to: null,
+      supersedes: [],
+      superseded_by: null,
+      contradicts: [],
+    });
   }
   return results;
 }

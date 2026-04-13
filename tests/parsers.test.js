@@ -87,6 +87,53 @@ test('parseExtractionOutput: all entries have consolidated: false', () => {
   assert.ok(result.every((m) => m.consolidated === false));
 });
 
+test('parseExtractionOutput: all entries have graph fields', () => {
+  const result = parseExtractionOutput('[fact:2:permanent] The city wall is made of black stone.');
+  assert.equal(result.length, 1);
+  assert.equal(typeof result[0].id, 'string');
+  assert.ok(result[0].id.length > 0);
+  assert.deepEqual(result[0].source_messages, []);
+  assert.deepEqual(result[0].entities, []);
+  assert.equal(result[0].time_scope, 'global');
+  assert.equal(result[0].valid_from, null);
+  assert.equal(result[0].valid_to, null);
+  assert.deepEqual(result[0].supersedes, []);
+  assert.equal(result[0].superseded_by, null);
+  assert.deepEqual(result[0].contradicts, []);
+});
+
+test('parseExtractionOutput: parses entity names from :entity= field', () => {
+  const result = parseExtractionOutput(
+    "[fact:2:permanent:entity=Senjin,Alex] Senjin is Alex's older brother.",
+  );
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0]._raw_entity_names, ['Senjin', 'Alex']);
+});
+
+test('parseExtractionOutput: entity field is empty array when absent', () => {
+  const result = parseExtractionOutput('[fact:2:permanent] No named entities here.');
+  assert.deepEqual(result[0]._raw_entity_names, []);
+});
+
+test('parseExtractionOutput: entity field works in any bracket position', () => {
+  // entity= before score and expiration
+  const result = parseExtractionOutput(
+    '[relationship:entity=Elara,Kael:3:permanent] They fought side by side at the bridge.',
+  );
+  assert.equal(result.length, 1);
+  assert.equal(result[0].importance, 3);
+  assert.equal(result[0].expiration, 'permanent');
+  assert.deepEqual(result[0]._raw_entity_names, ['Elara', 'Kael']);
+});
+
+test('parseExtractionOutput: each entry gets a unique id', () => {
+  const result = parseExtractionOutput(
+    '[fact] The city wall is made of black stone.\n[relationship] She trusts him completely.',
+  );
+  assert.equal(result.length, 2);
+  assert.notEqual(result[0].id, result[1].id);
+});
+
 // =========================================================================
 // parseSessionOutput
 // =========================================================================
@@ -142,6 +189,31 @@ test('parseSessionOutput: minimum content length is > 3', () => {
 test('parseSessionOutput: skips unknown session types', () => {
   assert.equal(parseSessionOutput('[memory] Something happened here.').length, 0);
   assert.equal(parseSessionOutput('[fact] This is a longterm type.').length, 0);
+});
+
+test('parseSessionOutput: all entries have graph fields with session scope', () => {
+  const result = parseSessionOutput(
+    '[scene:2:scene] Candlelit tavern, late evening, rain outside.',
+  );
+  assert.equal(result.length, 1);
+  assert.equal(typeof result[0].id, 'string');
+  assert.deepEqual(result[0].source_messages, []);
+  assert.deepEqual(result[0].entities, []);
+  assert.equal(result[0].time_scope, 'session');
+  assert.equal(result[0].superseded_by, null);
+});
+
+test('parseSessionOutput: parses entity names from :entity= field', () => {
+  const result = parseSessionOutput(
+    '[revelation:3:permanent:entity=Senjin,Kael] Senjin revealed that Kael is his estranged brother.',
+  );
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0]._raw_entity_names, ['Senjin', 'Kael']);
+});
+
+test('parseSessionOutput: entity field is empty array when absent', () => {
+  const result = parseSessionOutput("[detail:2:session] The whiskey is Dragon's Fire brand.");
+  assert.deepEqual(result[0]._raw_entity_names, []);
 });
 
 // =========================================================================
