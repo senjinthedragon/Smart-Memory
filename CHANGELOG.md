@@ -31,6 +31,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entity registries, and writes the version marker. Subsequent loads are a fast
   no-op.
 
+- **Entity extraction**: the long-term and session extraction prompts now instruct
+  the model to tag memories with an optional `:entity=Name1,Name2` field inside the
+  bracket. Named characters, places, and objects encountered in chat are recorded in
+  a per-character entity registry (extension_settings) and a per-session entity
+  registry (chatMetadata). Each memory's `entities` field is populated with the
+  stable ids of the entities it references. The normalizer uses case-insensitive
+  exact matching against canonical names and recorded aliases, so variant spellings
+  seen across sessions collapse to the same entity over time.
+- **Entity-resilient tag parser**: `parseExtractionOutput` and `parseSessionOutput`
+  now capture all bracket modifiers as a single string and extract score, expiration,
+  and entity names independently. This is resilient to local models reordering
+  optional fields rather than failing silently when the order doesn't match a fixed
+  regex pattern.
+
 ### Changed
 
 - **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
