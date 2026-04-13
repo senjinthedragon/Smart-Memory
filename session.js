@@ -69,18 +69,24 @@ import {
 
 /**
  * Filters session memory candidates against existing entries, removing
- * near-duplicates and entries that fail basic quality checks.
+ * near-duplicates and entries that fail basic quality checks. Identifies
+ * supersessions (state-change updates that should retire an existing memory).
  *
  * All texts are embedded in a single batch API call so nomic-embed-text only
  * needs to load once per verification pass rather than once per candidate.
  * Falls back to Jaccard word-overlap when embeddings are unavailable.
  *
  * @param {Array} candidates - Newly extracted session memory objects.
- * @param {Array} existing   - Currently stored session memories.
- * @returns {Promise<Array>} Candidates that passed all checks.
+ * @param {Array} existing   - Active (non-retired) session memories.
+ * @returns {Promise<{verified: Array, superseded: Map<string, string>}>}
+ *   verified  - Candidates that passed dedup and should be added.
+ *   superseded - Map from candidate content (lowercase) to the id of the
+ *                existing memory it replaces.
  */
 async function verifySessionCandidates(candidates, existing) {
-  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return { verified: [], superseded: new Map() };
+  }
 
   const seen = new Set();
   const filtered = candidates.filter((mem) => {
@@ -92,16 +98,17 @@ async function verifySessionCandidates(candidates, existing) {
     return true;
   });
 
-  if (filtered.length === 0) return [];
+  if (filtered.length === 0) return { verified: [], superseded: new Map() };
 
-  const { passed } = await batchVerify(filtered, existing);
-  return filtered.filter((m) =>
+  const { passed, superseded } = await batchVerify(filtered, existing);
+  const verified = filtered.filter((m) =>
     passed.has(
       String(m.content || '')
         .toLowerCase()
         .trim(),
     ),
   );
+  return { verified, superseded };
 }
 
 // ---- Storage (chatMetadata) ---------------------------------------------
@@ -222,7 +229,14 @@ export async function extractSessionMemories(recentMessages) {
 
     if (!chatHistory.trim()) return 0;
 
-    const existing = loadSessionMemories();
+    const existingAll = loadSessionMemories();
+
+    // Separate active from retired memories. Verification and merge operate only
+    // on active entries; retired ones are preserved in storage for history but
+    // should not be compared against (or count toward caps during merge).
+    const existing = existingAll.filter((m) => !m.superseded_by);
+    const retiredMemories = existingAll.filter((m) => m.superseded_by);
+
     const existingText = existing.map((m) => `[${m.type}] ${m.content}`).join('\n');
 
     // Pass long-term memories so the model skips facts already stored there.
@@ -241,30 +255,86 @@ export async function extractSessionMemories(recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const incoming = await verifySessionCandidates(parseSessionOutput(response), existing);
+    const { verified: incoming, superseded: supersessionMap } = await verifySessionCandidates(
+      parseSessionOutput(response),
+      existing,
+    );
     if (incoming.length === 0) return 0;
 
     const max = settings.session_max_memories ?? 30;
     const merged = deduplicateSession(existing, incoming, max);
 
+    // Apply supersession links. For each candidate that supersedes an existing
+    // memory: mark the old memory as retired (superseded_by + valid_to) and
+    // link the new memory back to it (supersedes + valid_from).
+    const context = getContext();
+    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+
+    const newlyRetiredIds = new Set();
+    for (const [candText, oldId] of supersessionMap) {
+      const newMem = merged.find(
+        (m) =>
+          String(m.content || '')
+            .toLowerCase()
+            .trim() === candText,
+      );
+      const oldMem = existing.find((m) => m.id === oldId);
+
+      if (newMem && oldMem && !oldMem.superseded_by) {
+        if (!newMem.supersedes) newMem.supersedes = [];
+        if (!newMem.supersedes.includes(oldId)) newMem.supersedes.push(oldId);
+        newMem.valid_from = newMem.valid_from ?? messageIndex;
+
+        oldMem.superseded_by = newMem.id;
+        oldMem.valid_to = messageIndex;
+        newlyRetiredIds.add(oldId);
+
+        console.log(
+          `[SmartMemory] Session supersession: "${oldMem.content.slice(0, 60)}" retired by "${newMem.content.slice(0, 60)}"`,
+        );
+      }
+    }
+
+    // Remove newly retired entries from the active merged set.
+    const finalActive = merged.filter((m) => !newlyRetiredIds.has(m.id));
+
     // Resolve entity names to ids for any new memories that carried
     // _raw_entity_names through the pipeline. The session entity registry is
     // loaded from chatMetadata, updated in place, then persisted.
-    const context = getContext();
-    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
     const entityRegistry = loadSessionEntityRegistry();
     const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
-    for (const mem of merged) {
+    for (const mem of finalActive) {
       if (Array.isArray(mem._raw_entity_names)) {
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
       }
     }
+    // DEBUG - remove before release
+    console.log(
+      `[SmartMemory] Session entity registry (${entityRegistry.length} entities):`,
+      entityRegistry.map((e) => `${e.name} (${e.type}, ${e.memory_ids.length} memories)`),
+    );
+    const memoriesWithEntities = finalActive.filter((m) => m.entities?.length > 0);
+    if (memoriesWithEntities.length > 0) {
+      console.log(
+        `[SmartMemory] Session memories with entity links:`,
+        memoriesWithEntities.map(
+          (m) => `[${m.type}] ${m.content.slice(0, 60)} -> [${m.entities.join(', ')}]`,
+        ),
+      );
+    }
+    // END DEBUG
     if (entityRegistry.length > 0) {
       await saveSessionEntityRegistry(entityRegistry);
     }
 
-    const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
-    await saveSessionMemories(merged);
+    // Newly retired active memories move to the retired pool.
+    const updatedRetired = [
+      ...retiredMemories,
+      ...existing.filter((m) => newlyRetiredIds.has(m.id)),
+    ];
+
+    const added = finalActive.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
+    await saveSessionMemories([...finalActive, ...updatedRetired]);
 
     return added;
   } catch (err) {
@@ -309,8 +379,11 @@ export async function consolidateSessionMemories(force = false) {
   let dirty = false;
 
   for (const type of SESSION_TYPES) {
-    const base = memories.filter((m) => m.type === type && m.consolidated);
-    const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
+    // Exclude retired memories from consolidation - they've already been replaced.
+    const base = memories.filter((m) => m.type === type && m.consolidated && !m.superseded_by);
+    const unprocessed = memories.filter(
+      (m) => m.type === type && !m.consolidated && !m.superseded_by,
+    );
 
     if (!force && unprocessed.length < threshold) continue;
     if (unprocessed.length === 0) continue;
@@ -404,7 +477,9 @@ export async function injectSessionMemories(updateTelemetry = false) {
     return;
   }
 
-  const memories = loadSessionMemories();
+  // Only inject active memories - retired ones (superseded_by set) are kept in
+  // storage for history but must not appear in the prompt.
+  const memories = loadSessionMemories().filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
     return;

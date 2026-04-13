@@ -86,18 +86,24 @@ function incomingPriorityScore(mem) {
 
 /**
  * Filters a list of candidate memories against existing ones, removing
- * near-duplicates and entries that fail basic quality checks.
+ * near-duplicates and entries that fail basic quality checks. Identifies
+ * supersessions (state-change updates that should retire an existing memory).
  *
  * All texts are embedded in a single batch API call so nomic-embed-text only
  * needs to load once per verification pass rather than once per candidate.
  * Falls back to Jaccard word-overlap when embeddings are unavailable.
  *
  * @param {Array} candidates - Newly extracted memory objects to evaluate.
- * @param {Array} existing   - Currently stored memories to compare against.
- * @returns {Promise<Array>} Candidates that passed all checks.
+ * @param {Array} existing   - Active (non-retired) memories to compare against.
+ * @returns {Promise<{verified: Array, superseded: Map<string, string>}>}
+ *   verified  - Candidates that passed dedup and should be added.
+ *   superseded - Map from candidate content (lowercase) to the id of the
+ *                existing memory it replaces.
  */
 async function verifyLongtermCandidates(candidates, existing) {
-  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return { verified: [], superseded: new Map() };
+  }
 
   const bannedPhrases = ['maybe', 'might be', 'possibly', 'i think', 'perhaps', 'seems like'];
   const seen = new Set();
@@ -114,17 +120,18 @@ async function verifyLongtermCandidates(candidates, existing) {
     return true;
   });
 
-  if (filtered.length === 0) return [];
+  if (filtered.length === 0) return { verified: [], superseded: new Map() };
 
   // Batch-embed all candidates and existing memories in one API call.
-  const { passed } = await batchVerify(filtered, existing);
-  return filtered.filter((m) =>
+  const { passed, superseded } = await batchVerify(filtered, existing);
+  const verified = filtered.filter((m) =>
     passed.has(
       String(m.content || '')
         .toLowerCase()
         .trim(),
     ),
   );
+  return { verified, superseded };
 }
 
 // ---- Storage helpers ----------------------------------------------------
@@ -316,7 +323,15 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     if (!chatHistory.trim()) return 0;
 
     const existingMemories = loadCharacterMemories(characterName);
-    const existingText = formatMemoriesForPrompt(existingMemories);
+
+    // Separate active from retired memories. Verification and merge operate only
+    // on active entries; retired ones are preserved in storage for history but
+    // should not be compared against (or count toward type caps during merge).
+    const activeMemories = existingMemories.filter((m) => !m.superseded_by);
+    const retiredMemories = existingMemories.filter((m) => m.superseded_by);
+
+    // Only show active memories as context in the extraction prompt.
+    const existingText = formatMemoriesForPrompt(activeMemories);
 
     const response = await generateMemoryExtract(
       buildExtractionPrompt(chatHistory, existingText, characterName),
@@ -337,7 +352,10 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       return 0;
     }
 
-    const newMemories = await verifyLongtermCandidates(parsed, existingMemories);
+    const { verified: newMemories, superseded: supersessionMap } = await verifyLongtermCandidates(
+      parsed,
+      activeMemories,
+    );
     if (newMemories.length === 0) {
       console.log(
         `[SmartMemory] All ${parsed.length} extracted candidates were duplicates of existing memories.`,
@@ -346,17 +364,55 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     }
 
     const maxMemories = settings.longterm_max_memories || 25;
-    const merged = mergeMemories(existingMemories, newMemories, maxMemories);
+    // Merge new memories into the active set. Result includes both existing
+    // active entries and the newly accepted candidates.
+    const merged = mergeMemories(activeMemories, newMemories, maxMemories);
+
+    // Apply supersession links. For each candidate that supersedes an existing
+    // memory: mark the old memory as retired (superseded_by + valid_to) and
+    // link the new memory back to it (supersedes + valid_from).
+    const context = getContext();
+    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+
+    const newlyRetiredIds = new Set();
+    for (const [candText, oldId] of supersessionMap) {
+      // Find the new memory in the merged active set.
+      const newMem = merged.find(
+        (m) =>
+          String(m.content || '')
+            .toLowerCase()
+            .trim() === candText,
+      );
+      // Find the old memory in the active set (it may not be in merged if evicted).
+      const oldMem = activeMemories.find((m) => m.id === oldId);
+
+      if (newMem && oldMem && !oldMem.superseded_by) {
+        // Link new -> old.
+        if (!newMem.supersedes) newMem.supersedes = [];
+        if (!newMem.supersedes.includes(oldId)) newMem.supersedes.push(oldId);
+        newMem.valid_from = newMem.valid_from ?? messageIndex;
+
+        // Retire old memory.
+        oldMem.superseded_by = newMem.id;
+        oldMem.valid_to = messageIndex;
+        newlyRetiredIds.add(oldId);
+
+        console.log(
+          `[SmartMemory] Supersession: "${oldMem.content.slice(0, 60)}" retired by "${newMem.content.slice(0, 60)}"`,
+        );
+      }
+    }
+
+    // Remove newly retired entries from the active merged set - they move to
+    // the retired pool so they stay in storage but are excluded from injection.
+    const finalActive = merged.filter((m) => !newlyRetiredIds.has(m.id));
 
     // Resolve entity names to ids for any new memories that carried
     // _raw_entity_names through the pipeline. The entity registry is loaded,
-    // updated in place, then persisted alongside the memories. messageIndex is
-    // the current chat tail - a best approximation of when this memory was created.
-    const context = getContext();
-    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+    // updated in place, then persisted alongside the memories.
     const entityRegistry = loadCharacterEntityRegistry(characterName);
-    const existingKeys = new Set(existingMemories.map((m) => `${m.type}|${m.content}`));
-    for (const mem of merged) {
+    const existingKeys = new Set(activeMemories.map((m) => `${m.type}|${m.content}`));
+    for (const mem of finalActive) {
       if (Array.isArray(mem._raw_entity_names)) {
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
       }
@@ -366,7 +422,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       `[SmartMemory] Entity registry for "${characterName}" (${entityRegistry.length} entities):`,
       entityRegistry.map((e) => `${e.name} (${e.type}, ${e.memory_ids.length} memories)`),
     );
-    const memoriesWithEntities = merged.filter((m) => m.entities?.length > 0);
+    const memoriesWithEntities = finalActive.filter((m) => m.entities?.length > 0);
     if (memoriesWithEntities.length > 0) {
       console.log(
         `[SmartMemory] Memories with entity links:`,
@@ -380,13 +436,20 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       saveCharacterEntityRegistry(characterName, entityRegistry);
     }
 
-    // Count how many of the new candidates actually survived dedup and made it
-    // into the merged set, regardless of whether older entries were displaced.
-    const added = merged.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
-    saveCharacterMemories(characterName, merged);
+    // Newly retired active memories are moved to the retired pool.
+    const updatedRetired = [
+      ...retiredMemories,
+      ...activeMemories.filter((m) => newlyRetiredIds.has(m.id)),
+    ];
+
+    // Count new entries that made it into the final active set.
+    const added = finalActive.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
+
+    // Save: final active set + all retired memories (history is preserved).
+    saveCharacterMemories(characterName, [...finalActive, ...updatedRetired]);
 
     console.log(
-      `[SmartMemory] Saved ${added} new memories for "${characterName}". Total: ${merged.length}`,
+      `[SmartMemory] Saved ${added} new memories for "${characterName}". Active: ${finalActive.length}, Retired: ${updatedRetired.length}`,
     );
     return added;
   } catch (err) {
@@ -457,8 +520,12 @@ export async function consolidateMemories(characterName, force = false) {
   let dirty = false;
 
   for (const type of MEMORY_TYPES) {
-    const base = memories.filter((m) => m.type === type && m.consolidated);
-    const unprocessed = memories.filter((m) => m.type === type && !m.consolidated);
+    // Exclude retired memories from consolidation - they've already been
+    // replaced and should not be re-evaluated or re-injected.
+    const base = memories.filter((m) => m.type === type && m.consolidated && !m.superseded_by);
+    const unprocessed = memories.filter(
+      (m) => m.type === type && !m.consolidated && !m.superseded_by,
+    );
 
     const threshold = thresholds[type] ?? DEFAULT_CONSOLIDATION_THRESHOLDS.fact;
     if (!force && unprocessed.length < threshold) continue;
@@ -543,7 +610,9 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
     return;
   }
 
-  const memories = loadCharacterMemories(characterName);
+  // Only inject active memories - retired ones (superseded_by set) are kept in
+  // storage for history but must not appear in the prompt.
+  const memories = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
     return;
