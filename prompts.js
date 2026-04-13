@@ -38,6 +38,13 @@
  * buildExtractionPrompt        - assembles the long-term memory extraction prompt
  * buildLongtermConsolidationPrompt - evaluates a batch of unprocessed long-term entries against the consolidated base for one type
  * buildSessionConsolidationPrompt  - same as above but for session memory types (scene, revelation, development, detail)
+ *
+ * Entity tagging: both extraction prompts instruct the model to append an
+ * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
+ * that involves a named character, place, or object. The suffix is parsed
+ * and normalised to entity registry ids by the extraction wiring in
+ * longterm.js and session.js. It is intentionally optional so the model can
+ * omit it when no named entities are relevant rather than hallucinating names.
  */
 
 // Prepended to every extraction prompt to prevent the local model from
@@ -217,12 +224,16 @@ EXPIRATION CLASS (choose one):
 - session    - useful for this current chat/session
 - permanent  - should persist as a durable memory
 
+ENTITY TAGGING (optional but encouraged):
+If the memory involves specific named characters, places, or objects, append :entity=Name1,Name2 inside the bracket. Use the exact names as they appear in the conversation. Omit this field entirely if no named entities are relevant - do not invent names.
+
 One item per line, exact format:
 [scene:2:scene] We are in a candlelit tavern, late evening, rain outside.
-[detail:3:permanent] The character's horse is named Ember, a chestnut mare.
+[detail:3:permanent:entity=Ember] The character's horse is named Ember, a chestnut mare.
+[revelation:3:permanent:entity=Senjin,Kael] Senjin revealed that Kael is his estranged brother.
 [revelation:1:session] He mentioned in passing that it rained last week.
 
-FINAL RULE: Output ONLY [type:score:expiration] lines. No headers. No intros. No explanations.
+FINAL RULE: Output ONLY [type:score:expiration] or [type:score:expiration:entity=...] lines. No headers. No intros. No explanations.
 If nothing new, output exactly: NONE`
   );
 }
@@ -481,13 +492,17 @@ Also classify expiration:
 - session    - useful for this current chat/session, but may fade
 - permanent  - durable fact that should persist long-term
 
+ENTITY TAGGING (optional but encouraged):
+If the memory involves specific named characters, places, or objects, append :entity=Name1,Name2 inside the bracket. Use the exact names as they appear in the conversation. Omit this field entirely if no named entities are relevant - do not invent names.
+
 Output ONLY one memory per line using this exact format (nothing else):
 [fact:2:permanent] The character's name is Elara and she works as a blacksmith.
-[relationship:3:permanent] We have developed a close friendship after helping each other escape the dungeon.
+[relationship:3:permanent:entity=Elara] We have developed a close friendship after helping each other escape the dungeon.
+[event:2:permanent:entity=Elara,Kael] Elara and Kael fought side by side at the bridge.
 [preference:2:session] The user enjoys slow-burn romance and witty banter.
 [event:1:scene] They briefly discussed the weather near the harbour.
 
-FINAL RULE: Output ONLY [type:score:expiration] lines. No headers. No intros. No explanations.
+FINAL RULE: Output ONLY [type:score:expiration] or [type:score:expiration:entity=...] lines. No headers. No intros. No explanations.
 If there is nothing new worth preserving, output exactly: NONE`
   );
 }
