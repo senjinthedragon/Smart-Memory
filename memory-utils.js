@@ -175,6 +175,11 @@ export function prioritizeMemories(memories) {
  * @returns {number}
  */
 export function memoryUtilityScore(mem, keywordFreq = null) {
+  // Retired memories (superseded by a newer fact) should always sort below active
+  // ones so they are the first candidates for eviction. A near-zero score ensures
+  // they never crowd out active memories during priority-based trimming.
+  if (mem.superseded_by) return 0.001;
+
   const expiration = EXPIRATION_WEIGHT[normalizeExpiration(mem.expiration)] ?? 2;
   const importance = numberOr(mem.importance, 2);
   const confidence = Math.max(0, Math.min(1, numberOr(mem.confidence, 0.7)));
