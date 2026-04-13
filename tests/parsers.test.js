@@ -7,6 +7,7 @@ import {
   parseContradictions,
   formatSummary,
   detectSceneBreakHeuristic,
+  parseProfileOutput,
 } from '../parsers.js';
 
 // =========================================================================
@@ -452,4 +453,88 @@ test('detectSceneBreakHeuristic: does not trigger on bare word "later"', () => {
   // "later" alone should not match - requires context like "hours later" or "later that day"
   assert.equal(detectSceneBreakHeuristic('We can talk about that later.'), false);
   assert.equal(detectSceneBreakHeuristic('She would figure it out later.'), false);
+});
+
+// =========================================================================
+// parseProfileOutput
+// =========================================================================
+
+test('parseProfileOutput: returns null for empty/null input', () => {
+  assert.equal(parseProfileOutput(''), null);
+  assert.equal(parseProfileOutput(null), null);
+  assert.equal(parseProfileOutput(undefined), null);
+});
+
+test('parseProfileOutput: returns null when no section tags found', () => {
+  assert.equal(parseProfileOutput('Goals: do stuff\nLocation: a forest'), null);
+});
+
+test('parseProfileOutput: parses all three sections', () => {
+  const input = `<character_state>
+Goals: Find the lost key
+Emotional posture: anxious
+Active fears: betrayal by allies
+Loyalties: loyal to Senjin
+</character_state>
+
+<world_state>
+Location: Foggy harbour at dusk
+Threats: city guard closing in
+Unresolved: missing shipment
+Time: late evening, two days after the heist
+</world_state>
+
+<relationship_matrix>
+Senjin (character): trusted partner, mutual respect [confidence: 0.9]
+</relationship_matrix>`;
+
+  const result = parseProfileOutput(input);
+  assert.ok(result !== null);
+  assert.ok(result.character_state.includes('Find the lost key'));
+  assert.ok(result.world_state.includes('Foggy harbour'));
+  assert.ok(result.relationship_matrix.includes('Senjin'));
+});
+
+test('parseProfileOutput: tolerates partial output (missing world_state)', () => {
+  const input = `<character_state>
+Goals: survive
+Emotional posture: stable
+Active fears: none identified
+Loyalties: to the cause
+</character_state>
+
+<relationship_matrix>
+Alex (character): close friend [confidence: 0.8]
+</relationship_matrix>`;
+
+  const result = parseProfileOutput(input);
+  assert.ok(result !== null);
+  assert.ok(result.character_state.includes('survive'));
+  assert.equal(result.world_state, '');
+  assert.ok(result.relationship_matrix.includes('Alex'));
+});
+
+test('parseProfileOutput: tag matching is case-insensitive', () => {
+  const input = `<CHARACTER_STATE>
+Goals: test
+Emotional posture: calm
+Active fears: none
+Loyalties: none
+</CHARACTER_STATE>`;
+  const result = parseProfileOutput(input);
+  assert.ok(result !== null);
+  assert.ok(result.character_state.includes('test'));
+});
+
+test('parseProfileOutput: trims whitespace from sections', () => {
+  const input = `<character_state>
+  Goals: trimmed
+  Emotional posture: neutral
+  Active fears: none
+  Loyalties: none
+</character_state>`;
+  const result = parseProfileOutput(input);
+  assert.ok(result !== null);
+  // Content should be trimmed but not empty
+  assert.ok(result.character_state.length > 0);
 });

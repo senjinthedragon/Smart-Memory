@@ -32,6 +32,7 @@
  * parseContradictions       - parses contradiction lines from a continuity check response
  * formatSummary             - strips model analysis scaffolding and extracts the summary text
  * detectSceneBreakHeuristic - pattern-based scene break check, no model call required
+ * parseProfileOutput        - extracts character_state, world_state, and relationship_matrix from profile generation output
  *
  * All new memory objects produced by the parse functions carry the full graph
  * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
@@ -329,6 +330,50 @@ export function formatSummary(raw) {
     return partialMatch[1].trim();
   }
   return result;
+}
+
+// ---- Profile output parsing ---------------------------------------------
+
+/**
+ * Extracts character_state, world_state, and relationship_matrix from the
+ * model's profile generation output. Looks for XML-style section tags:
+ *
+ *   <character_state>...</character_state>
+ *   <world_state>...</world_state>
+ *   <relationship_matrix>...</relationship_matrix>
+ *
+ * Returns null if none of the three sections are present (bad output).
+ * Partial output (one or two sections found) is returned with the missing
+ * sections as empty strings - a partial profile is better than no profile.
+ *
+ * @param {string} response - Raw model output from buildProfileGenerationPrompt.
+ * @returns {{character_state: string, world_state: string, relationship_matrix: string}|null}
+ */
+export function parseProfileOutput(response) {
+  if (!response) return null;
+
+  /**
+   * Extracts the content between a pair of XML-style tags.
+   * @param {string} tag
+   * @returns {string|null}
+   */
+  function extractSection(tag) {
+    const m = response.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+    return m ? m[1].trim() : null;
+  }
+
+  const character_state = extractSection('character_state');
+  const world_state = extractSection('world_state');
+  const relationship_matrix = extractSection('relationship_matrix');
+
+  // All three missing = unusable response.
+  if (!character_state && !world_state && !relationship_matrix) return null;
+
+  return {
+    character_state: character_state ?? '',
+    world_state: world_state ?? '',
+    relationship_matrix: relationship_matrix ?? '',
+  };
 }
 
 // ---- Scene break heuristics ---------------------------------------------
