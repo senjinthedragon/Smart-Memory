@@ -651,7 +651,7 @@ async function onCharacterMessageRendered() {
           }
           // Inject once after extraction (and any consolidation) - this is the
           // one call per AI response turn where telemetry should be updated.
-          injectMemories(characterName, isFreshStart(), true);
+          await injectMemories(characterName, isFreshStart(), true);
           updateLongTermUI(characterName);
           saveSettingsDebounced();
           total += count;
@@ -749,7 +749,7 @@ async function onChatChanged() {
   injectCanon(characterName);
   updateShortTermUI(summary);
 
-  injectMemories(characterName, freshStart);
+  await injectMemories(characterName, freshStart);
 
   await injectSessionMemories();
   injectSceneHistory();
@@ -1561,7 +1561,7 @@ function renderMemoriesList(memories, characterName) {
       memories[idx].content = newContent;
       saveCharacterMemories(characterName, memories);
       saveSettingsDebounced();
-      injectMemories(characterName, isFreshStart());
+      injectMemories(characterName, isFreshStart()).catch(console.error);
       renderMemoriesList(loadCharacterMemories(characterName), characterName);
     });
 
@@ -1610,7 +1610,7 @@ function renderMemoriesList(memories, characterName) {
     });
     saveCharacterMemories(characterName, memories);
     saveSettingsDebounced();
-    injectMemories(characterName, isFreshStart());
+    injectMemories(characterName, isFreshStart()).catch(console.error);
     renderMemoriesList(loadCharacterMemories(characterName), characterName);
   });
 }
@@ -1987,7 +1987,7 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().longterm_enabled = $(this).prop('checked');
       saveSettingsDebounced();
-      injectMemories(getCurrentCharacterName(), isFreshStart());
+      injectMemories(getCurrentCharacterName(), isFreshStart()).catch(console.error);
     });
 
   $('#sm_longterm_consolidate')
@@ -2101,7 +2101,7 @@ function bindSettingsUI() {
   $('#sm_fresh_start').on('change', async function () {
     const val = $(this).prop('checked');
     await setFreshStart(val);
-    injectMemories(getCurrentCharacterName(), val);
+    await injectMemories(getCurrentCharacterName(), val);
   });
 
   $('#sm_extract_now').on('click', async function () {
@@ -2141,7 +2141,7 @@ function bindSettingsUI() {
     clearCanon(characterName);
     saveSettingsDebounced();
     updateLongTermUI(characterName);
-    injectMemories(null, true);
+    injectMemories(null, true).catch(console.error);
     setStatusMessage('Memories cleared.');
   });
 
@@ -2595,7 +2595,7 @@ function bindSettingsUI() {
         // Re-inject after each chunk so the token display reflects what is
         // actually stored, not just what was injected before catch-up started.
         if (settings.longterm_enabled && characterName) {
-          injectMemories(characterName, isFreshStart());
+          await injectMemories(characterName, isFreshStart());
         }
         if (settings.session_enabled) {
           await injectSessionMemories();
@@ -2713,7 +2713,7 @@ function bindSettingsUI() {
 
       // Re-inject and refresh UI for everything processed so far, whether the
       // run completed or was cancelled partway through.
-      injectMemories(characterName, isFreshStart());
+      await injectMemories(characterName, isFreshStart());
       injectSessionMemories();
       injectSceneHistory();
       injectArcs();
@@ -2840,7 +2840,7 @@ function bindSettingsUI() {
 
     // Clear all injection slots.
     loadAndInjectSummary();
-    injectMemories(characterName, isFreshStart());
+    await injectMemories(characterName, isFreshStart());
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
@@ -3171,7 +3171,7 @@ jQuery(async function () {
           await extractAndStoreMemories(characterName, recentLongTerm);
           await extractSessionMemories(recentSession);
           await extractArcs(recentArcs);
-          injectMemories(characterName, isFreshStart());
+          await injectMemories(characterName, isFreshStart());
           await injectSessionMemories();
           injectArcs();
           updateLongTermUI(characterName);

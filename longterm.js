@@ -560,7 +560,10 @@ export async function consolidateMemories(characterName, force = false) {
 
       // Reconcile promoted entries with the base so "updated" base entries
       // replace older variants instead of being appended as duplicates.
-      const reconciledType = reconcileTypeEntries(base, promoted, 0.7, [...base, ...unprocessed]);
+      const reconciledType = await reconcileTypeEntries(base, promoted, 0.7, [
+        ...base,
+        ...unprocessed,
+      ]);
 
       // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
@@ -614,7 +617,7 @@ export async function consolidateMemories(characterName, force = false) {
  *   Only pass true from the post-extraction path (one real AI response turn). All other callers
  *   (chat load, settings change, etc.) leave telemetry unchanged to avoid inflating the signal.
  */
-export function injectMemories(characterName, freshStart = false, updateTelemetry = false) {
+export async function injectMemories(characterName, freshStart = false, updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.longterm_enabled || freshStart || !characterName) {
@@ -646,7 +649,7 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
     const lastMessages = (context.chat ?? []).slice(-2);
     const turnMentions = extractTurnEntityMentions(lastMessages);
     const entityRegistry = loadCharacterEntityRegistry(characterName);
-    trimmed = hybridPrioritize(memories, { turnMentions, entityRegistry });
+    trimmed = await hybridPrioritize(memories, { turnMentions, entityRegistry });
   } else {
     trimmed = prioritizeMemories(memories);
   }

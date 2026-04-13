@@ -31,6 +31,8 @@
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
  */
 
+import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
+
 function tokenSet(text) {
   return new Set((text || '').toLowerCase().split(/\s+/).filter(Boolean));
 }
@@ -306,13 +308,27 @@ export function buildCurrentSceneStateBlock(memories) {
  * @param {Array<{type: string, content: string, ts?: number}>} [timelinePool=[]] - Candidate entries for timestamp inference.
  * @returns {Array} The reconciled array (new array, base is not mutated).
  */
-export function reconcileTypeEntries(base, promoted, threshold, timelinePool = []) {
+export async function reconcileTypeEntries(base, promoted, threshold, timelinePool = []) {
   const sourcePool = timelinePool.length > 0 ? timelinePool : base;
+
+  // Batch-embed all unique content strings up front so similarity checks use
+  // cosine distance rather than Jaccard word-overlap. Falls back to Jaccard
+  // per-pair when the embedding call fails or returns no vector for a text.
+  const allTexts = [...new Set([...base, ...promoted, ...sourcePool].map((m) => m.content))];
+  const vectorMap = await getEmbeddingBatch(allTexts);
+
+  const simFn = (a, b) => {
+    const va = vectorMap.get(a);
+    const vb = vectorMap.get(b);
+    if (va && vb) return cosineSimilarity(va, vb);
+    return jaccardSimilarity(a, b);
+  };
+
   const reconciled = [...base];
   for (const mem of promoted) {
     const idx = reconciled.findIndex((ex) => {
       if (ex.type !== mem.type) return false;
-      return jaccardSimilarity(mem.content, ex.content) > threshold;
+      return simFn(mem.content, ex.content) > threshold;
     });
 
     // Default to now so the entry always has a valid timestamp even if no
@@ -320,11 +336,11 @@ export function reconcileTypeEntries(base, promoted, threshold, timelinePool = [
     let inferredTs = Number.isFinite(mem.ts) ? mem.ts : Date.now();
     let bestScore = 0;
     // Require a minimum similarity before accepting an inferred timestamp - a
-    // near-random match (score ~0.05) is not a meaningful source for the timeline.
+    // near-random match is not a meaningful source for the timeline.
     const MIN_TS_INFERENCE_SCORE = 0.3;
     for (const src of sourcePool) {
       if (src.type !== mem.type) continue;
-      const score = jaccardSimilarity(mem.content, src.content);
+      const score = simFn(mem.content, src.content);
       if (score > bestScore && score >= MIN_TS_INFERENCE_SCORE && Number.isFinite(src.ts)) {
         bestScore = score;
         inferredTs = src.ts;
@@ -441,16 +457,13 @@ const EXPIRATION_PROXIMITY = { scene: 2, session: 1, permanent: 0 };
 /**
  * Computes the weighted hybrid retrieval score for a single memory.
  *
- * Combines four synchronous signals:
+ * Combines four signals:
  *   w1 * utility_score       - existing importance/durability/retrieval composite
  *   w2 * entity_overlap      - 0-1, fraction of memory entities mentioned in the current turn
- *   w3 * arc_relevance       - 0-1, Jaccard overlap with any open arc content
+ *   w3 * arc_relevance       - 0-1, cosine similarity to the most relevant open arc
+ *                              (pre-computed by hybridPrioritize; falls back to Jaccard)
  *   w4 * temporal_proximity  - 0-1, how time-scoped the memory is relative to the current moment
  *   - contradiction_penalty  - flat deduction when the memory has unresolved contradictions
- *
- * Semantic similarity (w5) is intentionally omitted here because it requires
- * an async embedding call. The calling code can pre-compute and inject it as
- * part of the utility score or a future extension to this context.
  *
  * @param {Object} mem - Memory object.
  * @param {{
@@ -458,13 +471,21 @@ const EXPIRATION_PROXIMITY = { scene: 2, session: 1, permanent: 0 };
  *   turnMentions?: Set<string>,
  *   entityRegistry?: Array<{id: string, name: string, aliases?: string[]}>,
  *   arcs?: Array<{content: string}>,
- * }} [context={}] - Optional per-turn signals for the extra scoring components.
+ *   arcSimilarities?: Map<string, number>,
+ * }} [context={}] - Optional per-turn signals. arcSimilarities maps memory id to
+ *   pre-computed max cosine similarity against all open arcs - provided by hybridPrioritize.
  * @returns {number}
  */
 export function hybridScore(mem, context = {}) {
   if (mem.superseded_by) return 0.001;
 
-  const { keywordFreq = null, turnMentions = null, entityRegistry = null, arcs = null } = context;
+  const {
+    keywordFreq = null,
+    turnMentions = null,
+    entityRegistry = null,
+    arcs = null,
+    arcSimilarities = null,
+  } = context;
 
   // w1: existing utility score (0-500+ range, dominates when other signals are absent)
   const utility = memoryUtilityScore(mem, keywordFreq);
@@ -489,11 +510,13 @@ export function hybridScore(mem, context = {}) {
     entityOverlap = matched / mem.entities.length;
   }
 
-  // w3: arc relevance - Jaccard overlap between memory content and any open arc.
-  // Taking the max across all arcs so a memory that directly addresses the most
-  // pressing unresolved thread is boosted maximally.
+  // w3: arc relevance - how closely this memory relates to any open arc.
+  // Uses pre-computed cosine similarities when hybridPrioritize has already
+  // fetched them; falls back to inline Jaccard when not available.
   let arcRelevance = 0;
-  if (arcs && arcs.length > 0) {
+  if (arcSimilarities && arcSimilarities.has(mem.id)) {
+    arcRelevance = arcSimilarities.get(mem.id);
+  } else if (arcs && arcs.length > 0) {
     const memWords = tokenSet(mem.content);
     for (const arc of arcs) {
       const arcWords = tokenSet(arc.content);
@@ -530,8 +553,10 @@ export function hybridScore(mem, context = {}) {
  * context. Equivalent to prioritizeMemories but uses the enriched signal set
  * when context information is available.
  *
- * Builds the keyword frequency from the pool once and passes it into each
- * score call so repeated keywords within the pool are weighted correctly.
+ * Pre-computes arc relevance for every memory in one embedding batch call so
+ * hybridScore can use cosine similarity rather than Jaccard for that signal.
+ * Falls back to the inline Jaccard path inside hybridScore when the embedding
+ * call returns no vectors (embedding disabled, model unavailable, etc.).
  *
  * @param {Array} memories
  * @param {{
@@ -539,11 +564,33 @@ export function hybridScore(mem, context = {}) {
  *   entityRegistry?: Array,
  *   arcs?: Array,
  * }} [context={}]
- * @returns {Array}
+ * @returns {Promise<Array>}
  */
-export function hybridPrioritize(memories, context = {}) {
+export async function hybridPrioritize(memories, context = {}) {
+  const { arcs = null } = context;
   const keywordFreq = buildKeywordFrequency(memories);
-  const ctx = { ...context, keywordFreq };
+
+  // Pre-compute arc similarities via embeddings when arcs are present.
+  // Batch all memory + arc texts in one API call.
+  let arcSimilarities = null;
+  if (arcs && arcs.length > 0 && memories.length > 0) {
+    const memTexts = memories.map((m) => m.content);
+    const arcTexts = arcs.map((a) => a.content);
+    const vectorMap = await getEmbeddingBatch([...memTexts, ...arcTexts]);
+
+    if (vectorMap.size > 0) {
+      arcSimilarities = new Map();
+      const arcVectors = arcTexts.map((t) => vectorMap.get(t)).filter(Boolean);
+      for (const mem of memories) {
+        const memVec = vectorMap.get(mem.content);
+        if (!memVec || arcVectors.length === 0) continue;
+        const maxSim = Math.max(...arcVectors.map((av) => cosineSimilarity(memVec, av)));
+        arcSimilarities.set(mem.id, maxSim);
+      }
+    }
+  }
+
+  const ctx = { ...context, keywordFreq, arcSimilarities };
   return [...memories].sort((a, b) => {
     const sa = hybridScore(a, ctx);
     const sb = hybridScore(b, ctx);

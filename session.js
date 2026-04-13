@@ -415,7 +415,10 @@ export async function consolidateSessionMemories(force = false) {
 
       // Reconcile promoted entries with the base so "updated" base entries
       // replace older variants instead of being appended as duplicates.
-      const reconciledType = reconcileTypeEntries(base, promoted, 0.65, [...base, ...unprocessed]);
+      const reconciledType = await reconcileTypeEntries(base, promoted, 0.65, [
+        ...base,
+        ...unprocessed,
+      ]);
 
       // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
@@ -497,7 +500,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
     const context = getContext();
     const lastMessages = (context.chat ?? []).slice(-2);
     const turnMentions = extractTurnEntityMentions(lastMessages);
-    trimmed = hybridPrioritize(memories, { turnMentions });
+    trimmed = await hybridPrioritize(memories, { turnMentions });
   } else {
     trimmed = prioritizeMemories(memories);
   }
