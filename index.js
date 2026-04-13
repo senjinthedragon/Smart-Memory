@@ -119,6 +119,7 @@ import {
   runGraphMigration,
   loadCharacterEntityRegistry,
   loadSessionEntityRegistry,
+  clearSessionEntityRegistry,
 } from './graph-migration.js';
 import {
   generateProfiles,
@@ -1313,14 +1314,31 @@ function updateEntityPanel(characterName) {
   const ltEntities = characterName ? loadCharacterEntityRegistry(characterName) : [];
   const sessionEntities = loadSessionEntityRegistry();
 
-  // Merge: long-term keyed by id, session entities fill in gaps.
-  const byId = new Map();
-  for (const e of ltEntities) byId.set(e.id, e);
+  // Merge by canonical name (case-insensitive) rather than by UUID.
+  // The lt and session registries are independent stores with separate UUIDs,
+  // so the same named entity (e.g. "Senjin") will have different ids in each.
+  // Merging by name produces one row per real-world entity and combines their
+  // memory_ids so the timeline shows memories from both registries.
+  const byName = new Map();
+  for (const e of ltEntities) {
+    const key = e.name.toLowerCase().trim();
+    byName.set(key, { ...e, memory_ids: [...(e.memory_ids ?? [])] });
+  }
   for (const e of sessionEntities) {
-    if (!byId.has(e.id)) byId.set(e.id, e);
+    const key = e.name.toLowerCase().trim();
+    if (byName.has(key)) {
+      // Merge memory_ids and update last_seen.
+      const merged = byName.get(key);
+      for (const id of e.memory_ids ?? []) {
+        if (!merged.memory_ids.includes(id)) merged.memory_ids.push(id);
+      }
+      merged.last_seen = Math.max(merged.last_seen ?? 0, e.last_seen ?? 0);
+    } else {
+      byName.set(key, { ...e, memory_ids: [...(e.memory_ids ?? [])] });
+    }
   }
 
-  const entities = [...byId.values()].sort((a, b) => (b.last_seen ?? 0) - (a.last_seen ?? 0));
+  const entities = [...byName.values()].sort((a, b) => (b.last_seen ?? 0) - (a.last_seen ?? 0));
 
   if (entities.length === 0) {
     $panel.append('<span class="sm-muted">No entities extracted yet.</span>');
@@ -2230,6 +2248,7 @@ function bindSettingsUI() {
     if (isCatchUpRunning()) return;
     if (!confirm('Clear all session memories for this chat?')) return;
     await clearSessionMemories();
+    await clearSessionEntityRegistry();
     injectSessionMemories();
     updateSessionUI();
     setStatusMessage('Session memories cleared.');
@@ -2741,6 +2760,7 @@ function bindSettingsUI() {
 
     // Clear the other chat-scoped tiers.
     await clearSessionMemories();
+    await clearSessionEntityRegistry();
     await clearSceneHistory();
     await clearArcs();
     await clearArcSummaries();
@@ -2791,6 +2811,7 @@ function bindSettingsUI() {
     delete context.chatMetadata[META_KEY].summaryUpdated;
 
     await clearSessionMemories();
+    await clearSessionEntityRegistry();
     await clearSceneHistory();
     await clearArcs();
     await clearArcSummaries();

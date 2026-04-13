@@ -25,6 +25,7 @@
  * saveCharacterEntityRegistry  - persists the entity registry for a character
  * loadSessionEntityRegistry    - returns the session-scoped entity registry from chatMetadata
  * saveSessionEntityRegistry    - persists the session-scoped entity registry to chatMetadata
+ * clearSessionEntityRegistry   - empties the session-scoped entity registry in chatMetadata
  * resolveEntityNames           - maps raw extracted name strings to entity ids, upserting new entities
  * runGraphMigration            - one-shot migration pass: assigns IDs and graph fields to all
  *                                existing memories, initialises entity registries, writes version marker
@@ -136,6 +137,19 @@ export async function saveSessionEntityRegistry(entities) {
   await context.saveMetadata();
 }
 
+/**
+ * Empties the session-scoped entity registry from chatMetadata.
+ * Should be called alongside clearSessionMemories() so entity ids do not
+ * refer to memories that no longer exist after a chat clear.
+ */
+export async function clearSessionEntityRegistry() {
+  const context = getContext();
+  if (context.chatMetadata?.[META_KEY]) {
+    context.chatMetadata[META_KEY].entities = [];
+    await context.saveMetadata();
+  }
+}
+
 // ---- Entity normalizer ------------------------------------------------------
 
 /**
@@ -185,6 +199,28 @@ function findEntityByName(rawName, registry) {
  * @param {Array<Object>} registry - Entity registry array to mutate.
  * @returns {string} The entity id (existing or newly created).
  */
+// Keywords that suggest non-character entity types.
+const PLACE_PATTERNS =
+  /\b(city|town|village|castle|forest|mountain|river|sea|ocean|room|hall|inn|tavern|dungeon|kingdom|realm|world|island|house|building|tower|temple|shrine|camp|cave|ruins|road|street|district|region|country|territory|land|valley|lake|bay|port|market|quarter|website|server|platform|system|network|database|space|station|base|facility|lab|school|hospital|shop|store|office|academy|guild|manor|estate|garden|park)\b/i;
+const OBJECT_PATTERNS =
+  /\b(sword|blade|staff|wand|ring|amulet|book|scroll|map|key|gem|stone|artifact|relic|device|machine|tool|weapon|shield|armor|helm|cloak|potion|letter|contract|token|seal|orb|crystal|vr|headset|console|app|file|document|report|code|program|system)\b/i;
+const FACTION_PATTERNS =
+  /\b(guild|order|faction|clan|tribe|army|company|organization|group|party|council|court|empire|union|alliance|brotherhood|sisterhood|cult|church|institution|corporation|team)\b/i;
+
+/**
+ * Infers a rough entity type from the raw name string using keyword heuristics.
+ * Falls back to 'character' (the most common entity type in RP) when nothing matches.
+ *
+ * @param {string} name
+ * @returns {'character'|'place'|'object'|'faction'|'concept'}
+ */
+function inferEntityType(name) {
+  if (FACTION_PATTERNS.test(name)) return 'faction';
+  if (PLACE_PATTERNS.test(name)) return 'place';
+  if (OBJECT_PATTERNS.test(name)) return 'object';
+  return 'character';
+}
+
 function upsertEntity(rawName, memoryId, messageIndex, registry) {
   const existing = findEntityByName(rawName, registry);
 
@@ -207,11 +243,12 @@ function upsertEntity(rawName, memoryId, messageIndex, registry) {
     return existing.id;
   }
 
-  // New entity - default type is 'character'.
+  // New entity - infer a rough type from the name. This is a lightweight
+  // heuristic; the model does not tag types in the extraction output.
   const entity = {
     id: generateMemoryId(),
     name: rawName,
-    type: 'character',
+    type: inferEntityType(rawName),
     aliases: [],
     first_seen: messageIndex,
     last_seen: messageIndex,
