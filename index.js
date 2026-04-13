@@ -94,6 +94,7 @@ import {
   saveSceneHistory,
   clearSceneHistory,
   detectSceneBreakHeuristic,
+  linkMemoriesToLastScene,
 } from './scenes.js';
 import { extractArcs, injectArcs, loadArcs, saveArcs, clearArcs, deleteArc } from './arcs.js';
 import {
@@ -571,6 +572,14 @@ async function onCharacterMessageRendered() {
         settings.profiles_inject_budget = budgets.profiles;
 
         if (settings.session_enabled && sessionWindow.length > 0) {
+          // Snapshot existing memory ids before extraction so we can identify
+          // which memories are new and link them to the current scene.
+          const priorSessionIds = new Set(
+            loadSessionMemories()
+              .map((m) => m.id)
+              .filter(Boolean),
+          );
+
           const count = await extractSessionMemories(sessionWindow).catch((err) => {
             console.error('[SmartMemory] Session extraction error:', err);
             return 0;
@@ -586,6 +595,19 @@ async function onCharacterMessageRendered() {
           await injectSessionMemories(true);
           updateSessionUI();
           total += count;
+
+          // Link newly-added session memory ids to the most recent scene entry
+          // (layer 1 -> layer 2 backlink for three-layer summarization).
+          if (settings.scene_enabled && count > 0) {
+            const newIds = loadSessionMemories()
+              .map((m) => m.id)
+              .filter((id) => id && !priorSessionIds.has(id));
+            if (newIds.length > 0) {
+              await linkMemoriesToLastScene(newIds).catch((err) =>
+                console.error('[SmartMemory] Scene memory linking failed:', err),
+              );
+            }
+          }
         }
 
         if (settings.longterm_enabled && characterName && longtermWindow.length > 0) {

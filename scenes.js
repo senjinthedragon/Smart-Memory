@@ -24,14 +24,15 @@
  * call (optional, off by default) - then generates a mini-summary of the
  * completed scene and appends it to the per-chat scene history in chatMetadata.
  *
- * detectSceneBreakHeuristic - pattern-based scene break check (cheap, no model call)
- * detectSceneBreakAI        - model-based scene break check (accurate, costs a call)
- * loadSceneHistory          - returns the stored scene history array
- * saveSceneHistory          - persists the scene history array to chatMetadata
- * clearSceneHistory         - empties scene history for the current chat
- * summarizeScene            - generates a 2-3 sentence mini-summary of a scene
- * processSceneBreak         - orchestrates detection + summarization + storage
- * injectSceneHistory        - pushes scene history into the prompt via setExtensionPrompt
+ * detectSceneBreakHeuristic  - pattern-based scene break check (cheap, no model call)
+ * detectSceneBreakAI         - model-based scene break check (accurate, costs a call)
+ * loadSceneHistory           - returns the stored scene history array
+ * saveSceneHistory           - persists the scene history array to chatMetadata
+ * clearSceneHistory          - empties scene history for the current chat
+ * summarizeScene             - generates a 2-3 sentence mini-summary of a scene
+ * processSceneBreak          - orchestrates detection + summarization + storage
+ * linkMemoriesToLastScene    - attaches memory ids to the most recent scene entry
+ * injectSceneHistory         - pushes scene history into the prompt via setExtensionPrompt
  */
 
 import {
@@ -164,11 +165,43 @@ export async function processSceneBreak(lastMessageText, recentMessages) {
   const history = loadSceneHistory();
   const max = settings.scene_max_history ?? 5;
 
-  history.push({ summary, ts: Date.now() });
+  // source_memory_ids is populated after extraction via linkMemoriesToLastScene.
+  history.push({ summary, ts: Date.now(), source_memory_ids: [] });
   if (history.length > max) history.splice(0, history.length - max);
 
   await saveSceneHistory(history);
   return true;
+}
+
+// ---- Source memory linking ----------------------------------------------
+
+/**
+ * Attaches memory ids to the most recent scene entry in history.
+ * Called after extraction so each scene knows which memories it produced.
+ *
+ * Only adds ids that are not already present to avoid duplicates when
+ * multiple extraction passes run against the same scene.
+ *
+ * @param {string[]} memoryIds - Ids of memories extracted during this scene.
+ * @returns {Promise<void>}
+ */
+export async function linkMemoriesToLastScene(memoryIds) {
+  if (!memoryIds || memoryIds.length === 0) return;
+  const history = loadSceneHistory();
+  if (history.length === 0) return;
+
+  const last = history[history.length - 1];
+  if (!Array.isArray(last.source_memory_ids)) last.source_memory_ids = [];
+
+  const existing = new Set(last.source_memory_ids);
+  for (const id of memoryIds) {
+    if (id && !existing.has(id)) {
+      last.source_memory_ids.push(id);
+      existing.add(id);
+    }
+  }
+
+  await saveSceneHistory(history);
 }
 
 // ---- Injection ----------------------------------------------------------
