@@ -1,0 +1,257 @@
+/**
+ * Smart Memory - SillyTavern Extension
+ * Copyright (C) 2026 Senjin the Dragon
+ * https://github.com/senjinthedragon/Smart-Memory
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * Stateful character and world profiles regenerated from graph state.
+ *
+ * Profiles are compact snapshots injected every turn at low token cost as stable
+ * anchors for the AI. They are regenerated from stored memories on a schedule -
+ * not from raw chat - so they stay coherent even after compaction removes older
+ * messages. Profile generation is a single sequential model call that produces
+ * all three sections at once to minimise round-trips on local hardware.
+ *
+ * Stored in chatMetadata.smartMemory.profiles as:
+ *   { character_state, world_state, relationship_matrix, generated_at }
+ *
+ * loadProfiles         - returns stored profiles from chatMetadata (null if none)
+ * saveProfiles         - persists profiles to chatMetadata
+ * areProfilesStale     - true if profiles are older than the configured threshold
+ * generateProfiles     - calls the model and saves the result; returns the profiles
+ * injectProfiles       - pushes stored profiles into the prompt via setExtensionPrompt
+ * clearProfiles        - removes stored profiles and clears the injection slot
+ */
+
+import {
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../../script.js';
+import { getContext, extension_settings } from '../../../extensions.js';
+import { generateMemoryExtract } from './generate.js';
+import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_PROFILES } from './constants.js';
+import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
+import { loadSessionMemories } from './session.js';
+import { loadCharacterEntityRegistry } from './graph-migration.js';
+import { buildProfileGenerationPrompt } from './prompts.js';
+import { parseProfileOutput } from './parsers.js';
+
+// Default staleness threshold: 30 minutes. Profiles generated within this
+// window are considered current and will not be regenerated on chat load.
+const DEFAULT_STALE_THRESHOLD_MS = 30 * 60 * 1000;
+
+// ---- Storage ------------------------------------------------------------
+
+/**
+ * Returns stored profiles from chatMetadata, or null if none exist yet.
+ * @returns {{character_state: string, world_state: string, relationship_matrix: string, generated_at: number}|null}
+ */
+export function loadProfiles() {
+  const context = getContext();
+  return context.chatMetadata?.[META_KEY]?.profiles ?? null;
+}
+
+/**
+ * Persists profiles to chatMetadata.
+ * @param {{character_state: string, world_state: string, relationship_matrix: string, generated_at: number}} profiles
+ */
+export async function saveProfiles(profiles) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].profiles = profiles;
+  await context.saveMetadata();
+}
+
+/**
+ * Returns true if stored profiles are older than the configured threshold
+ * or do not exist yet. Used to decide whether to regenerate on chat load.
+ * @param {number} [thresholdMs] - Staleness threshold in milliseconds.
+ * @returns {boolean}
+ */
+export function areProfilesStale(thresholdMs = DEFAULT_STALE_THRESHOLD_MS) {
+  const profiles = loadProfiles();
+  if (!profiles) return true;
+  return Date.now() - (profiles.generated_at ?? 0) > thresholdMs;
+}
+
+// ---- Generation ---------------------------------------------------------
+
+/**
+ * Calls the model to regenerate character/world profiles from stored memories
+ * and saves the result to chatMetadata.
+ *
+ * Loads active long-term memories, session memories, and the character entity
+ * registry. Passes them all to buildProfileGenerationPrompt in one call.
+ * Returns null and logs a warning if the model produces unparseable output.
+ *
+ * @param {string} characterName - Active character name.
+ * @returns {Promise<{character_state: string, world_state: string, relationship_matrix: string, generated_at: number}|null>}
+ */
+export async function generateProfiles(characterName) {
+  const settings = extension_settings[MODULE_NAME];
+  if (!settings.profiles_enabled || !characterName) return null;
+
+  // Only pass active (non-retired) memories to the profile prompt.
+  const longtermMemories = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
+  const sessionMemories = loadSessionMemories().filter((m) => !m.superseded_by);
+
+  if (longtermMemories.length === 0 && sessionMemories.length === 0) {
+    // Nothing stored yet - skip generation rather than producing empty profiles.
+    return null;
+  }
+
+  const ltText = formatMemoriesForPrompt(longtermMemories);
+  const sessText =
+    sessionMemories.length > 0
+      ? sessionMemories.map((m) => `[${m.type}] ${m.content}`).join('\n')
+      : '';
+
+  // Pass entity registry names for the relationship matrix. Only character and
+  // place entities are useful here - concepts and objects clutter the output.
+  const entityRegistry = loadCharacterEntityRegistry(characterName);
+  const entities = entityRegistry
+    .filter((e) => e.type === 'character' || e.type === 'place')
+    .map((e) => ({ name: e.name, type: e.type }));
+
+  const prompt = buildProfileGenerationPrompt(characterName, ltText, sessText, entities);
+
+  try {
+    const response = await generateMemoryExtract(prompt, {
+      responseLength: settings.profiles_response_length ?? 400,
+    });
+
+    console.log('[SmartMemory] Profile generation response:', response);
+
+    if (!response) return null;
+
+    const parsed = parseProfileOutput(response);
+    if (!parsed) {
+      console.warn(
+        '[SmartMemory] Profile generation produced unparseable output. Check format above.',
+      );
+      return null;
+    }
+
+    const profiles = { ...parsed, generated_at: Date.now() };
+    await saveProfiles(profiles);
+    return profiles;
+  } catch (err) {
+    console.error('[SmartMemory] Profile generation failed:', err);
+    return null;
+  }
+}
+
+// ---- Injection ----------------------------------------------------------
+
+/**
+ * Formats profiles into a compact text block for prompt injection.
+ * Sections with empty content are omitted so the block stays short when
+ * the model only populated some sections.
+ * @param {{character_state: string, world_state: string, relationship_matrix: string}} profiles
+ * @param {number} budget - Token budget for the profiles block.
+ * @returns {string}
+ */
+function formatProfiles(profiles, budget) {
+  const parts = [];
+
+  if (profiles.character_state) {
+    parts.push(`Character state:\n${profiles.character_state}`);
+  }
+  if (profiles.world_state) {
+    parts.push(`World state:\n${profiles.world_state}`);
+  }
+  if (profiles.relationship_matrix) {
+    parts.push(`Relationships:\n${profiles.relationship_matrix}`);
+  }
+
+  let text = parts.join('\n\n');
+
+  // Trim to budget by removing the least-important section (relationship_matrix
+  // last, character_state first to preserve scene/relationship context).
+  const sections = ['character_state', 'world_state', 'relationship_matrix'];
+  let trimIdx = 0;
+  while (estimateTokens(text) > budget && trimIdx < sections.length) {
+    const toRemove = sections[trimIdx++];
+    const removed = profiles[toRemove];
+    if (!removed) continue;
+    const label =
+      toRemove === 'character_state'
+        ? 'Character state:'
+        : toRemove === 'world_state'
+          ? 'World state:'
+          : 'Relationships:';
+    text = text
+      .replace(`${label}\n${removed}`, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  return text;
+}
+
+/**
+ * Injects stored profiles into the prompt via setExtensionPrompt.
+ * Clears the slot if profiles are disabled, not yet generated, or empty.
+ */
+export function injectProfiles() {
+  const settings = extension_settings[MODULE_NAME];
+
+  if (!settings.profiles_enabled) {
+    setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
+    return;
+  }
+
+  const profiles = loadProfiles();
+  if (!profiles) {
+    setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
+    return;
+  }
+
+  const budget = settings.profiles_inject_budget ?? 200;
+  const text = formatProfiles(profiles, budget);
+
+  if (!text) {
+    setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
+    return;
+  }
+
+  const template = settings.profiles_template ?? '{{profiles}}';
+  const content = template.replace('{{profiles}}', text);
+
+  setExtensionPrompt(
+    PROMPT_KEY_PROFILES,
+    content,
+    settings.profiles_position ?? extension_prompt_types.IN_PROMPT,
+    settings.profiles_depth ?? 1,
+    false,
+    settings.profiles_role ?? extension_prompt_roles.SYSTEM,
+  );
+}
+
+/**
+ * Clears stored profiles from chatMetadata and removes the injection slot.
+ */
+export async function clearProfiles() {
+  const context = getContext();
+  if (context.chatMetadata?.[META_KEY]?.profiles) {
+    delete context.chatMetadata[META_KEY].profiles;
+    await context.saveMetadata();
+  }
+  setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
+}
