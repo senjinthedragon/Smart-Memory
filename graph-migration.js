@@ -200,31 +200,6 @@ function findEntityByName(rawName, registry) {
  * @param {Array<Object>} registry - Entity registry array to mutate.
  * @returns {string} The entity id (existing or newly created).
  */
-// Keywords that suggest non-character entity types.
-const PLACE_PATTERNS =
-  /\b(city|town|village|castle|forest|mountain|river|sea|ocean|room|hall|inn|tavern|dungeon|kingdom|realm|world|island|house|building|tower|temple|shrine|camp|cave|ruins|road|street|district|region|country|territory|land|valley|lake|bay|port|market|quarter|website|server|platform|network|database|space|station|base|facility|lab|school|hospital|shop|store|office|academy|guild|manor|estate|garden|park)\b/i;
-// Keyword heuristic is a last resort - the model classifies types directly
-// via the Name/type format in the extraction prompt. These patterns only fire
-// when the model omits a type classification, so keep them minimal and focused
-// on unambiguous structural words rather than scenario-specific props.
-const OBJECT_PATTERNS =
-  /\b(sword|blade|staff|wand|ring|amulet|book|scroll|map|key|gem|stone|artifact|relic|device|machine|tool|weapon|shield|armor|helm|cloak|potion|letter|contract|token|seal|orb|crystal|vr|headset|console|app|file|document|report|code|program)\b/i;
-const FACTION_PATTERNS =
-  /\b(guild|order|faction|clan|tribe|army|company|organization|group|party|council|court|empire|union|alliance|brotherhood|sisterhood|cult|church|institution|corporation|team)\b/i;
-
-/**
- * Infers a rough entity type from the raw name string using keyword heuristics.
- * Falls back to 'character' (the most common entity type in RP) when nothing matches.
- *
- * @param {string} name
- * @returns {'character'|'place'|'object'|'faction'|'concept'}
- */
-function inferEntityType(name) {
-  if (FACTION_PATTERNS.test(name)) return 'faction';
-  if (PLACE_PATTERNS.test(name)) return 'place';
-  if (OBJECT_PATTERNS.test(name)) return 'object';
-  return 'character';
-}
 
 /**
  * Parses a raw entity token from the extraction output into a name and an
@@ -268,12 +243,14 @@ function upsertEntity(rawName, memoryId, messageIndex, registry, classifiedType 
     return existing.id;
   }
 
-  // New entity. Use the model-provided type when available; fall back to the
-  // keyword heuristic only when the model did not classify it.
+  // New entity. Use the model-provided type when available; default to
+  // 'character' when the model omitted the classification - it is the most
+  // common entity type in RP and no keyword heuristic can reliably infer
+  // type from made-up or scenario-specific names.
   const entity = {
     id: generateMemoryId(),
     name: rawName,
-    type: classifiedType ?? inferEntityType(rawName),
+    type: classifiedType ?? 'character',
     aliases: [],
     first_seen: messageIndex,
     last_seen: messageIndex,
