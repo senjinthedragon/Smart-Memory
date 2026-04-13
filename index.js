@@ -57,6 +57,7 @@ import {
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
   PROMPT_KEY_REPAIR,
+  PROMPT_KEY_PROFILES,
   MEMORY_TYPES,
   SESSION_TYPES,
 } from './constants.js';
@@ -104,6 +105,7 @@ import {
 } from './continuity.js';
 import { clearEmbeddingCache } from './embeddings.js';
 import { runGraphMigration } from './graph-migration.js';
+import { generateProfiles, injectProfiles, clearProfiles, areProfilesStale } from './profiles.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -193,6 +195,16 @@ const defaultSettings = {
   embedding_url: '',
   embedding_model: 'nomic-embed-text',
   embedding_keep: false,
+
+  // Character/world profiles
+  profiles_enabled: true,
+  profiles_stale_threshold_minutes: 30,
+  profiles_response_length: 400,
+  profiles_inject_budget: 200,
+  profiles_position: extension_prompt_types.IN_PROMPT,
+  profiles_depth: 1,
+  profiles_role: extension_prompt_roles.SYSTEM,
+  profiles_template: '{{profiles}}',
 
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
@@ -294,6 +306,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_SCENES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_ARCS, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_REPAIR, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_PROFILES, '', none, 0);
   updateTokenDisplay();
 }
 
@@ -563,6 +576,16 @@ async function onCharacterMessageRendered() {
           total += count;
         }
 
+        // Regenerate profiles after each extraction pass so they reflect the
+        // latest memories. Sequential - same constraint as the other tiers.
+        if (settings.profiles_enabled && characterName) {
+          await generateProfiles(characterName)
+            .then((profiles) => {
+              if (profiles) injectProfiles();
+            })
+            .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
+        }
+
         updateTokenDisplay();
         setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
       } catch (err) {
@@ -623,6 +646,7 @@ async function onChatChanged() {
   await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
+  injectProfiles();
   loadAndInjectRepair();
 
   updateLongTermUI(characterName);
@@ -631,6 +655,22 @@ async function onChatChanged() {
   updateScenesUI();
   updateArcsUI();
   updateTokenDisplay();
+
+  // Regenerate profiles in the background if they are stale. Non-blocking -
+  // the existing stored profiles (if any) were already injected above, so the
+  // user sees coherent context immediately and the refresh is invisible.
+  if (settings.profiles_enabled && characterName && !freshStart) {
+    const thresholdMs = (settings.profiles_stale_threshold_minutes ?? 30) * 60 * 1000;
+    if (areProfilesStale(thresholdMs)) {
+      generateProfiles(characterName)
+        .then((profiles) => {
+          if (profiles) injectProfiles();
+        })
+        .catch((err) =>
+          console.error('[SmartMemory] Background profile regeneration failed:', err),
+        );
+    }
+  }
 
   // Show a recap popup if the user has been away long enough.
   if (settings.recap_enabled) {
@@ -2265,6 +2305,7 @@ function bindSettingsUI() {
     await clearSessionMemories();
     await clearSceneHistory();
     await clearArcs();
+    await clearProfiles();
     await context.saveMetadata();
 
     // Clearing chatMetadata means loadAndInjectSummary will clear the slot.
@@ -2312,6 +2353,7 @@ function bindSettingsUI() {
     await clearSessionMemories();
     await clearSceneHistory();
     await clearArcs();
+    await clearProfiles();
     // Dismiss any open recap modal.
     $('#sm_recap_overlay').remove();
 
