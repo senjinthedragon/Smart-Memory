@@ -652,6 +652,16 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
+#smart_memory_settings .sm_memory_conflict_badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.85em;
+  color: #e8a84c;
+  margin-right: 4px;
+  vertical-align: middle;
+  cursor: help;
+}
+
 #smart_memory_settings .sm_memory_retired_badge {
   display: inline-block;
   font-size: 0.7em;

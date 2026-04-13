@@ -959,15 +959,19 @@ function updateSessionUI() {
 
   memories.forEach((mem, idx) => {
     const isRetired = Boolean(mem.superseded_by);
+    const hasConflict = Array.isArray(mem.contradicts) && mem.contradicts.length > 0;
     const retiredClass = isRetired ? ' sm_memory_retired' : '';
     const retiredBadge = isRetired
       ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
+      : '';
+    const conflictBadge = hasConflict
+      ? `<span class="sm_memory_conflict_badge" title="This memory conflicts with ${mem.contradicts.length} other ${mem.contradicts.length === 1 ? 'memory' : 'memories'} - run the continuity checker to review"><i class="fa-solid fa-triangle-exclamation"></i></span>`
       : '';
 
     const $item = $(`
             <div class="sm_memory_item${retiredClass}" data-index="${idx}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
-                ${retiredBadge}
+                ${retiredBadge}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
                 <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
@@ -1239,15 +1243,19 @@ function renderMemoriesList(memories, characterName) {
 
   memories.forEach((mem, idx) => {
     const isRetired = Boolean(mem.superseded_by);
+    const hasConflict = Array.isArray(mem.contradicts) && mem.contradicts.length > 0;
     const retiredClass = isRetired ? ' sm_memory_retired' : '';
     const retiredBadge = isRetired
       ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
+      : '';
+    const conflictBadge = hasConflict
+      ? `<span class="sm_memory_conflict_badge" title="This memory conflicts with ${mem.contradicts.length} other ${mem.contradicts.length === 1 ? 'memory' : 'memories'} - run the continuity checker to review"><i class="fa-solid fa-triangle-exclamation"></i></span>`
       : '';
 
     const $item = $(`
             <div class="sm_memory_item${retiredClass}" data-index="${idx}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
-                ${retiredBadge}
+                ${retiredBadge}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
                 <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
