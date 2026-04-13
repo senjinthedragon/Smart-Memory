@@ -60,6 +60,8 @@ import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './promp
 import { parseExtractionOutput } from './parsers.js';
 import {
   prioritizeMemories,
+  hybridPrioritize,
+  extractTurnEntityMentions,
   reconcileTypeEntries,
   selectProtectedMemories,
   sortByTimeline,
@@ -618,14 +620,26 @@ export function injectMemories(characterName, freshStart = false, updateTelemetr
     return;
   }
 
-  // Trim to token budget: sort so low-importance old entries are dropped first.
-  // Primary sort: importance ascending (1 before 3). Secondary: age ascending (oldest first).
-  // This way a low-importance old entry is always dropped before a high-importance new one.
+  // Trim to token budget using hybrid scoring when current-turn context is
+  // available. On chat load (updateTelemetry=false) there is no "current turn"
+  // to read entity mentions from, so plain utility scoring is used instead.
   const budget = settings.longterm_inject_budget ?? 500;
   const protectedSet = new Set(
     selectProtectedMemories(memories, ['relationship', 'preference', 'fact']),
   );
-  const trimmed = prioritizeMemories(memories);
+
+  let trimmed;
+  if (updateTelemetry) {
+    // Post-extraction path: we have a fresh AI response to extract entity
+    // mentions from. Build turn context for the hybrid scorer.
+    const context = getContext();
+    const lastMessages = (context.chat ?? []).slice(-2);
+    const turnMentions = extractTurnEntityMentions(lastMessages);
+    const entityRegistry = loadCharacterEntityRegistry(characterName);
+    trimmed = hybridPrioritize(memories, { turnMentions, entityRegistry });
+  } else {
+    trimmed = prioritizeMemories(memories);
+  }
   // Use the injection format for budget estimation so the check matches what is actually injected.
   while (
     trimmed.length > 1 &&

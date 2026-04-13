@@ -61,6 +61,8 @@ import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
   prioritizeMemories,
+  hybridPrioritize,
+  extractTurnEntityMentions,
   reconcileTypeEntries,
   selectProtectedMemories,
   sortByTimeline,
@@ -485,11 +487,20 @@ export async function injectSessionMemories(updateTelemetry = false) {
     return;
   }
 
-  // Trim to token budget: sort so low-importance old entries are dropped first.
-  // Primary sort: importance descending (3 before 1). Secondary: age descending (newest first).
+  // Trim to token budget using hybrid scoring on real AI turns, plain utility
+  // scoring on chat load (no "current turn" to extract entity mentions from).
   const budget = settings.session_inject_budget ?? 400;
   const protectedSet = new Set(selectProtectedMemories(memories, ['development', 'scene']));
-  const trimmed = prioritizeMemories(memories);
+
+  let trimmed;
+  if (updateTelemetry) {
+    const context = getContext();
+    const lastMessages = (context.chat ?? []).slice(-2);
+    const turnMentions = extractTurnEntityMentions(lastMessages);
+    trimmed = hybridPrioritize(memories, { turnMentions });
+  } else {
+    trimmed = prioritizeMemories(memories);
+  }
   while (trimmed.length > 1 && estimateTokens(formatSessionMemories(trimmed)) > budget) {
     let idx = -1;
     for (let i = trimmed.length - 1; i >= 0; i--) {

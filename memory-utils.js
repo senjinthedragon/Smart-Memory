@@ -18,12 +18,15 @@
  */
 
 /**
- * Shared utility helpers for memory retention and consolidation.
+ * Shared utility helpers for memory retention, consolidation, and hybrid retrieval.
  *
- * prioritizeMemories    - sorts memories by durability/importance/keyword-recurrence/recency
- * trimByPriority        - trims a memory array to a cap, keeping durable/high-importance/newer entries
- * reconcileTypeEntries  - merges promoted consolidation entries into a base, replacing overlapping originals
- * sortByTimeline        - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
+ * prioritizeMemories        - sorts memories by durability/importance/keyword-recurrence/recency
+ * trimByPriority            - trims a memory array to a cap, keeping durable/high-importance/newer entries
+ * reconcileTypeEntries      - merges promoted consolidation entries into a base, replacing overlapping originals
+ * sortByTimeline            - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
+ * extractTurnEntityMentions - lightweight regex extraction of proper-noun candidates from last messages
+ * hybridScore               - weighted blend of utility, entity overlap, arc relevance, and temporal proximity
+ * hybridPrioritize          - sorts a memory array by hybridScore given current-turn context
  */
 
 function tokenSet(text) {
@@ -334,4 +337,215 @@ export function reconcileTypeEntries(base, promoted, threshold, timelinePool = [
     }
   }
   return reconciled;
+}
+
+// ---- Hybrid retrieval scoring -------------------------------------------
+
+// Common words that start sentences and would be false-positives in
+// proper-noun extraction (they look like proper nouns but are not entity names).
+const SENTENCE_STARTERS = new Set([
+  'i',
+  'he',
+  'she',
+  'we',
+  'they',
+  'you',
+  'it',
+  'the',
+  'a',
+  'an',
+  'my',
+  'your',
+  'his',
+  'her',
+  'its',
+  'our',
+  'their',
+  'this',
+  'that',
+  'these',
+  'those',
+  'what',
+  'who',
+  'where',
+  'when',
+  'why',
+  'how',
+  'which',
+  'there',
+  'here',
+  'yes',
+  'no',
+  'not',
+  'but',
+  'and',
+  'or',
+  'so',
+  'if',
+  'as',
+  'at',
+  'in',
+  'on',
+  'to',
+  'of',
+  'do',
+  'did',
+  'is',
+  'are',
+  'was',
+  'were',
+  'have',
+  'had',
+]);
+
+/**
+ * Extracts a set of lowercase proper-noun candidate names from the last 1-2
+ * chat messages. Uses a lightweight regex pass - no model call required.
+ *
+ * A word is considered a proper-noun candidate if:
+ * - it starts with an uppercase letter
+ * - it is not a common sentence-starter
+ * - it is at least 2 characters long
+ *
+ * Used to compute entity overlap between stored memories and the current turn.
+ *
+ * @param {Array<{mes?: string, name?: string}>} messages - Last 1-2 messages from context.chat.
+ * @returns {Set<string>} Lowercase candidate proper nouns.
+ */
+export function extractTurnEntityMentions(messages) {
+  const mentions = new Set();
+  for (const msg of messages) {
+    const text = String(msg?.mes || '');
+    // Match sequences of title-case words (e.g. "The Silver Tavern", "Lady Vael")
+    const matches = text.match(/\b[A-Z][a-z]{1,}/g) ?? [];
+    for (const word of matches) {
+      const lower = word.toLowerCase();
+      if (!SENTENCE_STARTERS.has(lower)) {
+        mentions.add(lower);
+      }
+    }
+  }
+  return mentions;
+}
+
+// Time-scope proximity weight: how "close to now" each scope is.
+// scene > session > arc > global for injection relevance.
+const TIME_SCOPE_PROXIMITY = { scene: 2, session: 1, arc: 0.5, global: 0 };
+
+// Expiration proximity weight: scene-expiry memories are the most
+// temporally specific, permanent ones are always relevant but diffuse.
+const EXPIRATION_PROXIMITY = { scene: 2, session: 1, permanent: 0 };
+
+/**
+ * Computes the weighted hybrid retrieval score for a single memory.
+ *
+ * Combines four synchronous signals:
+ *   w1 * utility_score       - existing importance/durability/retrieval composite
+ *   w2 * entity_overlap      - 0-1, fraction of memory entities mentioned in the current turn
+ *   w3 * arc_relevance       - 0-1, Jaccard overlap with any open arc content
+ *   w4 * temporal_proximity  - 0-1, how time-scoped the memory is relative to the current moment
+ *   - contradiction_penalty  - flat deduction when the memory has unresolved contradictions
+ *
+ * Semantic similarity (w5) is intentionally omitted here because it requires
+ * an async embedding call. The calling code can pre-compute and inject it as
+ * part of the utility score or a future extension to this context.
+ *
+ * @param {Object} mem - Memory object.
+ * @param {{
+ *   keywordFreq?: Map<string, number>,
+ *   turnMentions?: Set<string>,
+ *   entityRegistry?: Array<{id: string, name: string, aliases?: string[]}>,
+ *   arcs?: Array<{content: string}>,
+ * }} [context={}] - Optional per-turn signals for the extra scoring components.
+ * @returns {number}
+ */
+export function hybridScore(mem, context = {}) {
+  if (mem.superseded_by) return 0.001;
+
+  const { keywordFreq = null, turnMentions = null, entityRegistry = null, arcs = null } = context;
+
+  // w1: existing utility score (0-500+ range, dominates when other signals are absent)
+  const utility = memoryUtilityScore(mem, keywordFreq);
+
+  // w2: entity overlap - how many of this memory's entity ids map to entity names
+  // that appear in the current turn's text. Requires both turnMentions and a registry.
+  let entityOverlap = 0;
+  if (
+    turnMentions &&
+    turnMentions.size > 0 &&
+    entityRegistry &&
+    Array.isArray(mem.entities) &&
+    mem.entities.length > 0
+  ) {
+    let matched = 0;
+    for (const entityId of mem.entities) {
+      const entry = entityRegistry.find((e) => e.id === entityId);
+      if (!entry) continue;
+      const names = [entry.name, ...(entry.aliases ?? [])].map((n) => n.toLowerCase());
+      if (names.some((n) => turnMentions.has(n))) matched++;
+    }
+    entityOverlap = matched / mem.entities.length;
+  }
+
+  // w3: arc relevance - Jaccard overlap between memory content and any open arc.
+  // Taking the max across all arcs so a memory that directly addresses the most
+  // pressing unresolved thread is boosted maximally.
+  let arcRelevance = 0;
+  if (arcs && arcs.length > 0) {
+    const memWords = tokenSet(mem.content);
+    for (const arc of arcs) {
+      const arcWords = tokenSet(arc.content);
+      const intersection = [...memWords].filter((w) => arcWords.has(w)).length;
+      const union = new Set([...memWords, ...arcWords]).size;
+      const sim = union > 0 ? intersection / union : 0;
+      if (sim > arcRelevance) arcRelevance = sim;
+    }
+  }
+
+  // w4: temporal proximity - how "right now" is this memory?
+  // Blend of time_scope and expiration so scene-tagged session memories
+  // (the most temporally specific) score highest.
+  const scopeProx = TIME_SCOPE_PROXIMITY[mem.time_scope || 'global'] ?? 0;
+  const expProx = EXPIRATION_PROXIMITY[normalizeExpiration(mem.expiration, 'permanent')] ?? 0;
+  const temporalProximity = (scopeProx + expProx) / 4; // normalise to 0-1
+
+  // Contradiction penalty: subtract a fixed amount when the memory has
+  // unresolved contradictions so the retrieval system prefers clean facts.
+  const contradictionPenalty =
+    Array.isArray(mem.contradicts) && mem.contradicts.length > 0 ? 50 : 0;
+
+  return (
+    utility +
+    entityOverlap * 100 +
+    arcRelevance * 60 +
+    temporalProximity * 30 -
+    contradictionPenalty
+  );
+}
+
+/**
+ * Sorts a memory array by hybridScore (descending) given the current-turn
+ * context. Equivalent to prioritizeMemories but uses the enriched signal set
+ * when context information is available.
+ *
+ * Builds the keyword frequency from the pool once and passes it into each
+ * score call so repeated keywords within the pool are weighted correctly.
+ *
+ * @param {Array} memories
+ * @param {{
+ *   turnMentions?: Set<string>,
+ *   entityRegistry?: Array,
+ *   arcs?: Array,
+ * }} [context={}]
+ * @returns {Array}
+ */
+export function hybridPrioritize(memories, context = {}) {
+  const keywordFreq = buildKeywordFrequency(memories);
+  const ctx = { ...context, keywordFreq };
+  return [...memories].sort((a, b) => {
+    const sa = hybridScore(a, ctx);
+    const sb = hybridScore(b, ctx);
+    if (sa !== sb) return sb - sa;
+    return numberOr(b.ts, 0) - numberOr(a.ts, 0) || 0;
+  });
 }
