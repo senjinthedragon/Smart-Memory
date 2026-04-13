@@ -2828,6 +2828,7 @@ function bindSettingsUI() {
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
+    injectProfiles();
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);
@@ -2835,6 +2836,7 @@ function bindSettingsUI() {
     updateSessionUI();
     updateScenesUI();
     updateArcsUI();
+    updateProfilesUI(null);
     updateTokenDisplay();
     sceneMessageBuffer = [];
     sceneBufferLastIndex = -1;
