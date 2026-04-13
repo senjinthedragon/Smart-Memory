@@ -224,8 +224,8 @@ const defaultSettings = {
   // Character/world profiles
   profiles_enabled: true,
   profiles_stale_threshold_minutes: 30,
-  profiles_response_length: 400,
-  profiles_inject_budget: 200,
+  profiles_response_length: 600,
+  profiles_inject_budget: 400,
   profiles_position: extension_prompt_types.IN_PROMPT,
   profiles_depth: 1,
   profiles_role: extension_prompt_roles.SYSTEM,
@@ -821,6 +821,7 @@ const TOKEN_TIERS = [
   { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
   { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#a07840' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
+  { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: '#5a9ea0' },
 ];
 
 /**
@@ -2928,6 +2929,42 @@ function bindSettingsUI() {
       $(this).prop('disabled', false);
     }
   });
+
+  const $profilesBudgetVal = $('#sm_profiles_inject_budget_value');
+  $('#sm_profiles_inject_budget')
+    .val(s.profiles_inject_budget ?? 400)
+    .on('input', function () {
+      const val = parseInt($(this).val(), 10);
+      getSettings().profiles_inject_budget = val;
+      $profilesBudgetVal.text(val + ' tokens');
+      saveSettingsDebounced();
+      injectProfiles();
+    });
+  $profilesBudgetVal.text((s.profiles_inject_budget ?? 400) + ' tokens');
+
+  const currentProfilesPosition = s.profiles_position ?? extension_prompt_types.IN_PROMPT;
+  $(`input[name="sm_profiles_position"][value="${currentProfilesPosition}"]`).prop('checked', true);
+  $('input[name="sm_profiles_position"]').on('change', function () {
+    getSettings().profiles_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+    injectProfiles();
+  });
+
+  $('#sm_profiles_depth')
+    .val(s.profiles_depth ?? 1)
+    .on('input', function () {
+      getSettings().profiles_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+      injectProfiles();
+    });
+
+  $('#sm_profiles_role')
+    .val(s.profiles_role ?? extension_prompt_roles.SYSTEM)
+    .on('change', function () {
+      getSettings().profiles_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+      injectProfiles();
+    });
 
   updateProfilesUI(loadProfiles());
 
