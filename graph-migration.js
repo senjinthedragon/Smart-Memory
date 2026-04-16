@@ -341,7 +341,14 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
       if (entity.memory_ids.includes(mem.id)) continue; // already linked
 
       const contentLower = (mem.content ?? '').toLowerCase();
-      if (names.some((n) => contentLower.includes(n))) {
+      const linkedByName = names.some((n) => contentLower.includes(n));
+      // Also check the memory's own entities array. A consolidated memory may
+      // use pronouns ("she") instead of the entity's name - content substring
+      // matching would miss it, but reconcileTypeEntries carries the base
+      // entry's entities array forward so the ID is already present.
+      const linkedById = Array.isArray(mem.entities) && mem.entities.includes(entity.id);
+
+      if (linkedByName || linkedById) {
         entity.memory_ids.push(mem.id);
 
         // Keep the memory's own entities array in sync.

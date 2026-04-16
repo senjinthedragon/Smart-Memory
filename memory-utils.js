@@ -349,7 +349,20 @@ export async function reconcileTypeEntries(base, promoted, threshold, timelinePo
 
     if (idx >= 0) {
       const existingTs = reconciled[idx].ts;
-      reconciled[idx] = { ...mem, ts: Number.isFinite(existingTs) ? existingTs : inferredTs };
+      // Carry entity links forward from the base entry. A consolidated memory
+      // may use pronouns ("she") instead of the entity's name, so the registry
+      // reconciler cannot re-link it via content substring alone. By preserving
+      // the base entry's entities array, reconcileEntityRegistry can re-link
+      // using the ID directly rather than guessing from content.
+      const inheritedEntities =
+        (reconciled[idx].entities ?? []).length > 0
+          ? reconciled[idx].entities
+          : (mem.entities ?? []);
+      reconciled[idx] = {
+        ...mem,
+        ts: Number.isFinite(existingTs) ? existingTs : inferredTs,
+        entities: inheritedEntities,
+      };
     } else {
       reconciled.push({ ...mem, ts: inferredTs });
     }

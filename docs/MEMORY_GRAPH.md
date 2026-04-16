@@ -384,7 +384,9 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [x] Temporal proximity scoring
 - [x] Contradiction penalty
 - [x] Weighted hybrid score assembly in memory-utils.js
-- [ ] Diversity floor enforcement (existing per-type cap is a partial implementation)
+- [x] Diversity floor enforcement - `applyDiversityFloor` promotes the best entry of each
+      required type to the front of the sorted output so it appears prominently regardless
+      of its raw hybrid score. Long-term floor: relationship + fact. Session floor: development + scene.
 - [ ] Semantic weight downscaling for Profile A (w5 deferred - requires async embed call)
 
 ### Adaptive budget
@@ -416,10 +418,12 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [x] Hardware profile auto-detection from configured source
 - [x] Schema version check and migration on load
 - [ ] Tests for entity normalizer, supersession classifier, hybrid scorer, turn classifier
-- [ ] Entity registry re-link after consolidation is substring-based - if the model uses pronouns
+- [x] Entity registry re-link after consolidation is substring-based - if the model uses pronouns
       in a merged memory (e.g. "she" instead of "Alex"), the entity loses its link to that memory.
-      Fix: store entity name strings alongside memory IDs in the registry so reconcile does not
-      need to guess from content.
+      Fixed: `reconcileTypeEntries` now carries the base entry's `entities` array forward when
+      replacing it with a promoted entry. `reconcileEntityRegistry` pass 2 checks
+      `mem.entities.includes(entity.id)` alongside content substring so a memory that already
+      carries an entity ID is re-linked even when its content uses only pronouns.
 
 ---
 
