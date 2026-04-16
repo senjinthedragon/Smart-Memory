@@ -509,7 +509,10 @@ export async function injectSessionMemories(updateTelemetry = false) {
     const context = getContext();
     const lastMessages = (context.chat ?? []).slice(-2);
     const turnMentions = extractTurnEntityMentions(lastMessages);
-    trimmed = await hybridPrioritize(memories, { turnMentions });
+    trimmed = await hybridPrioritize(memories, {
+      turnMentions,
+      floorTypes: ['development', 'scene'],
+    });
   } else {
     trimmed = prioritizeMemories(memories);
   }

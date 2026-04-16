@@ -26,7 +26,7 @@
  * sortByTimeline            - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
  * extractTurnEntityMentions - lightweight regex extraction of proper-noun candidates from last messages
  * hybridScore               - weighted blend of utility, entity overlap, arc relevance, and temporal proximity
- * hybridPrioritize          - sorts a memory array by hybridScore given current-turn context
+ * hybridPrioritize          - sorts a memory array by hybridScore then applies a diversity floor
  * classifyTurn              - heuristic turn-type classifier (dialogue/action/transition/intimate)
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
  */
@@ -566,8 +566,42 @@ export function hybridScore(mem, context = {}) {
  * }} [context={}]
  * @returns {Promise<Array>}
  */
+/**
+ * Applies a diversity floor to an already-score-sorted memory array.
+ *
+ * The hybrid scorer can produce outputs dominated by a single type when
+ * several entries of that type happen to score high (e.g., many recently
+ * recalled relationship memories outscoring a single fact). The diversity
+ * floor guarantees that the best entry from each required type appears in
+ * the first positions of the output, so it is seen by the model and
+ * survives tight budget trimming.
+ *
+ * Entries are promoted in `floorTypes` order. Within the promoted group,
+ * their relative score order is preserved. The rest of the list follows
+ * in score order with no duplicates.
+ *
+ * @param {Array} sorted - Memories already sorted by hybrid score (highest first).
+ * @param {string[]} floorTypes - Types that must have at least one representative at the front.
+ * @returns {Array} Reordered array with floor representatives promoted.
+ */
+function applyDiversityFloor(sorted, floorTypes) {
+  if (!floorTypes || floorTypes.length === 0) return sorted;
+
+  // Pick the highest-scoring (earliest in sorted) entry for each floor type.
+  const promoted = new Set();
+  for (const type of floorTypes) {
+    const best = sorted.find((m) => m.type === type && !promoted.has(m));
+    if (best) promoted.add(best);
+  }
+
+  if (promoted.size === 0) return sorted;
+
+  // Promoted entries first (in their natural score order), then the rest.
+  return [...sorted.filter((m) => promoted.has(m)), ...sorted.filter((m) => !promoted.has(m))];
+}
+
 export async function hybridPrioritize(memories, context = {}) {
-  const { arcs = null } = context;
+  const { arcs = null, floorTypes = [] } = context;
   const keywordFreq = buildKeywordFrequency(memories);
 
   // Pre-compute arc similarities via embeddings when arcs are present.
@@ -591,12 +625,14 @@ export async function hybridPrioritize(memories, context = {}) {
   }
 
   const ctx = { ...context, keywordFreq, arcSimilarities };
-  return [...memories].sort((a, b) => {
+  const sorted = [...memories].sort((a, b) => {
     const sa = hybridScore(a, ctx);
     const sb = hybridScore(b, ctx);
     if (sa !== sb) return sb - sa;
     return numberOr(b.ts, 0) - numberOr(a.ts, 0) || 0;
   });
+
+  return applyDiversityFloor(sorted, floorTypes);
 }
 
 // ---- Adaptive token budget ----------------------------------------------

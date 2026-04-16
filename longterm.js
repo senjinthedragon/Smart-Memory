@@ -649,7 +649,11 @@ export async function injectMemories(characterName, freshStart = false, updateTe
     const lastMessages = (context.chat ?? []).slice(-2);
     const turnMentions = extractTurnEntityMentions(lastMessages);
     const entityRegistry = loadCharacterEntityRegistry(characterName);
-    trimmed = await hybridPrioritize(memories, { turnMentions, entityRegistry });
+    trimmed = await hybridPrioritize(memories, {
+      turnMentions,
+      entityRegistry,
+      floorTypes: ['relationship', 'fact'],
+    });
   } else {
     trimmed = prioritizeMemories(memories);
   }
