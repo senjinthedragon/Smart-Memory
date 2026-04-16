@@ -126,6 +126,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Profiles added to Memorize Chat flow**: after Memorize Chat completes, character
   and world profiles are regenerated and injected so they immediately reflect the
   memories just built.
+- **Diversity floor in hybrid retrieval**: `hybridPrioritize` now applies a
+  post-sort promotion pass that moves the best entry of each required type to the
+  front of the output, regardless of its raw hybrid score. Without this, a cluster
+  of high-scoring entries of the same type could dominate the injected list and push
+  critical types to the bottom where the model treats them as lower priority. Floor
+  types: long-term uses `relationship` + `fact`; session uses `development` + `scene`.
 - **Retrieval and budget unit tests**: targeted Jest tests for `hybridScore`,
   `hybridPrioritize`, `applyBudgetMultipliers`, `classifyTurn`, and
   `reconcileTypeEntries` in `memory-utils.js`. These cover the retrieval signal
