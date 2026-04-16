@@ -139,6 +139,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Entity links survive consolidation when content uses pronouns**: after a
+  consolidation pass, the merged memory may use "she" or "he" instead of an
+  entity's name. `reconcileTypeEntries` now carries the base entry's `entities`
+  array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
+  checks `mem.entities.includes(entity.id)` alongside content substring matching,
+  so the registry re-links by direct ID rather than guessing from text.
 - **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
   spreads the existing character object before writing the memories array, so the
   entity registry and any future per-character fields stored alongside memories are
