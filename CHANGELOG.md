@@ -101,6 +101,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     injection slot. A "Generate Canon" button appears in the short-term panel.
     Manual trigger only on local hardware.
 
+- **Model-classified entity types**: the extraction prompt now asks the model to
+  classify each extracted entity as `character`, `place`, `object`, `faction`, or
+  `concept` using a `Name/type` inline format (e.g. `entity=Alex/character,Kael/character`).
+  The keyword-heuristic approach that tried to guess type from a word list has been
+  removed entirely - it could not handle invented names or novel RP settings. Type
+  badges in the entity panel now reflect the model's classification rather than a
+  best-guess fallback.
+- **Embedding model used for consolidation and arc relevance**: `reconcileTypeEntries`
+  (consolidation overlap) and `hybridPrioritize` (arc relevance scoring) now call the
+  embedding model for semantic similarity where previously Jaccard word-overlap was
+  used. Jaccard remains the fallback when embeddings are unavailable. The embedding
+  model is tiny enough to run on CPU and does not compete with the main model for VRAM.
+- **Profile B behavioral gates**: `batchVerify` deduplication thresholds are now
+  profile-dependent. Profile B (hosted models) uses higher duplicate floors
+  (0.85 / 0.91 semantic, 0.68 / 0.78 Jaccard) so nuanced memories from powerful
+  models are less likely to be incorrectly rejected, and a lower same-topic threshold
+  (0.52 / 0.38) to catch more supersession candidates. Profile B also auto-regenerates
+  the canon summary after each arc extraction pass when at least two arc summaries
+  exist - no manual button needed.
+- **Profile settings controls**: the Character and World Profiles section in the
+  settings panel now includes a live token count showing how many tokens the current
+  profiles are injecting, a budget slider, and injection position/depth/role controls.
+- **Profiles added to Memorize Chat flow**: after Memorize Chat completes, character
+  and world profiles are regenerated and injected so they immediately reflect the
+  memories just built.
+- **Retrieval and budget unit tests**: targeted Jest tests for `hybridScore`,
+  `hybridPrioritize`, `applyBudgetMultipliers`, `classifyTurn`, and
+  `reconcileTypeEntries` in `memory-utils.js`. These cover the retrieval signal
+  weighting and adaptive budget logic to guard against regressions.
+
+### Fixed
+
+- **Entity timeline showing 0 memories after consolidation**: consolidation replaces
+  memory IDs with freshly-generated ones, which orphaned the entity registry. A
+  `reconcileEntityRegistry` pass now runs after every consolidation (both long-term
+  and session) - it prunes stale IDs, re-links entities by name match, and removes
+  entities that end up with zero memory links.
+- **Session entity registry not reconciled after consolidation**: the reconciliation
+  pass was added to long-term consolidation but missed `consolidateSessionMemories` in
+  `session.js`. Both paths now run the same reconciliation.
+- **Forget This Chat not clearing profiles**: Forget This Chat now clears character
+  and world profiles from both the injection slot and the UI display, alongside the
+  existing summary, session, scene, arc, and recap clears. Session entity registry
+  entries are also removed.
+- **Fresh Start not clearing profiles**: Fresh Start now clears the profiles injection
+  slot and UI display in addition to long-term memories and all chat-scoped tiers.
+- **Entity panel UI bugs**: several display issues in the entity registry panel fixed
+  after first-use testing - missing section header chevron, incorrect memory count
+  display, and timeline rendering edge cases.
+- **`saveSettingsDebounced` import**: was incorrectly imported from the wrong module
+  path; corrected to the proper `script.js` location.
+
 ### Changed
 
 - **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
