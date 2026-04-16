@@ -113,7 +113,7 @@ import {
   clearRepair,
   loadAndInjectRepair,
 } from './continuity.js';
-import { clearEmbeddingCache } from './embeddings.js';
+import { clearEmbeddingCache, getHardwareProfile } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon } from './canon.js';
 import {
   runGraphMigration,
@@ -315,27 +315,6 @@ let sceneBufferLastIndex = -1;
 /** Returns the settings object for this extension. */
 function getSettings() {
   return extension_settings[MODULE_NAME];
-}
-
-/**
- * Returns the active hardware profile: 'a' (local/low-VRAM) or 'b' (hosted).
- *
- * When set to 'auto', detection is based on the configured memory source:
- *   - ollama or webllm -> Profile A
- *   - main or openai_compatible -> Profile B
- *
- * Can be overridden by the user in settings (hardware_profile: 'a' | 'b').
- *
- * @returns {'a'|'b'}
- */
-export function getHardwareProfile() {
-  const s = getSettings();
-  const override = s.hardware_profile ?? 'auto';
-  if (override === 'a') return 'a';
-  if (override === 'b') return 'b';
-  // Auto-detect from source.
-  const source = s.source ?? memory_sources.main;
-  return source === memory_sources.ollama || source === memory_sources.webllm ? 'a' : 'b';
 }
 
 /** Returns the active character name, or null if no character is loaded. */
@@ -683,6 +662,20 @@ async function onCharacterMessageRendered() {
               }
             })
             .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
+        }
+
+        // Profile B only: auto-regenerate canon after arc extraction when
+        // enough resolved arc summaries are available. On Profile A this is
+        // too expensive for local models, so it stays manual-only there.
+        if (
+          settings.arcs_enabled &&
+          characterName &&
+          getHardwareProfile() === 'b' &&
+          loadArcSummaries().length >= 2
+        ) {
+          await generateCanon(characterName)
+            .then(() => injectCanon(characterName))
+            .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
         }
 
         // Refresh entity panel after extraction since new entities may have been linked.

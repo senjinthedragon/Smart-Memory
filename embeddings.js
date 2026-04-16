@@ -37,10 +37,12 @@
  *                       passed (new), superseded (state-change updates), and
  *                       rejected (duplicates)
  * clearEmbeddingCache - clears the in-session cache (call on chat change)
+ * getHardwareProfile  - returns the active hardware profile ('a' or 'b')
  */
 
 import { extension_settings } from '../../../extensions.js';
 import { MODULE_NAME } from './constants.js';
+import { memory_sources } from './generate.js';
 
 // In-session embedding cache: normalized text -> vector.
 // Embeddings are deterministic for a given text + model, so caching within a
@@ -198,6 +200,29 @@ function jaccardSimilarity(a, b) {
 }
 
 /**
+ * Returns the active hardware profile: 'a' (local/low-VRAM) or 'b' (hosted).
+ *
+ * Auto-detects from the configured memory source:
+ *   - ollama or webllm -> Profile A
+ *   - main or openai_compatible -> Profile B
+ *
+ * Can be overridden by the user in settings (hardware_profile: 'a' | 'b').
+ *
+ * Defined here (rather than index.js) so all modules can import it without
+ * creating circular dependencies.
+ *
+ * @returns {'a'|'b'}
+ */
+export function getHardwareProfile() {
+  const s = extension_settings[MODULE_NAME] ?? {};
+  const override = s.hardware_profile ?? 'auto';
+  if (override === 'a') return 'a';
+  if (override === 'b') return 'b';
+  const source = s.source ?? memory_sources.main;
+  return source === memory_sources.ollama || source === memory_sources.webllm ? 'a' : 'b';
+}
+
+/**
  * Batch-verifies a list of candidate memories against existing memories,
  * classifying each candidate into one of three buckets:
  *
@@ -270,17 +295,36 @@ export async function batchVerify(candidates, existing) {
       // Choose scoring method and thresholds. Fall back to Jaccard with its
       // own thresholds when either vector is missing - mixing methods and
       // thresholds produces wrong results.
+      //
+      // Profile B (hosted) uses slightly higher dup thresholds so nuanced
+      // memories from powerful models are less likely to be incorrectly
+      // rejected as duplicates of semantically adjacent but distinct facts.
+      // Profile B also uses a lower same-topic threshold to catch more
+      // supersession candidates, since hosted models write more varied prose.
+      const profile = getHardwareProfile();
       let score, dupThreshold, crossDupThreshold, sameTopicThreshold;
       if (candVec && exVec) {
         score = cosineSimilarity(candVec, exVec);
-        dupThreshold = 0.82;
-        crossDupThreshold = 0.88;
-        sameTopicThreshold = 0.55;
+        if (profile === 'b') {
+          dupThreshold = 0.85;
+          crossDupThreshold = 0.91;
+          sameTopicThreshold = 0.52;
+        } else {
+          dupThreshold = 0.82;
+          crossDupThreshold = 0.88;
+          sameTopicThreshold = 0.55;
+        }
       } else {
         score = jaccardSimilarity(candText, exText);
-        dupThreshold = 0.65;
-        crossDupThreshold = 0.75;
-        sameTopicThreshold = 0.4;
+        if (profile === 'b') {
+          dupThreshold = 0.68;
+          crossDupThreshold = 0.78;
+          sameTopicThreshold = 0.38;
+        } else {
+          dupThreshold = 0.65;
+          crossDupThreshold = 0.75;
+          sameTopicThreshold = 0.4;
+        }
       }
 
       const isSameType = ex.type === cand.type;

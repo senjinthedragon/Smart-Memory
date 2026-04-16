@@ -76,7 +76,7 @@ Entity registry is stored in `chatMetadata.smartMemory.entities` for session-sco
 
 Entities are extracted as a lightweight pass during or alongside memory extraction. The extraction prompt asks the model to tag each memory candidate with the entities it involves, using a short controlled vocabulary:
 
-```
+```text
 [fact:entity=Senjin,Alex] Senjin is Alex's older brother.
 [relationship:entity=Senjin,Alex] Their relationship has shifted from rivalry to deep mutual affection.
 ```
@@ -96,14 +96,16 @@ When a new memory candidate directly updates or replaces an earlier fact, the ol
 Supersession candidates are identified during the verifier pass. When a new candidate has high semantic similarity (above the deduplication threshold) with an existing memory but the content has meaningfully changed rather than being a near-duplicate, it is flagged as a supersession rather than a duplicate.
 
 Examples of supersession vs duplicate:
-- "She lives in Paris" + "She moved to Berlin last week" → supersession (state changed)
-- "She lives in Paris" + "She is based in Paris" → duplicate (same fact, different wording)
+
+- "She lives in Paris" + "She moved to Berlin last week" - supersession (state changed)
+- "She lives in Paris" + "She is based in Paris" - duplicate (same fact, different wording)
 
 The heuristic: high similarity score + divergent key named entities or negation markers → supersession candidate. The verifier prompt explicitly asks the model to classify each candidate as `new`, `duplicate`, `supersedes:[id]`, or `contradicts:[id]`.
 
 ### 3.2 Applying supersession
 
 When a supersession is confirmed:
+
 1. The new memory is written with `supersedes: [old_id]` and `valid_from` set to current message index.
 2. The old memory is updated: `superseded_by: new_id`, `valid_to: current message index`.
 3. The old memory is excluded from active injection/retrieval but kept in storage.
@@ -144,7 +146,7 @@ Sourced from recent `scene`, `development`, and `event` memories.
 
 Per named entity: a one-line directional state with confidence.
 
-```
+```text
 Alex (character): younger brother, deep mutual affection, slight protective dynamic, high trust [confidence: 0.9]
 The Cabin (place): shared safe space, strong emotional anchor for both [confidence: 0.8]
 ```
@@ -172,7 +174,7 @@ Currently injection selects memories by type priority and utility score. The gra
 
 Final retrieval score per memory is a weighted blend:
 
-```
+```text
 score =
   w1 * utility_score          // existing importance/recency/retrieval composite
   w2 * entity_overlap         // how many entities in this memory are present in the current turn
@@ -187,6 +189,7 @@ Weights are tunable per hardware profile. On local/low-VRAM, `w5` (semantic) is 
 ### 5.2 Diversity floor
 
 After scoring, enforce at least one memory from each of:
+
 - a `relationship` type
 - an unresolved arc
 - a recent `scene` or `development`
@@ -207,6 +210,7 @@ Instead of fixed token budgets per tier, allocate dynamically based on turn cont
 ### 6.1 Turn classification
 
 Classify each turn into one of:
+
 - `dialogue` - conversation-heavy, few scene changes
 - `action` - active scene, physical events, high detail
 - `transition` - timeskip, location change, returning after gap
@@ -266,6 +270,7 @@ Stored in `extension_settings.smart_memory.characters[name].canon` - persists ac
 ### 8.2 Entity panel
 
 New collapsible panel in the Smart Memory UI listing the entity registry. Each entity shows:
+
 - Name and type badge
 - Number of memories referencing it
 - Last seen (message index / relative label)
@@ -345,6 +350,7 @@ Migration is non-destructive - existing data is extended in place. No memories a
 ## 12. Implementation checklist
 
 ### Schema and storage
+
 - [x] Add `id` field - UUID generated on memory creation
 - [x] Add `source_messages` field
 - [x] Add `entities` field
@@ -355,12 +361,14 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [x] Schema version marker and migration pass
 
 ### Extraction
+
 - [x] Entity-tagged extraction prompt (bundle entity extraction into existing prompt)
 - [x] Entity normalizer (fuzzy match against registry, alias collapse)
 - [x] Supersession/contradiction classifier in verifier pass
 - [x] Apply supersession on verified candidates (retire old, link new)
 
 ### Profiles
+
 - [x] `character_state` generation prompt and parser
 - [x] `world_state` generation prompt and parser
 - [x] `relationship_matrix` generation prompt and parser
@@ -370,6 +378,7 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [x] Manual regenerate button in UI
 
 ### Retrieval
+
 - [x] Entity overlap scoring (regex entity pass on last messages)
 - [x] Arc relevance scoring
 - [x] Temporal proximity scoring
@@ -379,11 +388,13 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [ ] Semantic weight downscaling for Profile A (w5 deferred - requires async embed call)
 
 ### Adaptive budget
+
 - [x] Turn classifier (heuristic, no model call)
 - [x] Budget multiplier table
 - [x] Apply multipliers to injection budgets per turn
 
 ### Three-layer summarization
+
 - [x] `source_memory_ids` on scene schema
 - [x] Layer 2: arc summary generation on arc resolution
 - [x] Layer 3: canon summary generation (manual trigger)
@@ -391,6 +402,7 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [x] Canon summary injection (replaces compaction for long chats)
 
 ### UI
+
 - [x] Supersession indicator on retired memories (hidden by default, toggle)
 - [x] "Superseded by →" link on retired entries
 - [x] Contradiction warning indicator on affected entries
@@ -400,6 +412,7 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [x] Hardware profile override setting
 
 ### Infrastructure
+
 - [x] Hardware profile auto-detection from configured source
 - [x] Schema version check and migration on load
 - [ ] Tests for entity normalizer, supersession classifier, hybrid scorer, turn classifier
@@ -407,3 +420,20 @@ Migration is non-destructive - existing data is extended in place. No memories a
       in a merged memory (e.g. "she" instead of "Alex"), the entity loses its link to that memory.
       Fix: store entity name strings alongside memory IDs in the registry so reconcile does not
       need to guess from content.
+
+---
+
+### Profile B behavioral gates
+
+- [x] `getHardwareProfile()` moved to `embeddings.js`, imported everywhere else
+- [x] `batchVerify` thresholds - Profile B uses higher dup thresholds (0.85/0.91 semantic,
+      0.68/0.78 Jaccard) and lower same-topic threshold (0.52/0.38) to preserve nuanced
+      memories from powerful models while catching more supersession candidates
+- [x] Auto-canon regeneration after arc extraction (Profile B only, requires arcs_enabled +
+      at least 2 resolved arc summaries)
+- [ ] `hybridPrioritize` - semantic weight (`w5`) active on Profile B, downscaled on Profile A
+      (currently deferred - requires additional async embed call in scoring path)
+- [ ] Contradiction check auto-run on Profile B (currently manual-only on both profiles;
+      hosted models can afford periodic auto-checks but schedule/trigger not yet defined)
+- [ ] Profile regeneration on its own scheduled call every N messages (Profile B only;
+      currently regenerates on every extraction pass which is already sufficient for most use)
