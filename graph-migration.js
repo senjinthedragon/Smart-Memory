@@ -28,13 +28,13 @@
  * clearSessionEntityRegistry   - empties the session-scoped entity registry in chatMetadata
  * resolveEntityNames           - maps raw extracted name strings to entity ids, upserting new entities
  * reconcileEntityRegistry      - repairs entity registry links after memories are replaced (e.g. post-consolidation)
- * runGraphMigration            - one-shot migration pass: assigns IDs and graph fields to all
- *                                existing memories, initialises entity registries, writes version marker
+ * ensureCharacterMigrated      - runs any pending migration steps for a single character's data container
+ * ensureChatMigrated           - runs any pending migration steps for the current chat's data container
  */
 
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { MODULE_NAME, META_KEY, GRAPH_SCHEMA_VERSION, generateMemoryId } from './constants.js';
+import { MODULE_NAME, META_KEY, SCHEMA_VERSION, generateMemoryId } from './constants.js';
 
 // ---- Graph defaults ---------------------------------------------------------
 
@@ -375,73 +375,152 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
   }
 }
 
-// ---- One-shot migration pass -----------------------------------------------
+// ---- Per-container schema migration ----------------------------------------
+//
+// Each container (character store, chat block) carries its own schema_version
+// field. On load, the stored version is compared against SCHEMA_VERSION and any
+// missing steps are applied in sequence. Steps are never removed - old chats
+// may be opened at any point in the future.
+//
+// Adding a new migration:
+//   1. Increment SCHEMA_VERSION in constants.js.
+//   2. Add a new numbered entry to CHARACTER_MIGRATIONS and/or CHAT_MIGRATIONS
+//      below (whichever containers are affected).
+//   3. Do not remove any existing entries.
+//
+// Version 0 is the implicit starting state for all data written by v1.3.0 or
+// earlier (before this versioning system existed).
+
+// ---- Step definitions -------------------------------------------------------
 
 /**
- * Runs the graph schema migration if it has not yet been applied.
+ * CHARACTER migration: version 0 -> 1
  *
- * Checks extension_settings.smart_memory.graph_schema_version against the
- * current GRAPH_SCHEMA_VERSION constant. If absent or lower, performs:
- *   1. Assigns a stable UUID id to every long-term memory that lacks one.
- *   2. Adds all remaining graph fields (source_messages, entities, time_scope,
- *      valid_from, valid_to, supersedes, superseded_by, contradicts) with safe
- *      defaults. Existing fields are never overwritten.
- *   3. Does the same for session memories in the current chat (if any).
- *   4. Initialises an empty entity registry for each character and for the
- *      current session if no registry exists yet.
- *   5. Writes the GRAPH_SCHEMA_VERSION marker to extension_settings and saves.
+ * Adds graph fields to every long-term memory and initialises the entity
+ * registry. This covers all data written by v1.3.0 and earlier, which shipped
+ * without any graph schema fields.
  *
- * Migration is non-destructive - no memories are deleted or altered beyond
- * receiving new fields. Safe to call on every chat load; it is a fast no-op
- * once the version marker is set.
- *
- * @returns {Promise<boolean>} True if migration ran, false if already up to date.
+ * @param {Object} charData - Character data object { memories, entities, ... }
+ * @returns {Object} Updated character data with schema_version NOT yet set
+ *                   (the runner sets it after all steps complete).
  */
-export async function runGraphMigration() {
+function migrateCharacter_v1(charData) {
+  const memories = (charData.memories ?? []).map(applyGraphDefaults);
+  const entities = Array.isArray(charData.entities) ? charData.entities : [];
+  return { ...charData, memories, entities };
+}
+
+/**
+ * CHAT migration: version 0 -> 1
+ *
+ * Adds graph fields to every session memory and initialises the session entity
+ * registry. Covers all chat data written by v1.3.0 and earlier.
+ *
+ * @param {Object} chatMeta - chatMetadata[META_KEY] block.
+ * @returns {Object} Updated chat meta block with schema_version NOT yet set.
+ */
+function migrateChat_v1(chatMeta) {
+  const sessionMemories = (chatMeta.sessionMemories ?? []).map(applyGraphDefaults);
+  const entities = Array.isArray(chatMeta.entities) ? chatMeta.entities : [];
+  return { ...chatMeta, sessionMemories, entities };
+}
+
+// ---- Step registries --------------------------------------------------------
+// Map<version, stepFn> - add new entries here when SCHEMA_VERSION is bumped.
+
+const CHARACTER_MIGRATIONS = new Map([[1, migrateCharacter_v1]]);
+
+const CHAT_MIGRATIONS = new Map([[1, migrateChat_v1]]);
+
+// ---- Migration runner -------------------------------------------------------
+
+/**
+ * Applies all pending migration steps to a data container, returning the
+ * updated container. If the container is already at SCHEMA_VERSION the
+ * original object is returned unchanged.
+ *
+ * @param {Object} container - Data object with an optional schema_version field.
+ * @param {Map<number, Function>} steps - Ordered map of version -> migration fn.
+ * @returns {Object} Container with all pending steps applied and schema_version set.
+ */
+function applyMigrations(container, steps) {
+  let version = container.schema_version ?? 0;
+  if (version >= SCHEMA_VERSION) return container;
+
+  let current = container;
+  while (version < SCHEMA_VERSION) {
+    const step = steps.get(version + 1);
+    if (step) {
+      current = step(current);
+      console.log(`[SmartMemory] Applied migration step v${version + 1}.`);
+    }
+    version++;
+  }
+  return { ...current, schema_version: SCHEMA_VERSION };
+}
+
+// ---- Public API -------------------------------------------------------------
+
+/**
+ * Ensures the stored data for a single character is at the current schema
+ * version, running any pending migration steps if not.
+ *
+ * Safe to call on every chat load for the active character - it is a fast
+ * no-op when the container is already up to date.
+ *
+ * Writes the updated container back to extension_settings and calls
+ * saveSettingsDebounced() only when migration actually ran.
+ *
+ * @param {string} characterName
+ * @returns {boolean} True if migration ran, false if already up to date.
+ */
+export function ensureCharacterMigrated(characterName) {
+  if (!characterName) return false;
   const settings = extension_settings[MODULE_NAME];
   if (!settings) return false;
 
-  if ((settings.graph_schema_version ?? 0) >= GRAPH_SCHEMA_VERSION) return false;
+  const charData = settings.characters?.[characterName];
+  if (!charData) return false;
 
-  console.log('[SmartMemory] Running graph schema migration to v' + GRAPH_SCHEMA_VERSION + '...');
+  if ((charData.schema_version ?? 0) >= SCHEMA_VERSION) return false;
 
-  // --- Migrate all long-term character memories ----------------------------
-  const characters = settings.characters ?? {};
-  for (const [name, charData] of Object.entries(characters)) {
-    if (!Array.isArray(charData?.memories)) continue;
-
-    const migrated = charData.memories.map(applyGraphDefaults);
-    // Initialise an empty entity registry for this character if none exists.
-    const entities = Array.isArray(charData.entities) ? charData.entities : [];
-
-    settings.characters[name] = {
-      ...charData,
-      memories: migrated,
-      entities,
-    };
-  }
-
-  // --- Migrate current session memories ------------------------------------
-  // Only runs when a chat is actually loaded. On first load before any chat
-  // is opened this block is skipped cleanly; session memories are migrated
-  // via applyGraphDefaults in loadSessionMemories on the first access.
-  const context = getContext();
-  if (context.chatMetadata?.[META_KEY]?.sessionMemories) {
-    context.chatMetadata[META_KEY].sessionMemories =
-      context.chatMetadata[META_KEY].sessionMemories.map(applyGraphDefaults);
-
-    // Initialise session entity registry if not already present.
-    if (!Array.isArray(context.chatMetadata[META_KEY].entities)) {
-      context.chatMetadata[META_KEY].entities = [];
-    }
-
-    await context.saveMetadata();
-  }
-
-  // --- Write version marker and persist settings ---------------------------
-  settings.graph_schema_version = GRAPH_SCHEMA_VERSION;
+  console.log(
+    `[SmartMemory] Migrating character "${characterName}" to schema v${SCHEMA_VERSION}...`,
+  );
+  const migrated = applyMigrations(charData, CHARACTER_MIGRATIONS);
+  if (!settings.characters) settings.characters = {};
+  settings.characters[characterName] = migrated;
   saveSettingsDebounced();
 
-  console.log('[SmartMemory] Graph migration complete.');
+  console.log(`[SmartMemory] Character "${characterName}" migration complete.`);
+  return true;
+}
+
+/**
+ * Ensures the chatMetadata block for the current chat is at the current schema
+ * version, running any pending migration steps if not.
+ *
+ * Safe to call on every chat load - it is a fast no-op when the container is
+ * already up to date or when no chat is loaded.
+ *
+ * Writes the updated block back to chatMetadata and calls saveMetadata() only
+ * when migration actually ran.
+ *
+ * @returns {Promise<boolean>} True if migration ran, false if already up to date.
+ */
+export async function ensureChatMigrated() {
+  const context = getContext();
+  if (!context.chatMetadata) return false;
+
+  const meta = context.chatMetadata[META_KEY];
+  if (!meta) return false;
+
+  if ((meta.schema_version ?? 0) >= SCHEMA_VERSION) return false;
+
+  console.log(`[SmartMemory] Migrating chat data to schema v${SCHEMA_VERSION}...`);
+  context.chatMetadata[META_KEY] = applyMigrations(meta, CHAT_MIGRATIONS);
+  await context.saveMetadata();
+
+  console.log('[SmartMemory] Chat data migration complete.');
   return true;
 }

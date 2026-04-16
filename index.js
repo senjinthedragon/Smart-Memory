@@ -116,7 +116,8 @@ import {
 import { clearEmbeddingCache, getHardwareProfile } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon } from './canon.js';
 import {
-  runGraphMigration,
+  ensureCharacterMigrated,
+  ensureChatMigrated,
   loadCharacterEntityRegistry,
   loadSessionEntityRegistry,
   clearSessionEntityRegistry,
@@ -717,10 +718,9 @@ async function onChatChanged() {
   lastKnownChatLength = 0;
   clearEmbeddingCache();
 
-  // Run the one-shot graph schema migration. This is a fast no-op after the
-  // first run (version-gated). Runs here rather than at init so both long-term
-  // and session memories are accessible when the migration executes.
-  await runGraphMigration();
+  // Migrate chat data first - no character name needed, operates on chatMetadata.
+  // Fast no-op when the container is already at the current schema version.
+  await ensureChatMigrated();
 
   const settings = getSettings();
   if (!settings.enabled) return;
@@ -732,6 +732,10 @@ async function onChatChanged() {
   }
 
   const characterName = getCurrentCharacterName();
+
+  // Migrate character data now that we know which character is active.
+  // Fast no-op when already at the current schema version.
+  ensureCharacterMigrated(characterName);
   const freshStart = isFreshStart();
 
   // Restore all injected context from the previous session.
