@@ -131,28 +131,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reconcileTypeEntries` in `memory-utils.js`. These cover the retrieval signal
   weighting and adaptive budget logic to guard against regressions.
 
-### Fixed
-
-- **Entity timeline showing 0 memories after consolidation**: consolidation replaces
-  memory IDs with freshly-generated ones, which orphaned the entity registry. A
-  `reconcileEntityRegistry` pass now runs after every consolidation (both long-term
-  and session) - it prunes stale IDs, re-links entities by name match, and removes
-  entities that end up with zero memory links.
-- **Session entity registry not reconciled after consolidation**: the reconciliation
-  pass was added to long-term consolidation but missed `consolidateSessionMemories` in
-  `session.js`. Both paths now run the same reconciliation.
-- **Forget This Chat not clearing profiles**: Forget This Chat now clears character
-  and world profiles from both the injection slot and the UI display, alongside the
-  existing summary, session, scene, arc, and recap clears. Session entity registry
-  entries are also removed.
-- **Fresh Start not clearing profiles**: Fresh Start now clears the profiles injection
-  slot and UI display in addition to long-term memories and all chat-scoped tiers.
-- **Entity panel UI bugs**: several display issues in the entity registry panel fixed
-  after first-use testing - missing section header chevron, incorrect memory count
-  display, and timeline rendering edge cases.
-- **`saveSettingsDebounced` import**: was incorrectly imported from the wrong module
-  path; corrected to the proper `script.js` location.
-
 ### Changed
 
 - **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
