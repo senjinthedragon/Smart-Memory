@@ -319,10 +319,8 @@ export function resolveEntityNames(mem, rawNames, messageIndex, registry) {
 export function reconcileEntityRegistry(entityRegistry, currentMemories) {
   if (!Array.isArray(entityRegistry) || entityRegistry.length === 0) return;
   if (!Array.isArray(currentMemories) || currentMemories.length === 0) {
-    // No current memories - clear all memory_ids but keep the entity entries.
-    for (const entity of entityRegistry) {
-      entity.memory_ids = [];
-    }
+    // No current memories - remove all entity entries (nothing left to link to).
+    entityRegistry.splice(0);
     return;
   }
 
@@ -359,6 +357,21 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
       const linked = currentMemories.filter((m) => entity.memory_ids.includes(m.id));
       entity.last_seen = Math.max(...linked.map((m) => m.valid_from ?? m.ts ?? 0));
     }
+  }
+
+  // Remove any entities that ended up with no linked memories. They contribute
+  // nothing to timeline, entity overlap scoring, or the panel display. If the
+  // entity reappears in a future extraction it will be re-added via upsertEntity.
+  const before = entityRegistry.length;
+  entityRegistry.splice(
+    0,
+    entityRegistry.length,
+    ...entityRegistry.filter((e) => e.memory_ids.length > 0),
+  );
+  if (entityRegistry.length < before) {
+    console.log(
+      `[SmartMemory] Pruned ${before - entityRegistry.length} entity entries with no linked memories.`,
+    );
   }
 }
 
