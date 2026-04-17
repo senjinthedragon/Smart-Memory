@@ -228,7 +228,7 @@ EXPIRATION CLASS (choose one):
 - permanent  - should persist as a durable memory
 
 ENTITY TAGGING (optional but encouraged):
-If the memory involves specific named characters, places, or objects, append :entity=Name/type pairs inside the bracket. Use the exact names as they appear in the conversation. Classify each entity as one of: character, place, object, faction, concept. Omit this field entirely if no named entities are relevant - do not invent names.
+If the memory involves specific NAMED entities (proper nouns with a specific name - a character, a named location, a named object, an organisation), append :entity=Name/type pairs inside the bracket. Use the exact names as they appear in the conversation. Classify each as: character, place, object, faction, or concept. Do NOT tag generic nouns (whiskey, sword, horse, money, fire) - only tag them if they have a specific proper name (Jack Daniel's, Excalibur, Shadowmere). Omit this field entirely if no named entities are relevant - do not invent names.
 
 One item per line, exact format:
 [scene:2:scene] We are in a candlelit tavern, late evening, rain outside.
@@ -589,7 +589,7 @@ Also classify expiration:
 - permanent  - durable fact that should persist long-term
 
 ENTITY TAGGING (optional but encouraged):
-If the memory involves specific named characters, places, or objects, append :entity=Name/type pairs inside the bracket. Use the exact names as they appear in the conversation. Classify each entity as one of: character, place, object, faction, concept. Omit this field entirely if no named entities are relevant - do not invent names.
+If the memory involves specific NAMED entities (proper nouns with a specific name - a character, a named location, a named object, an organisation), append :entity=Name/type pairs inside the bracket. Use the exact names as they appear in the conversation. Classify each as: character, place, object, faction, or concept. Do NOT tag generic nouns (whiskey, sword, horse, money, fire) - only tag them if they have a specific proper name (Jack Daniel's, Excalibur, Shadowmere). Omit this field entirely if no named entities are relevant - do not invent names.
 
 Output ONLY one memory per line using this exact format (nothing else):
 [fact:2:permanent] The character's name is Elara and she works as a blacksmith.

@@ -28,6 +28,9 @@
  * clearSessionEntityRegistry   - empties the session-scoped entity registry in chatMetadata
  * resolveEntityNames           - maps raw extracted name strings to entity ids, upserting new entities
  * reconcileEntityRegistry      - repairs entity registry links after memories are replaced (e.g. post-consolidation)
+ * setEntityType                - changes the type of an entity in a registry by id
+ * mergeEntitiesByName          - merges a source entity into a target across both registries; source name becomes an alias
+ * seedCharacterEntity          - ensures the active character card name exists in the long-term registry on chat load
  * ensureCharacterMigrated      - runs any pending migration steps for a single character's data container
  * ensureChatMigrated           - runs any pending migration steps for the current chat's data container
  */
@@ -243,14 +246,13 @@ function upsertEntity(rawName, memoryId, messageIndex, registry, classifiedType 
     return existing.id;
   }
 
-  // New entity. Use the model-provided type when available; default to
-  // 'character' when the model omitted the classification - it is the most
-  // common entity type in RP and no keyword heuristic can reliably infer
-  // type from made-up or scenario-specific names.
+  // New entity. Use the model-provided type when available; fall back to
+  // 'unknown' rather than 'character' so the user can see at a glance which
+  // entries the model failed to classify, and correct them if needed.
   const entity = {
     id: generateMemoryId(),
     name: rawName,
-    type: classifiedType ?? 'character',
+    type: classifiedType ?? 'unknown',
     aliases: [],
     first_seen: messageIndex,
     last_seen: messageIndex,
@@ -380,6 +382,179 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
       `[SmartMemory] Pruned ${before - entityRegistry.length} entity entries with no linked memories.`,
     );
   }
+}
+
+// ---- Entity type override ---------------------------------------------------
+
+/**
+ * Changes the type of an entity in the given registry, identified by id.
+ * Mutates the registry in place. Caller is responsible for persisting.
+ *
+ * @param {string} entityId - The entity's stable UUID.
+ * @param {string} newType  - New type string (character|place|object|faction|concept|unknown).
+ * @param {Array<Object>} registry - Registry to update (mutated in place).
+ */
+export function setEntityType(entityId, newType, registry) {
+  const entity = registry.find((e) => e.id === entityId);
+  if (entity) entity.type = newType;
+}
+
+// ---- Entity merge -----------------------------------------------------------
+
+/**
+ * Merges a source entity into a target entity within a single registry.
+ * After the merge:
+ * - The source's canonical name and all its aliases are added to the target's
+ *   alias list. Future extractions that mention the source name will resolve
+ *   to the target entity automatically via the alias lookup in findEntityByName.
+ * - All memory_ids from the source are moved to the target (deduplicated).
+ * - Every memory in the supplied memories array that referenced the source id
+ *   is updated to reference the target id instead.
+ * - The source entity is removed from the registry.
+ *
+ * Both sourceId and targetId must exist in the registry. Mutates the registry
+ * and memories arrays in place. Caller is responsible for persisting both.
+ *
+ * @param {string} sourceId  - UUID of the entity to absorb (will be removed).
+ * @param {string} targetId  - UUID of the entity to keep (will gain aliases).
+ * @param {Array<Object>} registry - Entity registry array (mutated in place).
+ * @param {Array<Object>} memories - Memory array to update entity refs in (mutated in place).
+ */
+function mergeInRegistry(sourceId, targetId, registry, memories) {
+  const sourceIdx = registry.findIndex((e) => e.id === sourceId);
+  const target = registry.find((e) => e.id === targetId);
+  if (sourceIdx < 0 || !target) return;
+
+  const source = registry[sourceIdx];
+
+  // Absorb source name and aliases into target aliases.
+  const newAliases = [source.name, ...(source.aliases ?? [])];
+  if (!Array.isArray(target.aliases)) target.aliases = [];
+  for (const alias of newAliases) {
+    const lower = alias.toLowerCase().trim();
+    const alreadyKnown =
+      target.name.toLowerCase() === lower ||
+      target.aliases.some((a) => a.toLowerCase().trim() === lower);
+    if (!alreadyKnown) target.aliases.push(alias);
+  }
+
+  // Move memory_ids.
+  for (const id of source.memory_ids ?? []) {
+    if (!target.memory_ids.includes(id)) target.memory_ids.push(id);
+  }
+
+  // Advance last_seen.
+  target.last_seen = Math.max(target.last_seen ?? 0, source.last_seen ?? 0);
+
+  // Rewrite entity refs in the memory array.
+  for (const mem of memories) {
+    if (!Array.isArray(mem.entities)) continue;
+    const idx = mem.entities.indexOf(sourceId);
+    if (idx >= 0) {
+      mem.entities.splice(idx, 1);
+      if (!mem.entities.includes(targetId)) mem.entities.push(targetId);
+    }
+  }
+
+  // Remove source from registry.
+  registry.splice(sourceIdx, 1);
+}
+
+/**
+ * Merges two entities by canonical name across both the long-term and
+ * session-scoped registries. The source name (and its aliases) become aliases
+ * on the target entity, so future extractions that mention the source name
+ * resolve to the target automatically.
+ *
+ * Operates on both registries independently: if the source name exists in the
+ * lt registry, it is merged into the lt target (creating the target if it only
+ * exists in session). Vice-versa for session. In the rare case where target
+ * only exists in one registry and source only exists in the other, the source
+ * entity is renamed to the target name and the canonical name is updated.
+ *
+ * Mutates all four arrays in place. Caller is responsible for persisting.
+ *
+ * @param {string} sourceName   - Canonical name of the entity to absorb.
+ * @param {string} targetName   - Canonical name of the entity to keep.
+ * @param {Array<Object>} ltRegistry       - Long-term entity registry (mutated).
+ * @param {Array<Object>} ltMemories       - Long-term memory array (mutated).
+ * @param {Array<Object>} sessionRegistry  - Session entity registry (mutated).
+ * @param {Array<Object>} sessionMemories  - Session memory array (mutated).
+ */
+export function mergeEntitiesByName(
+  sourceName,
+  targetName,
+  ltRegistry,
+  ltMemories,
+  sessionRegistry,
+  sessionMemories,
+) {
+  const sLower = sourceName.toLowerCase().trim();
+  const tLower = targetName.toLowerCase().trim();
+  if (sLower === tLower) return; // nothing to do
+
+  for (const [registry, memories] of [
+    [ltRegistry, ltMemories],
+    [sessionRegistry, sessionMemories],
+  ]) {
+    const source = registry.find(
+      (e) =>
+        e.name.toLowerCase() === sLower ||
+        (e.aliases ?? []).some((a) => a.toLowerCase() === sLower),
+    );
+    if (!source) continue;
+
+    const target = registry.find(
+      (e) =>
+        e.id !== source.id &&
+        (e.name.toLowerCase() === tLower ||
+          (e.aliases ?? []).some((a) => a.toLowerCase() === tLower)),
+    );
+
+    if (target) {
+      // Both exist in this registry - standard merge.
+      mergeInRegistry(source.id, target.id, registry, memories);
+    } else {
+      // Source exists but target does not - rename source to the target name,
+      // keeping the old name as an alias so it is still recognised.
+      const oldName = source.name;
+      source.name = targetName;
+      if (!Array.isArray(source.aliases)) source.aliases = [];
+      if (!source.aliases.some((a) => a.toLowerCase() === oldName.toLowerCase())) {
+        source.aliases.push(oldName);
+      }
+    }
+  }
+}
+
+// ---- Character card entity seeding ------------------------------------------
+
+/**
+ * Ensures the active character has a seed entity in the long-term registry.
+ * Called on chat load / character change so the main character is always
+ * present in the registry from the first message, rather than only appearing
+ * once the extraction model first tags them.
+ *
+ * If an entity with this name (or alias) already exists, nothing is changed.
+ * Mutates the registry in place. Caller is responsible for persisting.
+ *
+ * @param {string} characterName - Canonical name from the character card.
+ * @param {Array<Object>} registry - Long-term entity registry (mutated in place).
+ */
+export function seedCharacterEntity(characterName, registry) {
+  if (!characterName || !Array.isArray(registry)) return;
+  const existing = findEntityByName(characterName, registry);
+  if (existing) return; // already present
+
+  registry.push({
+    id: generateMemoryId(),
+    name: characterName,
+    type: 'character',
+    aliases: [],
+    first_seen: 0,
+    last_seen: 0,
+    memory_ids: [],
+  });
 }
 
 // ---- Per-container schema migration ----------------------------------------

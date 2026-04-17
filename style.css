@@ -735,6 +735,55 @@
   border: 1px solid rgba(240, 160, 160, 0.25);
 }
 
+#smart_memory_settings .sm_entity_type_unknown {
+  color: #999;
+  background: rgba(153, 153, 153, 0.1);
+  border: 1px solid rgba(153, 153, 153, 0.25);
+}
+
+#smart_memory_settings .sm_entity_type_badge[data-clickable] {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+#smart_memory_settings .sm_entity_type_badge[data-clickable]:hover {
+  opacity: 0.75;
+}
+
+#smart_memory_settings .sm_entity_type_picker {
+  position: absolute;
+  z-index: 100;
+  background: var(--black-3, #222);
+  border: 1px solid var(--border-color, #555);
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+}
+
+#smart_memory_settings .sm_entity_type_option {
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+#smart_memory_settings .sm_entity_type_option:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#smart_memory_settings .sm_entity_merge_btn {
+  padding: 2px 6px;
+  font-size: 0.75em;
+  flex-shrink: 0;
+}
+
 #smart_memory_settings .sm_entity_name {
   font-weight: 600;
   color: var(--SmartReplyColor, #ddd);

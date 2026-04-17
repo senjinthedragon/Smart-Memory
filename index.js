@@ -119,8 +119,13 @@ import {
   ensureCharacterMigrated,
   ensureChatMigrated,
   loadCharacterEntityRegistry,
+  saveCharacterEntityRegistry,
   loadSessionEntityRegistry,
+  saveSessionEntityRegistry,
   clearSessionEntityRegistry,
+  setEntityType,
+  mergeEntitiesByName,
+  seedCharacterEntity,
 } from './graph-migration.js';
 import {
   generateProfiles,
@@ -736,6 +741,20 @@ async function onChatChanged() {
   // Migrate character data now that we know which character is active.
   // Fast no-op when already at the current schema version.
   ensureCharacterMigrated(characterName);
+
+  // Seed the active character's canonical name into the long-term entity registry
+  // if not already present, so the main character appears in the entity panel and
+  // benefits from entity overlap scoring from the first message.
+  if (characterName) {
+    const ltReg = loadCharacterEntityRegistry(characterName);
+    const before = ltReg.length;
+    seedCharacterEntity(characterName, ltReg);
+    if (ltReg.length > before) {
+      saveCharacterEntityRegistry(characterName, ltReg);
+      saveSettingsDebounced();
+    }
+  }
+
   const freshStart = isFreshStart();
 
   // Restore all injected context from the previous session.
@@ -1349,25 +1368,117 @@ function updateEntityPanel(characterName) {
     object: 'fa-cube',
     faction: 'fa-users',
     concept: 'fa-lightbulb',
+    unknown: 'fa-question',
+  };
+
+  const ENTITY_TYPES = ['character', 'place', 'object', 'faction', 'concept', 'unknown'];
+
+  // Helper: persist type or merge changes across both registries, then re-render.
+  const persistAndRefresh = async () => {
+    if (characterName) {
+      const lt = loadCharacterEntityRegistry(characterName);
+      saveCharacterEntityRegistry(characterName, lt);
+      saveSettingsDebounced();
+    }
+    const session = loadSessionEntityRegistry();
+    await saveSessionEntityRegistry(session);
+    updateEntityPanel(characterName);
   };
 
   for (const entity of entities) {
     const icon = TYPE_ICONS[entity.type] ?? 'fa-tag';
     const memCount = Array.isArray(entity.memory_ids) ? entity.memory_ids.length : 0;
     const lastSeen = entity.last_seen != null ? `msg #${entity.last_seen}` : 'unknown';
+    const safeName = $('<div>').text(entity.name).html();
 
     const $row = $(`
-      <div class="sm_entity_row" data-entity-id="${entity.id}">
-        <span class="sm_entity_type_badge sm_entity_type_${entity.type}">
+      <div class="sm_entity_row" data-entity-id="${entity.id}" style="position:relative;">
+        <span class="sm_entity_type_badge sm_entity_type_${entity.type}" data-clickable title="Click to change type">
           <i class="fa-solid ${icon}"></i> ${entity.type}
         </span>
-        <span class="sm_entity_name">${$('<div>').text(entity.name).html()}</span>
+        <span class="sm_entity_name">${safeName}</span>
         <span class="sm_entity_meta">${memCount} ${memCount === 1 ? 'memory' : 'memories'} &middot; last seen ${lastSeen}</span>
+        <button class="sm_entity_merge_btn menu_button" title="Merge into another entity">
+          <i class="fa-solid fa-code-merge"></i>
+        </button>
         <button class="sm_entity_timeline_btn menu_button" title="View timeline for this entity">
           <i class="fa-solid fa-timeline"></i>
         </button>
       </div>
     `);
+
+    // Type-picker: clicking the badge opens an inline dropdown to change the type.
+    $row.find('.sm_entity_type_badge').on('click', (e) => {
+      e.stopPropagation();
+      $panel.find('.sm_entity_type_picker').remove();
+
+      const $picker = $('<div class="sm_entity_type_picker">');
+      for (const t of ENTITY_TYPES) {
+        const tIcon = TYPE_ICONS[t] ?? 'fa-tag';
+        const $opt = $(
+          `<div class="sm_entity_type_option sm_entity_type_${t}"><i class="fa-solid ${tIcon}"></i> ${t}</div>`,
+        );
+        $opt.on('click', async (ev) => {
+          ev.stopPropagation();
+          $picker.remove();
+          const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
+          const sessReg = loadSessionEntityRegistry();
+          setEntityType(entity.id, t, ltReg);
+          setEntityType(entity.id, t, sessReg);
+          await persistAndRefresh();
+        });
+        $picker.append($opt);
+      }
+
+      // Position below the badge and close on outside click.
+      $row.append($picker);
+      const closeOnOutside = (ev) => {
+        if (!$picker[0].contains(ev.target)) {
+          $picker.remove();
+          $(document).off('click', closeOnOutside);
+        }
+      };
+      setTimeout(() => $(document).on('click', closeOnOutside), 0);
+    });
+
+    // Merge button: shows a select of all other entity names.
+    $row.find('.sm_entity_merge_btn').on('click', (e) => {
+      e.stopPropagation();
+      $panel.find('.sm_entity_type_picker').remove();
+
+      const otherNames = entities.filter((en) => en.id !== entity.id).map((en) => en.name);
+      if (otherNames.length === 0) return;
+
+      const $picker = $('<div class="sm_entity_type_picker">');
+      $picker.append(
+        $('<div style="font-size:0.75em;opacity:0.6;padding:2px 8px 4px;">Merge into:</div>'),
+      );
+      for (const targetName of otherNames) {
+        const safeTarget = $('<div>').text(targetName).html();
+        const $opt = $(`<div class="sm_entity_type_option">${safeTarget}</div>`);
+        $opt.on('click', async (ev) => {
+          ev.stopPropagation();
+          $picker.remove();
+          const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
+          const ltMems = characterName ? loadCharacterMemories(characterName) : [];
+          const sessReg = loadSessionEntityRegistry();
+          const sessMems = loadSessionMemories();
+          mergeEntitiesByName(entity.name, targetName, ltReg, ltMems, sessReg, sessMems);
+          if (characterName) saveCharacterMemories(characterName, ltMems);
+          await persistAndRefresh();
+        });
+        $picker.append($opt);
+      }
+
+      $row.append($picker);
+      const closeOnOutside = (ev) => {
+        if (!$picker[0].contains(ev.target)) {
+          $picker.remove();
+          $(document).off('click', closeOnOutside);
+        }
+      };
+      setTimeout(() => $(document).on('click', closeOnOutside), 0);
+    });
 
     $row.find('.sm_entity_timeline_btn').on('click', (e) => {
       e.stopPropagation();
