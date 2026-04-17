@@ -326,16 +326,21 @@
 #smart_memory_settings .sm_delete_arc {
   flex-shrink: 0;
   padding: 2px 6px;
+  color: #c06060;
   opacity: 0.6;
   transition: opacity 0.15s;
 }
 
 #smart_memory_settings .sm_edit_memory:hover,
 #smart_memory_settings .sm_edit_session_memory:hover,
-#smart_memory_settings .sm_edit_arc:hover,
+#smart_memory_settings .sm_edit_arc:hover {
+  opacity: 1;
+}
+
 #smart_memory_settings .sm_delete_memory:hover,
 #smart_memory_settings .sm_delete_session_memory:hover,
 #smart_memory_settings .sm_delete_arc:hover {
+  color: #e07070;
   opacity: 1;
 }
 
@@ -809,10 +814,13 @@
   font-size: 0.75em;
   flex-shrink: 0;
   color: #c06060;
+  opacity: 0.6;
+  transition: opacity 0.15s;
 }
 
 #smart_memory_settings .sm_entity_delete_btn:hover {
   color: #e07070;
+  opacity: 1;
 }
 
 /* ── Entity timeline ─────────────────────────────────────────────────────── */
