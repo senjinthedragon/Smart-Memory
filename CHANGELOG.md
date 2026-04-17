@@ -201,6 +201,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verbose arc entries in the response, 400 tokens was not enough and the last arc was silently
   truncated mid-sentence at the storage level before injection. 600 tokens accommodates 10
   full-sentence arcs with headroom.
+- **Arc injection budget default raised from 400 to 700 tokens**: the adaptive budget applies
+  a 0.8x multiplier to arcs during intimate scenes, bringing a 600 token budget down to 480.
+  With 10 verbose arcs totalling ~530 tokens, this caused the oldest arc to be silently
+  excluded from injection. 700 tokens (effective 560 at 0.8x) provides sufficient headroom.
+  Existing installs with the old default (200 or 400) are migrated automatically on load.
 
 - **Adaptive budget values persisted to disk during extraction**: `saveSettingsDebounced`
   was called inside the extraction try block while the per-turn-type multipliers were still

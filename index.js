@@ -206,7 +206,7 @@ const defaultSettings = {
   arcs_enabled: true,
   arcs_max: 10,
   arcs_response_length: 600,
-  arcs_inject_budget: 400,
+  arcs_inject_budget: 700,
   arcs_position: extension_prompt_types.IN_CHAT,
   arcs_depth: 2,
   arcs_role: extension_prompt_roles.SYSTEM,
@@ -1789,10 +1789,14 @@ function loadSettings() {
     extension_settings[MODULE_NAME].compaction_response_length = 2000;
   }
 
-  // Migration: raise arc injection budget from 200 to 400.
-  // 200 tokens is too tight for 10 arcs, causing the last entry to be cut mid-sentence.
-  if (extension_settings[MODULE_NAME].arcs_inject_budget === 200) {
-    extension_settings[MODULE_NAME].arcs_inject_budget = 400;
+  // Migration: raise arc injection budget to 700.
+  // 200 was too tight for 10 arcs; 400 was too tight once the adaptive budget applies a
+  // 0.8x multiplier during intimate scenes, dropping the oldest arc from injection.
+  if (
+    extension_settings[MODULE_NAME].arcs_inject_budget === 200 ||
+    extension_settings[MODULE_NAME].arcs_inject_budget === 400
+  ) {
+    extension_settings[MODULE_NAME].arcs_inject_budget = 700;
   }
 
   // Migration: raise arc extraction response length from 400 to 600.
