@@ -190,6 +190,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Arc deduplication on extraction**: each extraction pass now compares new arc candidates
+  against existing arcs using Jaccard word-overlap (threshold 0.4). Candidates that are
+  semantically near-identical to an existing arc are dropped rather than appended. A cleanup
+  pass also runs on the stored arc list itself each extraction cycle, so duplicates that
+  accumulated before this fix are removed on the next extraction. Previously the same story
+  thread (e.g. an unresolved promise) could appear three or more times with slightly different
+  phrasing because the model re-extracted it each pass.
+- **Arc extraction response length default raised from 400 to 600 tokens**: with up to 10
+  verbose arc entries in the response, 400 tokens was not enough and the last arc was silently
+  truncated mid-sentence at the storage level before injection. 600 tokens accommodates 10
+  full-sentence arcs with headroom.
+
 - **Adaptive budget values persisted to disk during extraction**: `saveSettingsDebounced`
   was called inside the extraction try block while the per-turn-type multipliers were still
   patched into `settings`. Ollama LLM calls take several seconds - well past the 1000 ms

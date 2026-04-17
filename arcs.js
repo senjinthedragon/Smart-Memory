@@ -29,7 +29,7 @@
  * saveArcs          - persists the arc array to chatMetadata
  * deleteArc         - removes a single arc by index
  * clearArcs         - empties all arcs for the current chat
- * extractArcs       - runs extraction against the conversation and updates the arc list
+ * extractArcs       - runs extraction against the conversation, deduplicates, and updates the arc list
  * injectArcs        - pushes active arcs into the prompt via setExtensionPrompt
  * loadArcSummaries  - returns the stored arc summary array for the current chat
  * saveArcSummaries  - persists the arc summary array to chatMetadata
@@ -48,6 +48,38 @@ import { buildArcExtractionPrompt, buildArcSummaryPrompt } from './prompts.js';
 import { parseArcOutput } from './parsers.js';
 import { loadSceneHistory } from './scenes.js';
 import { loadSessionMemories } from './session.js';
+
+// ---- Deduplication ------------------------------------------------------
+
+/**
+ * Jaccard word-overlap similarity between two arc content strings.
+ * Used to detect near-duplicate arcs with different phrasing.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number} Similarity in [0, 1].
+ */
+function arcJaccard(a, b) {
+  const aWords = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+  const bWords = new Set(b.toLowerCase().split(/\s+/).filter(Boolean));
+  if (aWords.size === 0 || bWords.size === 0) return 0;
+  let intersection = 0;
+  for (const w of aWords) if (bWords.has(w)) intersection++;
+  return intersection / (aWords.size + bWords.size - intersection);
+}
+
+/**
+ * Removes duplicate entries from an arc array, keeping the first occurrence
+ * when two arcs exceed the similarity threshold.
+ * @param {Array<{content: string}>} arcs
+ * @param {number} threshold - Jaccard threshold above which arcs are considered duplicates.
+ * @returns {Array<{content: string}>} Deduplicated arc array.
+ */
+function deduplicateArcs(arcs, threshold = 0.4) {
+  return arcs.filter(
+    (arc, idx) =>
+      !arcs.slice(0, idx).some((prev) => arcJaccard(arc.content, prev.content) >= threshold),
+  );
+}
 
 // ---- Storage ------------------------------------------------------------
 
@@ -230,14 +262,28 @@ export async function extractArcs(messages) {
       await saveArcSummaries(arcSummaries);
     }
 
-    // Filter out resolved arcs, then append new ones.
-    const afterResolve = existing.filter((_, i) => !resolve.includes(i));
+    // Filter out resolved arcs.
+    let afterResolve = existing.filter((_, i) => !resolve.includes(i));
+
+    // Clean up any duplicates that accumulated in storage from previous passes.
+    afterResolve = deduplicateArcs(afterResolve);
+
+    // Drop new arcs that are semantically redundant with what remains.
+    const ARC_DEDUP_THRESHOLD = 0.4;
+    const dedupedAdd = add.filter(
+      (newArc, idx) =>
+        !afterResolve.some((ex) => arcJaccard(newArc.content, ex.content) >= ARC_DEDUP_THRESHOLD) &&
+        !add
+          .slice(0, idx)
+          .some((prev) => arcJaccard(newArc.content, prev.content) >= ARC_DEDUP_THRESHOLD),
+    );
+
     const max = settings.arcs_max ?? 10;
     // slice(-max) keeps the most recent arcs when over the limit.
-    const merged = [...afterResolve, ...add].slice(-max);
+    const merged = [...afterResolve, ...dedupedAdd].slice(-max);
 
     await saveArcs(merged);
-    return add.length;
+    return dedupedAdd.length;
   } catch (err) {
     console.error('[SmartMemory] Arc extraction failed:', err);
     throw err;

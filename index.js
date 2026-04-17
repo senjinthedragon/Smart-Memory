@@ -205,7 +205,7 @@ const defaultSettings = {
   // Story arcs
   arcs_enabled: true,
   arcs_max: 10,
-  arcs_response_length: 400,
+  arcs_response_length: 600,
   arcs_inject_budget: 400,
   arcs_position: extension_prompt_types.IN_CHAT,
   arcs_depth: 2,
