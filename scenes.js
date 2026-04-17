@@ -24,7 +24,7 @@
  * call (optional, off by default) - then generates a mini-summary of the
  * completed scene and appends it to the per-chat scene history in chatMetadata.
  *
- * detectSceneBreakHeuristic  - pattern-based scene break check (cheap, no model call)
+ * detectSceneBreakHeuristic  - pattern-based scene break check (cheap, no model call); includes dawn/sleep/wake patterns
  * detectSceneBreakAI         - model-based scene break check (accurate, costs a call)
  * loadSceneHistory           - returns the stored scene history array
  * saveSceneHistory           - persists the scene history array to chatMetadata
@@ -48,6 +48,25 @@ import { detectSceneBreakHeuristic } from './parsers.js';
 
 // Re-export so index.js can import directly from scenes.js as before.
 export { detectSceneBreakHeuristic };
+
+// ---- Deduplication ------------------------------------------------------
+
+/**
+ * Jaccard word-overlap similarity between two scene summary strings.
+ * Used to avoid storing duplicate summaries when the heuristic fires
+ * multiple times during the same narrative event.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number} Similarity in [0, 1].
+ */
+function sceneJaccard(a, b) {
+  const aWords = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+  const bWords = new Set(b.toLowerCase().split(/\s+/).filter(Boolean));
+  if (aWords.size === 0 || bWords.size === 0) return 0;
+  let intersection = 0;
+  for (const w of aWords) if (bWords.has(w)) intersection++;
+  return intersection / (aWords.size + bWords.size - intersection);
+}
 
 // ---- Heuristics ---------------------------------------------------------
 
@@ -163,6 +182,17 @@ export async function processSceneBreak(lastMessageText, recentMessages) {
   if (!summary) return false;
 
   const history = loadSceneHistory();
+
+  // Skip if the new summary is too similar to the most recent stored scene.
+  // Prevents duplicate entries when the heuristic fires multiple times on
+  // the same narrative event.
+  const SCENE_DEDUP_THRESHOLD = 0.5;
+  const lastScene = history[history.length - 1];
+  if (lastScene && sceneJaccard(summary, lastScene.summary) >= SCENE_DEDUP_THRESHOLD) {
+    console.log('[SmartMemory] Scene summary too similar to previous - skipping duplicate.');
+    return false;
+  }
+
   const max = settings.scene_max_history ?? 5;
 
   // source_memory_ids is populated after extraction via linkMemoriesToLastScene.

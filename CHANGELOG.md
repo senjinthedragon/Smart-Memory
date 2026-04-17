@@ -253,6 +253,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Scene break heuristic now detects dawn/sleep/wake transitions**: added two new pattern
+  groups - dawn/dusk (`as dawn broke`, `as night fell`, etc.) and sleep/wake (`woke to find`,
+  `stirred from sleep`, etc.). Previously only time skips and location arrivals were caught,
+  so transitions into intimate or rest scenes were never detected as scene breaks.
+- **Scene deduplication on storage**: before appending a new scene summary, the Jaccard
+  similarity between the new summary and the most recent stored scene is checked (threshold
+  0.5). If they describe the same event in different words the new entry is dropped. Prevents
+  multiple near-identical entries accumulating when the heuristic fires more than once during
+  the same narrative event.
 - **Consolidation prompts use concrete examples instead of template lines**: both the
   long-term and session consolidation prompts previously used format illustration lines
   like `[fact:2:permanent] The memory entry here.` as output examples. Models copied

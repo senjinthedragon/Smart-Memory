@@ -392,6 +392,11 @@ const SCENE_BREAK_PATTERNS = [
   /\b(arrived at (the|a|an)\s+\w+|found (himself|herself|themselves|myself|yourself) (in|at) (a|an|the)\s+\w+|made (his|her|their|my|your) way (to|into) (the|a|an)\s+\w+|fled (to|into) (the|a|an)\s+\w+|escaped (to|into) (the|a|an)\s+\w+)\b/i,
   // Location transitions - establishing a new base or camp.
   /\b(settled (in|into|down in)|made (a|his|her|their|my) (home|camp|base) (in|at)|took (shelter|refuge) (in|at|among))\b/i,
+  // Dawn/dusk transitions implying time passage through sleep or rest.
+  /\b(as (dawn|morning|daylight|the sun) (broke|crept|arrived|filtered through|rose|spread)|when (dawn|morning) (came|broke|arrived))\b/i,
+  /\b(as (night|darkness|dusk|evening) (fell|settled|crept|arrived|descended)|when (night|darkness|dusk) (came|fell|settled))\b/i,
+  // Sleep/wake transitions - waking after rest implies time has passed.
+  /\b((woke|stirred|roused) (to find|from (sleep|slumber)|as (dawn|morning|light)|with the (sun|light|dawn)))\b/i,
   // Explicit separator markers (---, ***, * * *)
   /^[-*~]{3,}$/m,
   /\*\s*\*\s*\*/,
