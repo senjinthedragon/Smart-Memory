@@ -394,19 +394,21 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-For each new entry, decide:
-1. DUPLICATE - already fully captured by an existing base entry, or describes the same subject from a different angle with no net new information. Drop it entirely.
-2. UPDATE - describes the same subject as an existing base entry but adds genuinely new detail. Output one merged entry that combines both into a single concise line - do NOT keep the old version alongside the new one.
-3. NEW - describes a subject not covered by any base entry at all. Keep it as-is.
+For each new entry, work through these steps in order:
+
+Step 1 - Find the base entry whose subject most closely matches the new entry.
+Step 2 - If a match exists and the new entry adds no information not already in that base entry: DROP IT. Output nothing for this entry.
+Step 3 - If a match exists and the new entry adds genuinely new detail about the same subject: output ONE merged line that folds all unique details from both into a single concise statement. Do NOT output the original base entry - only the merged replacement.
+Step 4 - If no base entry covers the same subject at all: output the new entry as-is.
 
 Rules:
-- SAME SUBJECT = same person, relationship, or fact, even if the wording differs. Two entries about "Finn and Senjin's bond" are the same subject regardless of which aspect they emphasize.
-- When merging, fold all unique details from both entries into one compact line. Do not append - rewrite as a single unified statement.
+- SAME SUBJECT = same person, physical feature, relationship, or fact, even if worded differently. "Roderick is a ranger" and "Roderick is a seasoned ranger who prefers solitude" are the same subject.
+- When merging, rewrite as one unified statement - do not append details with "also" or "additionally".
 - NEW information OVERRIDES outdated or conflicting base information.
 - Never invent information not present in the base or new entries.
-- Keep entries compact and precise - one line per distinct subject.
+- One line per distinct subject.
 
-For each output entry, include an importance score (1-3) and expiration:
+Scoring for output entries:
 - importance 1: minor flavor detail, 2: useful context, 3: critical trait or major event
 - expiration: scene (fades after scene), session (fades after chat), permanent (durable fact)
 
@@ -445,19 +447,21 @@ ${baseSection}NEW ENTRIES TO EVALUATE (type: ${type}):
 ${batchText}
 
 ---
-For each new entry, decide:
-1. DUPLICATE - already fully captured by an existing base entry, or describes the same subject from a different angle with no net new information. Drop it entirely.
-2. UPDATE - describes the same subject as an existing base entry but adds genuinely new detail. Output one merged entry that combines both into a single concise line - do NOT keep the old version alongside the new one.
-3. NEW - describes a subject not covered by any base entry at all. Keep it as-is.
+For each new entry, work through these steps in order:
+
+Step 1 - Find the base entry whose subject most closely matches the new entry.
+Step 2 - If a match exists and the new entry adds no information not already in that base entry: DROP IT. Output nothing for this entry.
+Step 3 - If a match exists and the new entry adds genuinely new detail about the same subject: output ONE merged line that folds all unique details from both into a single concise statement. Do NOT output the original base entry - only the merged replacement.
+Step 4 - If no base entry covers the same subject at all: output the new entry as-is.
 
 Rules:
-- SAME SUBJECT = same scene, event, or detail, even if the wording differs.
-- When merging, fold all unique details from both entries into one compact line. Do not append - rewrite as a single unified statement.
+- SAME SUBJECT = same scene, event, or detail, even if worded differently.
+- When merging, rewrite as one unified statement - do not append details with "also" or "additionally".
 - NEW information OVERRIDES outdated or conflicting base information.
 - Never invent information not present in the base or new entries.
-- Keep entries compact and precise - one line per distinct subject.
+- One line per distinct subject.
 
-For each output entry, include an importance score (1-3) and expiration:
+Scoring for output entries:
 - importance 1: passing detail, 2: useful session context, 3: pivotal moment or key revelation
 - expiration: scene (fades after scene transition), session (relevant for this chat only), permanent (durable across sessions)
 

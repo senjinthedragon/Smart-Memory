@@ -184,6 +184,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Consolidation prompt rewritten as a step-by-step decision tree**: both the
+  long-term and session consolidation prompts now guide the model through an
+  explicit four-step process (find closest match, drop if no new information,
+  merge if same subject with new detail, keep as new if no match). The previous
+  free-form DUPLICATE/UPDATE/NEW labels were ambiguous enough that models
+  consistently treated all entries as NEW rather than merging or dropping. The
+  new wording also adds a concrete SAME SUBJECT example to prevent the ranger/ranger
+  false-NEW pattern. Verified improvement on both long-term and session consolidation
+  tasks.
 - **Apostrophe normalization in entity lookup**: `findEntityByName` now normalises
   typographic apostrophes (U+2019) and modifier letter apostrophes (U+02BC) to plain
   ASCII before comparison. Previously "Jack Daniel's" (typographic) and "Jack Daniel's"
