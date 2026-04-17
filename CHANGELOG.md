@@ -149,6 +149,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   character's name is pre-populated in the long-term entity registry if not already
   present. The main character now benefits from entity overlap scoring from the first
   message rather than only appearing after the extraction model first tags them.
+- **Entity delete**: each entity row in the entity panel now has a trash button.
+  Clicking it removes the entity from both the long-term and session registries and
+  scrubs its id from all memory entities arrays. Useful for cleaning up noise entries
+  (generic nouns the model tagged against instructions) without having to wipe the
+  whole registry.
 
 ### Fixed
 
@@ -179,6 +184,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Apostrophe normalization in entity lookup**: `findEntityByName` now normalises
+  typographic apostrophes (U+2019) and modifier letter apostrophes (U+02BC) to plain
+  ASCII before comparison. Previously "Jack Daniel's" (typographic) and "Jack Daniel's"
+  (ASCII) were treated as different names, silently creating a duplicate entity instead
+  of matching the existing one.
 - **Memory save no longer clobbers entity registry**: `saveCharacterMemories` now
   spreads the existing character object before writing the memories array, so the
   entity registry and any future per-character fields stored alongside memories are

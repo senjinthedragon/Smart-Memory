@@ -29,6 +29,7 @@
  * resolveEntityNames           - maps raw extracted name strings to entity ids, upserting new entities
  * reconcileEntityRegistry      - repairs entity registry links after memories are replaced (e.g. post-consolidation)
  * setEntityType                - changes the type of an entity in a registry by id
+ * deleteEntityById              - removes an entity from a registry and scrubs its id from all memory entities arrays
  * mergeEntitiesByName          - merges a source entity into a target across both registries; source name becomes an alias
  * seedCharacterEntity          - ensures the active character card name exists in the long-term registry on chat load
  * ensureCharacterMigrated      - runs any pending migration steps for a single character's data container
@@ -163,6 +164,11 @@ export async function clearSessionEntityRegistry() {
  * 1. Case-insensitive exact match against the canonical name.
  * 2. Case-insensitive exact match against any recorded alias.
  *
+ * Before comparison, both the query and all stored names are apostrophe-
+ * normalised: typographic apostrophes (U+2019 RIGHT SINGLE QUOTATION MARK)
+ * and Unicode modifier letter apostrophe (U+02BC) are collapsed to a plain
+ * ASCII apostrophe so "Jack Daniel\u2019s" matches "Jack Daniel's".
+ *
  * Fuzzy matching is intentionally not used here - entity names are short and
  * near-exact matches are likely coincidental rather than genuine aliases
  * (e.g. "Alex" and "Alexa" should not collapse automatically). Alias
@@ -172,12 +178,17 @@ export async function clearSessionEntityRegistry() {
  * @param {Array<Object>} registry - Current entity registry array.
  * @returns {Object|null} The matching entity, or null if not found.
  */
+function normaliseApostrophes(str) {
+  return str.replace(/[\u2019\u02BC]/g, "'");
+}
+
 function findEntityByName(rawName, registry) {
-  const lower = rawName.toLowerCase().trim();
+  const lower = normaliseApostrophes(rawName).toLowerCase().trim();
   return (
     registry.find(
       (e) =>
-        e.name.toLowerCase() === lower || (e.aliases ?? []).some((a) => a.toLowerCase() === lower),
+        normaliseApostrophes(e.name).toLowerCase() === lower ||
+        (e.aliases ?? []).some((a) => normaliseApostrophes(a).toLowerCase() === lower),
     ) ?? null
   );
 }
@@ -397,6 +408,29 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
 export function setEntityType(entityId, newType, registry) {
   const entity = registry.find((e) => e.id === entityId);
   if (entity) entity.type = newType;
+}
+
+// ---- Entity delete ----------------------------------------------------------
+
+/**
+ * Removes an entity from the registry and scrubs its id from every memory's
+ * entities array. Does nothing if the id is not found.
+ *
+ * Mutates both arrays in place. Caller is responsible for persisting.
+ *
+ * @param {string} entityId - UUID of the entity to remove.
+ * @param {Array<Object>} registry - Entity registry array (mutated in place).
+ * @param {Array<Object>} memories - Memory array whose entity refs are cleaned up (mutated in place).
+ */
+export function deleteEntityById(entityId, registry, memories) {
+  const idx = registry.findIndex((e) => e.id === entityId);
+  if (idx < 0) return;
+  registry.splice(idx, 1);
+  for (const mem of memories) {
+    if (!Array.isArray(mem.entities)) continue;
+    const mIdx = mem.entities.indexOf(entityId);
+    if (mIdx >= 0) mem.entities.splice(mIdx, 1);
+  }
 }
 
 // ---- Entity merge -----------------------------------------------------------

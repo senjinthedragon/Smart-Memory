@@ -804,6 +804,17 @@
   flex-shrink: 0;
 }
 
+#smart_memory_settings .sm_entity_delete_btn {
+  padding: 2px 6px;
+  font-size: 0.75em;
+  flex-shrink: 0;
+  color: #c06060;
+}
+
+#smart_memory_settings .sm_entity_delete_btn:hover {
+  color: #e07070;
+}
+
 /* ── Entity timeline ─────────────────────────────────────────────────────── */
 
 #smart_memory_settings .sm_entity_timeline {

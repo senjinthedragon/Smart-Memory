@@ -124,6 +124,7 @@ import {
   saveSessionEntityRegistry,
   clearSessionEntityRegistry,
   setEntityType,
+  deleteEntityById,
   mergeEntitiesByName,
   seedCharacterEntity,
 } from './graph-migration.js';
@@ -1404,6 +1405,9 @@ function updateEntityPanel(characterName) {
         <button class="sm_entity_timeline_btn menu_button" title="View timeline for this entity">
           <i class="fa-solid fa-timeline"></i>
         </button>
+        <button class="sm_entity_delete_btn menu_button" title="Delete this entity">
+          <i class="fa-solid fa-trash"></i>
+        </button>
       </div>
     `);
 
@@ -1483,6 +1487,19 @@ function updateEntityPanel(characterName) {
     $row.find('.sm_entity_timeline_btn').on('click', (e) => {
       e.stopPropagation();
       showEntityTimeline(entity, characterName);
+    });
+
+    $row.find('.sm_entity_delete_btn').on('click', async (e) => {
+      e.stopPropagation();
+      $panel.find('.sm_entity_type_picker').remove();
+      const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
+      const ltMems = characterName ? loadCharacterMemories(characterName) : [];
+      const sessReg = loadSessionEntityRegistry();
+      const sessMems = loadSessionMemories();
+      deleteEntityById(entity.id, ltReg, ltMems);
+      deleteEntityById(entity.id, sessReg, sessMems);
+      if (characterName) saveCharacterMemories(characterName, ltMems);
+      await persistAndRefresh();
     });
 
     $panel.append($row);
