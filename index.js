@@ -1794,6 +1794,12 @@ function loadSettings() {
   if (extension_settings[MODULE_NAME].arcs_inject_budget === 200) {
     extension_settings[MODULE_NAME].arcs_inject_budget = 400;
   }
+
+  // Migration: raise arc extraction response length from 400 to 600.
+  // 400 tokens was too tight for 10 verbose arc entries, truncating the last arc mid-sentence.
+  if (extension_settings[MODULE_NAME].arcs_response_length === 400) {
+    extension_settings[MODULE_NAME].arcs_response_length = 600;
+  }
 }
 
 /**
