@@ -311,21 +311,6 @@ export async function extractSessionMemories(recentMessages) {
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
       }
     }
-    // DEBUG - remove before release
-    console.log(
-      `[SmartMemory] Session entity registry (${entityRegistry.length} entities):`,
-      entityRegistry.map((e) => `${e.name} (${e.type}, ${e.memory_ids.length} memories)`),
-    );
-    const memoriesWithEntities = finalActive.filter((m) => m.entities?.length > 0);
-    if (memoriesWithEntities.length > 0) {
-      console.log(
-        `[SmartMemory] Session memories with entity links:`,
-        memoriesWithEntities.map(
-          (m) => `[${m.type}] ${m.content.slice(0, 60)} -> [${m.entities.join(', ')}]`,
-        ),
-      );
-    }
-    // END DEBUG
     if (entityRegistry.length > 0) {
       await saveSessionEntityRegistry(entityRegistry);
     }
