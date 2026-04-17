@@ -132,6 +132,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of high-scoring entries of the same type could dominate the injected list and push
   critical types to the bottom where the model treats them as lower priority. Floor
   types: long-term uses `relationship` + `fact`; session uses `development` + `scene`.
+- **Hybrid retrieval scoring**: memory injection now ranks memories by a
+  weighted blend of four signals: utility score (existing importance/durability
+  composite), entity overlap (fraction of memory's entities mentioned in the
+  current turn), arc relevance (Jaccard overlap with open arc content), and
+  temporal proximity (how closely the memory's time scope matches the current
+  moment). Entity names are extracted from the last 1-2 messages via lightweight
+  regex with no model call. The scorer runs on real AI response turns; plain
+  priority ordering is used on chat load where there is no current turn to read
+  from. Semantic similarity via embeddings is noted as a future enhancement.
+- **Adaptive token budget allocation per turn type**: `classifyTurn` uses
+  lightweight regex on the last AI message to classify the current turn as
+  dialogue, action, transition, or intimate. `adaptiveBudgets` then shifts
+  token budgets across tiers using per-type multipliers - for example, dialogue
+  boosts long-term and profiles while reducing scenes; action boosts session and
+  scenes; intimate boosts session and profiles while reducing arcs. Total budget
+  is preserved - if adjusted totals exceed the base, all tiers are scaled down
+  proportionally. Budgets are patched for the extraction/injection pass then
+  restored to user-configured values in a finally block.
 - **Retrieval and budget unit tests**: targeted Jest tests for `hybridScore`,
   `hybridPrioritize`, `applyBudgetMultipliers`, `classifyTurn`, and
   `reconcileTypeEntries` in `memory-utils.js`. These cover the retrieval signal
@@ -157,6 +175,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Session entity registry not reconciled after consolidation**: session
+  consolidation was missing the `reconcileEntityRegistry` call present in
+  long-term consolidation. Memories replaced by consolidation got new IDs,
+  leaving the session entity registry with stale `memory_id` refs. The entity
+  panel showed inflated memory counts and timelines showed 0 entries for
+  session entities.
+- **Entity registry orphan pruning**: `reconcileEntityRegistry` now removes
+  entity entries whose `memory_ids` array is empty after reconciliation.
+  Entities reach this state when their memories are evicted by priority trimming
+  or when the pronoun edge case prevents re-linking after consolidation. Orphaned
+  entries contributed nothing to timeline, entity overlap scoring, or the panel.
+  Entities that reappear in future extractions are re-added normally.
+- **Forget This Chat and Fresh Start left stale entity and profile data**:
+  Forget This Chat now clears the session entity registry and character/world
+  profiles. Fresh Start clears profiles from both the UI display and the token
+  injection slot, which previously showed stale values after all data was wiped.
+- **Entity panel showed duplicate rows and merged registries by UUID**: the
+  entity panel now merges long-term and session registries by canonical name
+  (case-insensitive) rather than by UUID. Because the two registries are
+  independent stores, the same entity had different UUIDs in each, appearing
+  as two rows. Merging by name produces one row per real entity with combined
+  `memory_ids` from both registries so the timeline is complete. Also clears
+  the session entity registry on chat clear, Forget This Chat, and Fresh Start
+  to prevent stale ids accumulating across Memorize Chat runs.
 - **Recap popup clipped off the top of the screen on mobile**: the overlay used
   `align-items: center`, which centers the card relative to the full CSS viewport
   height. On mobile, browser chrome (address bar, navigation bar) reduces the
@@ -168,6 +210,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Per-container schema versioning replaces global migration flag**: each data
+  container (per-character store, per-chat block) now carries its own
+  `schema_version` field. Previously a single global `graph_schema_version` flag
+  tracked whether migration had run at all, making it impossible to tell whether
+  any specific container was at the current schema and leaving no path for
+  incremental future migrations. Migration steps are registered by version number
+  in `CHARACTER_MIGRATIONS` and `CHAT_MIGRATIONS` maps in `graph-migration.js`.
+  The runner applies all steps from `(stored_version + 1)` through
+  `SCHEMA_VERSION` in order. Adding a future migration requires only incrementing
+  `SCHEMA_VERSION` and adding a numbered entry to the relevant map.
 - **Consistent red tint on all destructive action buttons**: delete buttons in
   the long-term memory list, session memory list, story arcs list, and entity
   registry now all share the same `#c06060` colour fading to `#e07070` on hover,
