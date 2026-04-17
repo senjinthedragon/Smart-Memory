@@ -112,8 +112,14 @@ export function displayRecap(recap, hoursAway) {
     background: 'rgba(0,0,0,0.65)',
     zIndex: 10000,
     display: 'flex',
-    alignItems: 'center',
+    // flex-start + margin:auto on the card centers when there is room, and
+    // lets the card start at the top (with padding breathing room) when there
+    // is not - preventing the card from being pushed off the top of the screen
+    // on mobile where browser chrome shrinks the visible area below 100vh.
+    alignItems: 'flex-start',
     justifyContent: 'center',
+    overflowY: 'auto',
+    padding: '16px',
   });
 
   const card = $('<div>').css({
@@ -122,8 +128,11 @@ export function displayRecap(recap, hoursAway) {
     borderRadius: '8px',
     padding: '24px',
     maxWidth: '580px',
-    width: '90%',
-    maxHeight: '75vh',
+    width: '100%',
+    // margin:auto distributes free vertical space equally, centering the card
+    // when it fits. When the card is tall, the overlay scrolls instead.
+    marginTop: 'auto',
+    marginBottom: 'auto',
     overflowY: 'auto',
     boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
   });

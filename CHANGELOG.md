@@ -137,6 +137,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reconcileTypeEntries` in `memory-utils.js`. These cover the retrieval signal
   weighting and adaptive budget logic to guard against regressions.
 
+### Fixed
+
+- **Recap popup clipped off the top of the screen on mobile**: the overlay used
+  `align-items: center`, which centers the card relative to the full CSS viewport
+  height. On mobile, browser chrome (address bar, navigation bar) reduces the
+  visible area below what `100vh` reports, so a centered card overflows upward and
+  the top is unreachable. The overlay is now `align-items: flex-start` with
+  `overflow-y: auto` and `padding: 16px`. The card uses `margin: auto` to center
+  itself when it fits, and falls back to top-aligned with overlay scrolling when it
+  does not - making the full popup reachable on all screen sizes.
+
 ### Changed
 
 - **Entity links survive consolidation when content uses pronouns**: after a
