@@ -282,10 +282,15 @@ ${existingSection}CONVERSATION:\n${chatHistory}
 ---
 Extract open story threads - unresolved conflicts, promises made, character goals, mysteries introduced, tensions established.
 
-Produce two types of output lines and nothing else:
-- [arc] A newly introduced unresolved thread not already in the existing arcs above.
-- [resolved] An existing arc that was explicitly closed in this conversation.
+Output format - one entry per line, two tags allowed:
+  [arc] <new unresolved thread from this conversation, not already listed above>
+  [resolved] <title or brief description of an existing arc that was explicitly closed>
 
+Example output:
+  [arc] Mira swore revenge on the merchant who sold her into slavery.
+  [resolved] The missing heir was found alive in the northern keep.
+
+Only output [arc] for threads that are NEW in this conversation - do not re-output existing arcs.
 Only mark [resolved] if the conversation directly closes the arc - a promise kept, a mystery answered, a conflict ended. A related revelation is NOT a resolution. If new information makes an existing arc more urgent or complicated, it stays open.
 
 If nothing new and nothing resolved, output: NONE`

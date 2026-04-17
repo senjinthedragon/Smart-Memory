@@ -190,6 +190,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Adaptive budget values persisted to disk during extraction**: `saveSettingsDebounced`
+  was called inside the extraction try block while the per-turn-type multipliers were still
+  patched into `settings`. Ollama LLM calls take several seconds - well past the 1000 ms
+  debounce delay - so the debounce fired and wrote the temporary adapted values to disk as
+  if they were user-configured. On the next chat load the user-set budgets were gone. The
+  call is now in the finally block after the originals are restored via `Object.assign`,
+  so only the user-configured values are ever persisted.
+
 - **Recap popup clipped off the top of the screen on mobile**: the overlay used
   `align-items: center`, which centers the card relative to the full CSS viewport
   height. On mobile, browser chrome (address bar, navigation bar) reduces the
@@ -232,6 +240,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Arc extraction output format uses concrete examples instead of template lines**:
+  the output format description previously used lines like
+  `- [arc] A newly introduced unresolved thread not already in the existing arcs above.`
+  as format illustrations. Models copied these literally into their output, producing two
+  identical placeholder entries on every extraction pass. The format section now uses
+  fictional named examples (`[arc] Mira swore revenge...`) that cannot be mistaken for
+  valid output to copy.
 - **Arc extraction prompt restructured to prevent false resolves and annotation errors**:
   the existing arcs section is now labelled "read-only context - do not copy, annotate,
   or re-output these" to prevent the model from annotating existing entries inline instead
