@@ -136,6 +136,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hybridPrioritize`, `applyBudgetMultipliers`, `classifyTurn`, and
   `reconcileTypeEntries` in `memory-utils.js`. These cover the retrieval signal
   weighting and adaptive budget logic to guard against regressions.
+- **Entity type editing**: clicking any entity's type badge in the entity panel opens
+  an inline picker listing all six types (character, place, object, faction, concept,
+  unknown). Selecting one updates the entity in both the long-term and session
+  registries immediately.
+- **Entity merge**: each entity row now has a merge button. Clicking it opens a
+  dropdown of all other entity names; selecting a target merges the source into it.
+  The source's canonical name and aliases become permanent aliases on the target, so
+  future extractions that mention the source name (e.g. "Rod") automatically resolve
+  to the merged entity (e.g. "Roderick") without any further manual action.
+- **Character card seeding**: on every chat load and character change, the active
+  character's name is pre-populated in the long-term entity registry if not already
+  present. The main character now benefits from entity overlap scoring from the first
+  message rather than only appearing after the extraction model first tags them.
 
 ### Fixed
 
@@ -150,6 +163,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Unknown default type for unclassified entities**: new entities whose type the
+  model did not classify now receive type `unknown` (grey badge with `?` icon)
+  instead of `character`. This makes extraction noise visible at a glance rather
+  than hiding it behind a plausible-looking label. Type has no effect on retrieval
+  scoring - only the entity name matters for overlap detection.
+- **Extraction prompt tightened to exclude generic nouns**: both the long-term and
+  session extraction prompts now explicitly instruct the model to tag only
+  named/proper entities, not generic nouns (whiskey, sword, horse). Named examples
+  (Jack Daniel's, Excalibur, Shadowmere) clarify the intended boundary. Reduces
+  noise entries in the entity registry from local models that over-tag.
 - **Entity links survive consolidation when content uses pronouns**: after a
   consolidation pass, the merged memory may use "she" or "he" instead of an
   entity's name. `reconcileTypeEntries` now carries the base entry's `entities`
