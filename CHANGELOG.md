@@ -184,6 +184,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Arc extraction prompt restructured to prevent false resolves and annotation errors**:
+  the existing arcs section is now labelled "read-only context - do not copy, annotate,
+  or re-output these" to prevent the model from annotating existing entries inline instead
+  of producing its own output list. Output instructions now explicitly name two line types
+  ([arc] for new threads, [resolved] for explicitly closed ones) with a clear rule that a
+  related revelation does not count as a resolution. Previously the model would mark arcs
+  resolved based on thematic inference rather than explicit closure in the conversation.
 - **Consolidation prompt rewritten as a step-by-step decision tree**: both the
   long-term and session consolidation prompts now guide the model through an
   explicit four-step process (find closest match, drop if no new information,

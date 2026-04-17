@@ -270,7 +270,7 @@ export const ARC_EXTRACTION_SYSTEM = `You are a story analyst. You extract open 
  */
 export function buildArcExtractionPrompt(chatHistory, existingArcs) {
   const existingSection = existingArcs
-    ? `EXISTING ARCS (only add NEW ones, or mark old ones as resolved):\n${existingArcs}\n\n`
+    ? `EXISTING OPEN ARCS (read-only context - do not copy, annotate, or re-output these):\n${existingArcs}\n\n`
     : '';
 
   return (
@@ -282,13 +282,13 @@ ${existingSection}CONVERSATION:\n${chatHistory}
 ---
 Extract open story threads - unresolved conflicts, promises made, character goals, mysteries introduced, tensions established.
 
-CRITICAL: Each arc must be one short sentence only. No sub-clauses, no questions, no elaboration. State the unresolved thread as a plain fact.
+Produce two types of output lines and nothing else:
+- [arc] A newly introduced unresolved thread not already in the existing arcs above.
+- [resolved] An existing arc that was explicitly closed in this conversation.
 
-One arc per line:
-[arc] She promised to meet him at dawn but never explained why.
-[resolved] The missing letter was found - this arc is closed.
+Only mark [resolved] if the conversation directly closes the arc - a promise kept, a mystery answered, a conflict ended. A related revelation is NOT a resolution. If new information makes an existing arc more urgent or complicated, it stays open.
 
-If no significant arcs exist or nothing new, output: NONE`
+If nothing new and nothing resolved, output: NONE`
   );
 }
 
