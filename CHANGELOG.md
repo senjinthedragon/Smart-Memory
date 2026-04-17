@@ -168,6 +168,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Consistent red tint on all destructive action buttons**: delete buttons in
+  the long-term memory list, session memory list, story arcs list, and entity
+  registry now all share the same `#c06060` colour fading to `#e07070` on hover,
+  with `opacity: 0.6` at rest. Previously the entity delete was red while all
+  others had no colour.
 - **Unknown default type for unclassified entities**: new entities whose type the
   model did not classify now receive type `unknown` (grey badge with `?` icon)
   instead of `character`. This makes extraction noise visible at a glance rather
