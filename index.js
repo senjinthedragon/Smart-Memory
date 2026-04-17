@@ -1789,10 +1789,13 @@ function loadSettings() {
     extension_settings[MODULE_NAME].compaction_response_length = 2000;
   }
 
-  // Migration: raise arc injection budget from 400 to 700.
+  // Migration: raise arc injection budget to 700.
   // 400 was too tight once the adaptive budget applies a 0.8x multiplier during intimate
-  // scenes (effective 320), dropping the oldest arc from injection.
-  if (extension_settings[MODULE_NAME].arcs_inject_budget === 400) {
+  // scenes, dropping the oldest arc from injection. 200 is the pre-1.3.0 default.
+  if (
+    extension_settings[MODULE_NAME].arcs_inject_budget === 200 ||
+    extension_settings[MODULE_NAME].arcs_inject_budget === 400
+  ) {
     extension_settings[MODULE_NAME].arcs_inject_budget = 700;
   }
 }
