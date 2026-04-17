@@ -205,7 +205,7 @@ const defaultSettings = {
   // Story arcs
   arcs_enabled: true,
   arcs_max: 10,
-  arcs_response_length: 600,
+  arcs_response_length: 400,
   arcs_inject_budget: 700,
   arcs_position: extension_prompt_types.IN_CHAT,
   arcs_depth: 2,
@@ -1797,12 +1797,6 @@ function loadSettings() {
     extension_settings[MODULE_NAME].arcs_inject_budget === 400
   ) {
     extension_settings[MODULE_NAME].arcs_inject_budget = 700;
-  }
-
-  // Migration: raise arc extraction response length from 400 to 600.
-  // 400 tokens was too tight for 10 verbose arc entries, truncating the last arc mid-sentence.
-  if (extension_settings[MODULE_NAME].arcs_response_length === 400) {
-    extension_settings[MODULE_NAME].arcs_response_length = 600;
   }
 }
 

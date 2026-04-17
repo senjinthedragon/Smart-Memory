@@ -197,10 +197,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accumulated before this fix are removed on the next extraction. Previously the same story
   thread (e.g. an unresolved promise) could appear three or more times with slightly different
   phrasing because the model re-extracted it each pass.
-- **Arc extraction response length default raised from 400 to 600 tokens**: with up to 10
-  verbose arc entries in the response, 400 tokens was not enough and the last arc was silently
-  truncated mid-sentence at the storage level before injection. 600 tokens accommodates 10
-  full-sentence arcs with headroom.
 - **Arc injection budget default raised from 400 to 700 tokens**: the adaptive budget applies
   a 0.8x multiplier to arcs during intimate scenes, bringing a 600 token budget down to 480.
   With 10 verbose arcs totalling ~530 tokens, this caused the oldest arc to be silently
