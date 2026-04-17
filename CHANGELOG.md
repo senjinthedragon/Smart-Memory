@@ -172,33 +172,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scrubs its id from all memory entities arrays. Useful for cleaning up noise entries
   (generic nouns the model tagged against instructions) without having to wipe the
   whole registry.
+- **Entity registry and profile lifecycle**: Forget This Chat clears the session
+  entity registry and character/world profiles. Fresh Start clears profiles from
+  both the UI and the token injection slot. The session entity registry is also
+  cleared on chat clear and after Memorize Chat runs to prevent stale ids
+  accumulating across rebuilds.
+- **Entity panel merges registries by canonical name**: the entity panel combines
+  long-term and session registries by canonical name (case-insensitive) rather than
+  by UUID. Because the two registries are independent stores, the same entity could
+  have different UUIDs in each. Merging by name produces one row per real entity
+  with combined `memory_ids` from both registries so the timeline is complete.
+- **Entity registry reconciliation and orphan pruning**: session consolidation now
+  calls `reconcileEntityRegistry` after compaction, matching the long-term path.
+  `reconcileEntityRegistry` also prunes entities whose `memory_ids` array is empty
+  after reconciliation - these arise from priority eviction or the pronoun edge case
+  and contribute nothing to retrieval or the panel.
 
 ### Fixed
 
-- **Session entity registry not reconciled after consolidation**: session
-  consolidation was missing the `reconcileEntityRegistry` call present in
-  long-term consolidation. Memories replaced by consolidation got new IDs,
-  leaving the session entity registry with stale `memory_id` refs. The entity
-  panel showed inflated memory counts and timelines showed 0 entries for
-  session entities.
-- **Entity registry orphan pruning**: `reconcileEntityRegistry` now removes
-  entity entries whose `memory_ids` array is empty after reconciliation.
-  Entities reach this state when their memories are evicted by priority trimming
-  or when the pronoun edge case prevents re-linking after consolidation. Orphaned
-  entries contributed nothing to timeline, entity overlap scoring, or the panel.
-  Entities that reappear in future extractions are re-added normally.
-- **Forget This Chat and Fresh Start left stale entity and profile data**:
-  Forget This Chat now clears the session entity registry and character/world
-  profiles. Fresh Start clears profiles from both the UI display and the token
-  injection slot, which previously showed stale values after all data was wiped.
-- **Entity panel showed duplicate rows and merged registries by UUID**: the
-  entity panel now merges long-term and session registries by canonical name
-  (case-insensitive) rather than by UUID. Because the two registries are
-  independent stores, the same entity had different UUIDs in each, appearing
-  as two rows. Merging by name produces one row per real entity with combined
-  `memory_ids` from both registries so the timeline is complete. Also clears
-  the session entity registry on chat clear, Forget This Chat, and Fresh Start
-  to prevent stale ids accumulating across Memorize Chat runs.
 - **Recap popup clipped off the top of the screen on mobile**: the overlay used
   `align-items: center`, which centers the card relative to the full CSS viewport
   height. On mobile, browser chrome (address bar, navigation bar) reduces the
