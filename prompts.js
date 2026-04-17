@@ -417,8 +417,11 @@ Scoring for output entries:
 - importance 1: minor flavor detail, 2: useful context, 3: critical trait or major event
 - expiration: scene (fades after scene), session (fades after chat), permanent (durable fact)
 
-Output ONLY the entries to ADD or UPDATE in the base, one per line:
-[${type}:2:permanent] The memory entry here.
+Output ONLY the entries to ADD or UPDATE in the base, one per line.
+
+Example output:
+[fact:3:permanent] Mira lost her sister to the plague three winters ago.
+[relationship:2:permanent] Kael distrusts Mira but owes her a debt.
 
 FINAL RULE: Output ONLY [${type}:score:expiration] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`
@@ -470,8 +473,11 @@ Scoring for output entries:
 - importance 1: passing detail, 2: useful session context, 3: pivotal moment or key revelation
 - expiration: scene (fades after scene transition), session (relevant for this chat only), permanent (durable across sessions)
 
-Output ONLY the entries to ADD or UPDATE in the base, one per line:
-[${type}:2:session] The session memory entry here.
+Output ONLY the entries to ADD or UPDATE in the base, one per line.
+
+Example output:
+[scene:2:session] Candlelit tavern, late evening, rain hammering the shutters.
+[detail:1:session] Senjin left his pack by the door when they entered.
 
 FINAL RULE: Output ONLY [${type}:score:expiration] lines. No headers. No intros. No explanations.
 If all new entries are duplicates and nothing needs to be added, output exactly: NONE`

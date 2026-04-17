@@ -253,6 +253,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Consolidation prompts use concrete examples instead of template lines**: both the
+  long-term and session consolidation prompts previously used format illustration lines
+  like `[fact:2:permanent] The memory entry here.` as output examples. Models copied
+  these literally into their output, injecting placeholder text into memories and session
+  context on every consolidation pass. Replaced with fictional named examples that cannot
+  be mistaken for valid output to copy.
 - **Arc extraction output format uses concrete examples instead of template lines**:
   the output format description previously used lines like
   `- [arc] A newly introduced unresolved thread not already in the existing arcs above.`
