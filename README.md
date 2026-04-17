@@ -109,6 +109,14 @@ Smart Memory is designed to work *alongside* SillyTavern's built-in vector stora
 
 If you are on limited VRAM (8GB or less), keep the Message Limit extension enabled and consider lowering **Max session memories** to around 15 to keep prompt size comfortable.
 
+### Recommended local model
+
+For local Ollama setups with limited VRAM (8GB or less), the best tested model for Smart Memory's extraction and summarization tasks is:
+
+**`huihui_ai/qwen3-vl-abliterated:8b-instruct`**
+
+It follows structured output formats reliably, handles explicit roleplay content without refusals, and fits comfortably at 4-bit quantization on an 8GB card alongside the embedding model. Other models may work but have not been tested against Smart Memory's full prompt suite.
+
 ### Injection depth stacking order
 
 Smart Memory's defaults are designed to layer cleanly alongside vector storage. Depth is distance from the user's last message - depth 0 is right before the AI responds, higher numbers are further back.
