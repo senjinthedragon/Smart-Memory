@@ -436,6 +436,11 @@ async function onCharacterMessageRendered() {
     .find((m) => m.is_user && !m.is_system && m.mes);
   const lastUserMsgText = lastUserMsg?.mes ?? '';
 
+  // Previous AI message - passed to scene break detection as context so the
+  // model can distinguish a continuation from a genuine transition.
+  const aiMessages = context.chat.filter((m) => !m.is_user && !m.is_system && m.mes);
+  const prevAiMsgText = aiMessages.length >= 2 ? aiMessages[aiMessages.length - 2].mes : '';
+
   // Push only messages not yet in the buffer. Using the chat index as a
   // cursor prevents duplicate pushes when the event fires more than once
   // for the same message (swipes, re-renders).
@@ -492,7 +497,7 @@ async function onCharacterMessageRendered() {
   const sceneCheckText = [lastUserMsgText, lastMsgText].filter(Boolean).join('\n');
   if (settings.scene_enabled && sceneCheckText) {
     try {
-      const wasBreak = await processSceneBreak(sceneCheckText, sceneMessageBuffer);
+      const wasBreak = await processSceneBreak(sceneCheckText, sceneMessageBuffer, prevAiMsgText);
       if (wasBreak) {
         injectSceneHistory();
         updateScenesUI();

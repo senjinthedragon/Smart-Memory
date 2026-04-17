@@ -28,7 +28,7 @@
  * RECAP_PROMPT                 - away recap "Previously on..." prompt
  * SESSION_EXTRACTION_SYSTEM    - system role string for session extraction
  * buildSessionExtractionPrompt - assembles the session extraction prompt
- * SCENE_DETECT_PROMPT          - yes/no scene break detection prompt
+ * buildSceneDetectPrompt       - assembles the yes/no scene break detection prompt with prior context
  * SCENE_SUMMARY_PROMPT         - scene mini-summary prompt
  * ARC_EXTRACTION_SYSTEM        - system role string for arc extraction
  * buildArcExtractionPrompt     - assembles the arc extraction prompt
@@ -243,13 +243,42 @@ If nothing new, output exactly: NONE`
 
 // ---- Scene break detection ----------------------------------------------
 
-/** Simple yes/no prompt - expects "YES" or "NO" as the entire response. */
-export const SCENE_DETECT_PROMPT =
-  NO_ACTION_PREAMBLE +
-  `Did the following story text contain a scene break - meaning a time skip, location change, or clear transition to a new scene? Answer with YES or NO only, nothing else.
+/**
+ * Assembles the scene break detection prompt.
+ * Providing the previous message as context lets the model distinguish a
+ * transition from a continuation of the same scene.
+ * @param {string} currentMessage - The latest AI message to evaluate.
+ * @param {string} [previousMessage] - The preceding AI message, if available.
+ * @returns {string} The complete yes/no detection prompt.
+ */
+export function buildSceneDetectPrompt(currentMessage, previousMessage) {
+  const prevSection = previousMessage
+    ? `PREVIOUS MESSAGE (for context - the scene that just ended or is continuing):\n${previousMessage.slice(0, 600)}\n\n`
+    : '';
 
-TEXT:
-{{text}}`;
+  return (
+    NO_ACTION_PREAMBLE +
+    `[SCENE BREAK DETECTION - Answer YES or NO only.]
+
+${prevSection}CURRENT MESSAGE:
+${currentMessage.slice(0, 800)}
+
+---
+Did the CURRENT MESSAGE mark the start of a new scene?
+
+A NEW SCENE starts when:
+- A meaningful amount of time has passed (hours, days, sleep, dawn breaking, waking up after rest)
+- The characters have moved to a clearly different location
+- A hard narrative break occurs (portal, transition, loss of consciousness then recovery, etc.)
+
+NOT a new scene:
+- Action, combat, or drama continuing in the same location and moment
+- Emotional beats or dialogue within the same continuous encounter
+- The story picking up seconds or minutes after the previous message
+
+Answer YES or NO only. Nothing else.`
+  );
+}
 
 export const SCENE_SUMMARY_PROMPT =
   NO_ACTION_PREAMBLE +

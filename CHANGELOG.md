@@ -253,6 +253,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Scene break AI detection reworked with prior context and clearer rules**: the detection
+  prompt now receives the preceding AI message alongside the current one so the model can
+  distinguish a continuation from a genuine transition. The prompt also explicitly lists
+  what counts as a new scene (time passage, location change, hard narrative break such as
+  portal or loss of consciousness) and what does not (combat or drama in the same continuous
+  moment, emotional beats within the same encounter). Previously the model was given a single
+  message with no context, causing it to answer YES to dramatic action sequences that were
+  part of an ongoing scene and NO to dawn/intimacy transitions it could not recognise without
+  knowing what came before.
 - **Scene break heuristic now detects dawn/sleep/wake transitions**: added two new pattern
   groups - dawn/dusk (`as dawn broke`, `as night fell`, etc.) and sleep/wake (`woke to find`,
   `stirred from sleep`, etc.). Previously only time skips and location arrivals were caught,

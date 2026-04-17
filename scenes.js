@@ -43,7 +43,7 @@ import {
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
-import { SCENE_DETECT_PROMPT, SCENE_SUMMARY_PROMPT } from './prompts.js';
+import { buildSceneDetectPrompt, SCENE_SUMMARY_PROMPT } from './prompts.js';
 import { detectSceneBreakHeuristic } from './parsers.js';
 
 // Re-export so index.js can import directly from scenes.js as before.
@@ -75,11 +75,12 @@ function sceneJaccard(a, b) {
  * More accurate than the heuristic but costs one model call per message.
  * Only used when scene_ai_detect is enabled in settings.
  * @param {string} messageText - The last AI message to inspect.
+ * @param {string} [previousMessageText] - The preceding AI message for context.
  * @returns {Promise<boolean>}
  */
-export async function detectSceneBreakAI(messageText) {
+export async function detectSceneBreakAI(messageText, previousMessageText) {
   try {
-    const prompt = SCENE_DETECT_PROMPT.replace('{{text}}', messageText.slice(0, 800));
+    const prompt = buildSceneDetectPrompt(messageText, previousMessageText);
     const response = await generateMemoryExtract(prompt, { responseLength: 5 });
     return response?.trim().toUpperCase().startsWith('YES') ?? false;
   } catch {
@@ -164,14 +165,15 @@ export async function summarizeScene(sceneMessages) {
  *
  * @param {string} lastMessageText - Text of the last AI message.
  * @param {Array} recentMessages - Messages accumulated since the last scene break.
+ * @param {string} [previousAiMessage] - The preceding AI message for context (AI detection only).
  * @returns {Promise<boolean>} True if a scene break was detected and processed.
  */
-export async function processSceneBreak(lastMessageText, recentMessages) {
+export async function processSceneBreak(lastMessageText, recentMessages, previousAiMessage) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.scene_enabled) return false;
 
   const isBreak = settings.scene_ai_detect
-    ? await detectSceneBreakAI(lastMessageText)
+    ? await detectSceneBreakAI(lastMessageText, previousAiMessage)
     : detectSceneBreakHeuristic(lastMessageText);
 
   if (!isBreak) return false;
