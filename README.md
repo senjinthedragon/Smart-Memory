@@ -115,7 +115,9 @@ For local Ollama setups with limited VRAM (8GB or less), the best tested model f
 
 **`huihui_ai/qwen3-vl-abliterated:8b-instruct`**
 
-It follows structured output formats reliably, handles explicit roleplay content without refusals, and fits comfortably at 4-bit quantization on an 8GB card alongside the embedding model. Other models may work but have not been tested against Smart Memory's full prompt suite.
+It follows structured output formats reliably, handles explicit roleplay content without refusals, and fits comfortably at 4-bit quantization on an 8GB card alongside the embedding model.
+
+Other 8B-class models tested against Smart Memory's prompts consistently produced garbled or nonsense output once the combined prompt length (chat history + existing memories + instructions) exceeded their effective context window. Smart Memory's extraction prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle here. If you try a different model and get malformed output, context overflow is the most likely cause.
 
 ### Injection depth stacking order
 
