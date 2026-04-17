@@ -639,7 +639,6 @@ async function onCharacterMessageRendered() {
           // one call per AI response turn where telemetry should be updated.
           await injectMemories(characterName, isFreshStart(), true);
           updateLongTermUI(characterName);
-          saveSettingsDebounced();
           total += count;
         }
 
@@ -695,7 +694,12 @@ async function onCharacterMessageRendered() {
       } finally {
         // Restore original budget settings so chat-load / settings-change injection
         // paths use the user's configured values, not this turn's adapted values.
+        // saveSettingsDebounced is called here rather than inside the try block to
+        // ensure the debounce never fires while adapted budgets are still patched in.
+        // On Ollama, LLM calls take several seconds - long enough for a 1000ms debounce
+        // to fire with wrong values and persist them to disk.
         Object.assign(settings, originalBudgets);
+        saveSettingsDebounced();
         extractionRunning = false;
       }
     }
