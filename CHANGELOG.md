@@ -253,6 +253,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array forward into the promoted entry, and `reconcileEntityRegistry` pass 2
   checks `mem.entities.includes(entity.id)` alongside content substring matching,
   so the registry re-links by direct ID rather than guessing from text.
+- **Compaction prompt no longer uses analysis scaffolding**: the `<analysis>` block with
+  its `[Your analysis ensuring all sections are covered accurately]` placeholder has been
+  removed. Models ignored the XML tags and wrote inline bracketed prose that leaked into
+  the stored summary. The prompt now asks for the summary directly inside `<summary>` tags
+  with the nine section headings as the output template. The update prompt's
+  `[Updated summary here]` placeholder is replaced with the section skeleton for the same
+  reason.
+- **formatSummary strips preamble before numbered sections as a last resort**: if the model
+  omits XML tags entirely, the parser now strips any content before the first `1.` at the
+  start of a line rather than returning the raw string including the preamble.
 - **Scene break AI detection reworked with prior context and clearer rules**: the detection
   prompt now receives the preceding AI message alongside the current one so the model can
   distinguish a continuation from a genuine transition. The prompt also explicitly lists

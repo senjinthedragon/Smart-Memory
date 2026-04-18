@@ -329,6 +329,13 @@ export function formatSummary(raw) {
   if (partialMatch) {
     return partialMatch[1].trim();
   }
+  // Last resort: if the model omitted tags entirely, strip any preamble before
+  // the first numbered section ("1." at the start of a line).
+  const numberedStart = result.search(/^1\./m);
+  if (numberedStart > 0) {
+    return result.slice(numberedStart).trim();
+  }
+
   return result;
 }
 

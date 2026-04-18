@@ -77,51 +77,26 @@ export function buildSummaryPrompt(storedMemories = '') {
     NO_ACTION_PREAMBLE +
     `${storedSection}Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
 
-Before writing your summary, organize your thoughts in <analysis> tags, then write the summary in <summary> tags.
-
-Your summary must cover ALL of the following sections:
-
-1. Scene & Setting: Current location, time of day, atmosphere, and any relevant environmental details.
-2. Characters Present: Who is involved, their current emotional state, disposition, and demeanor.
-3. Key Events: What happened during this conversation, in chronological order. Be specific.
-4. Relationship Dynamics: The current state of the relationship(s) between characters - trust, tension, affection, history.
-5. Revealed Information: New facts that came to light THIS session that are NOT already stored elsewhere.
-6. Story Threads: Unresolved tensions, promises made, questions raised, or ongoing conflicts.
-7. User's Direction: What themes, tone, or direction the user has been steering the story toward.
-8. Current Moment: Precisely where the story was at the moment this summary was triggered - what was just said or done.
-9. Next Beat: The most natural immediate continuation based on what was happening.
-
-<analysis>
-[Your analysis ensuring all sections are covered accurately]
-</analysis>
+Write the summary inside <summary> tags. Cover all nine sections below - do not skip or abbreviate any of them.
 
 <summary>
-1. Scene & Setting:
-   [Details]
+1. Scene & Setting: Current location, time of day, atmosphere, and any relevant environmental details.
 
-2. Characters Present:
-   [Details]
+2. Characters Present: Who is involved, their current emotional state, disposition, and demeanor.
 
-3. Key Events:
-   - [Event]
+3. Key Events: What happened during this conversation, in chronological order. Be specific.
 
-4. Relationship Dynamics:
-   [Details]
+4. Relationship Dynamics: The current state of the relationship(s) between characters - trust, tension, affection, history.
 
-5. Revealed Information:
-   - [Detail]
+5. Revealed Information: New facts that came to light THIS session that are NOT already stored elsewhere.
 
-6. Story Threads:
-   - [Thread]
+6. Story Threads: Unresolved tensions, promises made, questions raised, or ongoing conflicts.
 
-7. User's Direction:
-   [Details]
+7. User's Direction: What themes, tone, or direction the user has been steering the story toward.
 
-8. Current Moment:
-   [Details]
+8. Current Moment: Precisely where the story was at the moment this summary was triggered - what was just said or done.
 
-9. Next Beat:
-   [Details]
+9. Next Beat: The most natural immediate continuation based on what was happening.
 </summary>`
   );
 }
@@ -162,10 +137,18 @@ EXISTING SUMMARY:
 NEW EVENTS TO INCORPORATE:
 {{new_events}}
 
-Write the complete updated summary inside <summary> tags using the same 9-section format.
+Write the complete updated summary inside <summary> tags using the same 9-section format. Reproduce all nine sections in full.
 
 <summary>
-[Updated summary here]
+1. Scene & Setting:
+2. Characters Present:
+3. Key Events:
+4. Relationship Dynamics:
+5. Revealed Information:
+6. Story Threads:
+7. User's Direction:
+8. Current Moment:
+9. Next Beat:
 </summary>`
   );
 }
