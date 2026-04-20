@@ -29,6 +29,7 @@
  *   Story arcs    Open plot threads - promises made, tensions, mysteries.
  *   Away recap    "Previously on..." summary when returning after a long break.
  *   Continuity    Manual check: does the last response contradict known facts?
+ *   /sm-search    Slash command: semantic search across all tiers, shows results popup.
  */
 
 import {
@@ -64,7 +65,10 @@ import {
 import { memory_sources, fetchOllamaModels, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
-import { ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
+import {
+  ARGUMENT_TYPE,
+  SlashCommandArgument,
+} from '../../../slash-commands/SlashCommandArgument.js';
 
 import { shouldCompact, runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
 import {
@@ -113,7 +117,13 @@ import {
   clearRepair,
   loadAndInjectRepair,
 } from './continuity.js';
-import { clearEmbeddingCache, getHardwareProfile } from './embeddings.js';
+import {
+  clearEmbeddingCache,
+  getHardwareProfile,
+  getEmbeddingBatch,
+  cosineSimilarity,
+} from './embeddings.js';
+import { jaccardSimilarity } from './similarity.js';
 import { clearCanon, generateCanon, injectCanon } from './canon.js';
 import {
   ensureCharacterMigrated,
@@ -964,6 +974,54 @@ function setContinuityBadge(count) {
       .text(`${count} conflict${count === 1 ? '' : 's'}`)
       .show();
   }
+}
+
+/**
+ * Displays memory search results in a dismissible modal overlay.
+ * Called by the /sm-search slash command.
+ * @param {string} query - The original search query.
+ * @param {Array<{mem: Object, score: number}>} results - Top-K scored memories, sorted descending.
+ */
+function showSearchResults(query, results) {
+  $('#sm_search_overlay').remove();
+
+  const overlay = $('<div id="sm_search_overlay">');
+
+  const card = $('<div class="sm_search_card">');
+  card.append($('<h3>Memory Search Results</h3>'));
+  card.append(
+    $('<p class="sm_search_query_label">').text(
+      `Query: "${query}" - ${results.length} result${results.length === 1 ? '' : 's'}`,
+    ),
+  );
+
+  if (results.length === 0) {
+    card.append($('<p>').text('No matching memories found.'));
+  } else {
+    const $list = $('<ul class="sm_search_list">');
+    for (const { mem, score } of results) {
+      const $item = $('<li class="sm_search_item">');
+      $item.append(
+        $('<span class="sm_search_badge sm_search_badge_tier">').text(mem._tier),
+        $('<span>').addClass(`sm_search_badge sm_type_${mem.type}`).text(mem.type),
+        $('<span class="sm_search_content">').text(String(mem.content || '')),
+        $('<span class="sm_search_score">').text(`${Math.round(score * 100)}%`),
+      );
+      $list.append($item);
+    }
+    card.append($list);
+  }
+
+  const $footer = $('<div class="sm_search_footer">');
+  const $dismiss = $('<button>Dismiss</button>').addClass('menu_button');
+  $dismiss.on('click', () => overlay.remove());
+  overlay.on('click', (e) => {
+    if (e.target === overlay[0]) overlay.remove();
+  });
+  $footer.append($dismiss);
+  card.append($footer);
+  overlay.append(card);
+  $('body').append(overlay);
 }
 
 /**
@@ -3405,6 +3463,68 @@ jQuery(async function () {
       },
       helpString:
         'Generates a "Previously on..." recap of the current chat and displays it as a popup.',
+      returns: ARGUMENT_TYPE.STRING,
+    }),
+  );
+
+  SlashCommandParser.addCommandObject(
+    SlashCommand.fromProps({
+      name: 'sm-search',
+      callback: async (args, query) => {
+        const q = String(query || '').trim();
+        if (!q) {
+          toastr.warning('Usage: /sm-search <query>', 'Smart Memory', {
+            timeOut: 3000,
+            positionClass: 'toast-bottom-right',
+          });
+          return '';
+        }
+
+        const characterName = getCurrentCharacterName();
+        const ltMemories = characterName
+          ? loadCharacterMemories(characterName).filter((m) => !m.superseded_by)
+          : [];
+        const sessionMems = loadSessionMemories().filter((m) => !m.superseded_by);
+        const allMems = [
+          ...ltMemories.map((m) => ({ ...m, _tier: 'long-term' })),
+          ...sessionMems.map((m) => ({ ...m, _tier: 'session' })),
+        ];
+
+        if (allMems.length === 0) {
+          toastr.info('No memories to search.', 'Smart Memory', {
+            timeOut: 3000,
+            positionClass: 'toast-bottom-right',
+          });
+          return '';
+        }
+
+        const topK = Math.max(1, Math.min(50, Number(args?.k) || 10));
+        const qLower = q.toLowerCase();
+        const memTexts = allMems.map((m) =>
+          String(m.content || '')
+            .toLowerCase()
+            .trim(),
+        );
+        const vectorMap = await getEmbeddingBatch([qLower, ...memTexts]);
+        const queryVec = vectorMap.get(qLower) ?? null;
+
+        const scored = allMems.map((mem, i) => {
+          const memText = memTexts[i];
+          const memVec = vectorMap.get(memText) ?? null;
+          const score =
+            queryVec && memVec
+              ? cosineSimilarity(queryVec, memVec)
+              : jaccardSimilarity(qLower, memText);
+          return { mem, score };
+        });
+
+        scored.sort((a, b) => b.score - a.score);
+        showSearchResults(q, scored.slice(0, topK));
+        return `Found ${Math.min(topK, scored.length)} result${Math.min(topK, scored.length) === 1 ? '' : 's'} for "${q}".`;
+      },
+      unnamedArgumentList: [new SlashCommandArgument('search query', [ARGUMENT_TYPE.STRING], true)],
+      helpString:
+        'Searches long-term and session memories by semantic similarity. Displays top matching memories with type and tier labels. Optional named argument k sets the result count (default 10).',
       returns: ARGUMENT_TYPE.STRING,
     }),
   );

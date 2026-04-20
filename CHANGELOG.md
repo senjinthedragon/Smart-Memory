@@ -203,6 +203,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next AI response exactly as the manual path does. Runs fire-and-forget so it does
   not delay the event handler. Profile A (local hardware) is unaffected - manual-only
   as before.
+- **`/sm-search` slash command**: search all active memories (long-term and session)
+  by semantic similarity. Type `/sm-search the ritual` in the chat input and a popup
+  shows the top matching memories with tier labels (long-term / session), type badges,
+  content, and a similarity percentage. The optional named argument `k` controls the
+  result count (`/sm-search k=20 the ritual`; default 10, max 50). Embeddings are
+  used when available; Jaccard word-overlap is the fallback so the command works even
+  without an embedding model configured.
 - **Per-memory confidence decay**: memories that are not re-extracted over successive
   passes gradually lose confidence while memories that keep appearing in new text are
   reinforced. Each extraction pass `batchVerify` now returns a `confirmed` set

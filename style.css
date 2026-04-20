@@ -981,3 +981,99 @@
   margin: 8px 0;
   border-color: var(--greyCAl, rgba(255, 255, 255, 0.1));
 }
+
+/* ── Memory search overlay (/sm-search) ─────────────────────────────────── */
+
+#sm_search_overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.sm_search_card {
+  background: var(--black-2, #1a1a2e);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-width: 680px;
+  width: 100%;
+  margin: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.sm_search_card h3 {
+  margin: 0 0 4px 0;
+  font-size: 1.1em;
+}
+
+.sm_search_query_label {
+  font-size: 0.8em;
+  opacity: 0.6;
+  margin: 0 0 14px 0;
+}
+
+.sm_search_list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.sm_search_item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color-subtle, rgba(255, 255, 255, 0.07));
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.9em;
+}
+
+.sm_search_item:last-child {
+  border-bottom: none;
+}
+
+.sm_search_badge {
+  font-size: 0.72em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sm_search_badge_tier {
+  background: var(--black-4, #2c2c4a);
+  color: var(--text-muted, #aaa);
+}
+
+.sm_search_content {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.sm_search_score {
+  font-size: 0.72em;
+  opacity: 0.45;
+  flex-shrink: 0;
+}
+
+.sm_search_footer {
+  margin-top: 14px;
+  text-align: right;
+}
+
+/* Type badge colours reused in search overlay (same values as panel badges). */
+#sm_search_overlay .sm_type_fact { background: #4a6fa5; }
+#sm_search_overlay .sm_type_relationship { background: #8e5a8e; }
+#sm_search_overlay .sm_type_preference { background: #5a8e5a; }
+#sm_search_overlay .sm_type_event { background: #8e6e3a; }
+#sm_search_overlay .sm_type_scene { background: #5a8e7a; }
+#sm_search_overlay .sm_type_revelation { background: #8e5a5a; }
+#sm_search_overlay .sm_type_development { background: #7a7a3a; }
+#sm_search_overlay .sm_type_detail { background: #3a7a8e; }
