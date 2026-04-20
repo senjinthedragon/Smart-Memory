@@ -3499,6 +3499,10 @@ jQuery(async function () {
         }
 
         const topK = Math.max(1, Math.min(50, Number(args?.k) || 10));
+        const minScore = Math.max(
+          0,
+          Math.min(1, args?.min !== undefined ? Number(args.min) : 0.25),
+        );
         const qLower = q.toLowerCase();
         const memTexts = allMems.map((m) =>
           String(m.content || '')
@@ -3508,23 +3512,26 @@ jQuery(async function () {
         const vectorMap = await getEmbeddingBatch([qLower, ...memTexts]);
         const queryVec = vectorMap.get(qLower) ?? null;
 
-        const scored = allMems.map((mem, i) => {
-          const memText = memTexts[i];
-          const memVec = vectorMap.get(memText) ?? null;
-          const score =
-            queryVec && memVec
-              ? cosineSimilarity(queryVec, memVec)
-              : jaccardSimilarity(qLower, memText);
-          return { mem, score };
-        });
+        const scored = allMems
+          .map((mem, i) => {
+            const memText = memTexts[i];
+            const memVec = vectorMap.get(memText) ?? null;
+            const score =
+              queryVec && memVec
+                ? cosineSimilarity(queryVec, memVec)
+                : jaccardSimilarity(qLower, memText);
+            return { mem, score };
+          })
+          .filter(({ score }) => score >= minScore);
 
         scored.sort((a, b) => b.score - a.score);
-        showSearchResults(q, scored.slice(0, topK));
-        return `Found ${Math.min(topK, scored.length)} result${Math.min(topK, scored.length) === 1 ? '' : 's'} for "${q}".`;
+        const top = scored.slice(0, topK);
+        showSearchResults(q, top);
+        return `Found ${top.length} result${top.length === 1 ? '' : 's'} for "${q}".`;
       },
       unnamedArgumentList: [new SlashCommandArgument('search query', [ARGUMENT_TYPE.STRING], true)],
       helpString:
-        'Searches long-term and session memories by semantic similarity. Displays top matching memories with type and tier labels. Optional named argument k sets the result count (default 10).',
+        'Searches long-term and session memories by semantic similarity. Displays top matching memories with type and tier labels. Optional: k sets result count (default 10, max 50); min sets the minimum similarity threshold to filter weak matches (default 0.25, range 0-1).',
       returns: ARGUMENT_TYPE.STRING,
     }),
   );
