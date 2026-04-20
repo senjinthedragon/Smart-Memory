@@ -72,9 +72,11 @@ import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings
 import { smLog } from './logging.js';
 
 // Maximum new entries accepted per type per extraction pass.
-// Prevents one burst of similar events flooding a single type while still
-// allowing genuinely diverse new facts through.
-const MAX_NEW_PER_TYPE_PER_EXTRACTION = 2;
+// Profile B (hosted) uses a higher cap because hosted models extract more
+// reliably and rarely over-fire on a single type the way small local models can.
+function maxNewPerType() {
+  return getHardwareProfile() === 'b' ? 4 : 2;
+}
 
 function incomingPriorityScore(mem) {
   const typeBonus =
@@ -245,9 +247,9 @@ export function formatMemoriesForPrompt(memories) {
 /**
  * Merges new memories into the existing set with two layers of churn control:
  *
- * 1. Per-type extraction cap: at most MAX_NEW_PER_TYPE_PER_EXTRACTION entries
- *    per type are accepted per pass. Prevents a burst of similar events from
- *    flooding one type while the rest accumulate normally.
+ * 1. Per-type extraction cap: at most maxNewPerType() entries per type are
+ *    accepted per pass (2 on Profile A, 4 on Profile B). Prevents a burst of
+ *    similar events from flooding one type while the rest accumulate normally.
  *
  * 2. Per-type storage cap: derived from maxTotal / number of types (rounded up).
  *    When a new entry would push a type over its cap, the lowest-priority entry
@@ -274,7 +276,7 @@ function mergeMemories(existing, incoming, maxTotal) {
 
   for (const mem of sorted) {
     const typeAdded = addedPerType.get(mem.type) ?? 0;
-    if (typeAdded >= MAX_NEW_PER_TYPE_PER_EXTRACTION) continue;
+    if (typeAdded >= maxNewPerType()) continue;
 
     // If this type is already at the per-type storage cap, evict the
     // lowest-priority existing entry of this type before adding the new one -

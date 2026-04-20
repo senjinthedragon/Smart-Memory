@@ -34,6 +34,10 @@
  * seedCharacterEntity          - ensures the active character card name exists in the long-term registry on chat load
  * ensureCharacterMigrated      - runs any pending migration steps for a single character's data container
  * ensureChatMigrated           - runs any pending migration steps for the current chat's data container
+ *
+ * Internal helpers (not exported):
+ * assertNonDestructive         - throws if a migration step deleted or overwrote a pre-existing field
+ * applyMigrations              - drives the step loop and calls assertNonDestructive after each step
  */
 
 import { saveSettingsDebounced } from '../../../../script.js';
@@ -689,9 +693,47 @@ const CHAT_MIGRATIONS = new Map([
 // ---- Migration runner -------------------------------------------------------
 
 /**
+ * Recursively verifies that a migration step did not overwrite or delete any
+ * field that existed in the container before the step ran.
+ *
+ * For every key present in `before`, the corresponding key must exist in
+ * `after` with the same value. Primitive mismatches and missing keys both
+ * throw. New keys in `after` are permitted (that is the point of a migration).
+ * Arrays are checked element-by-element at the same indices so that existing
+ * memory objects cannot have their content silently cleared.
+ *
+ * @param {Object|Array} before - Container snapshot before the step ran.
+ * @param {Object|Array} after  - Container returned by the step.
+ * @param {number} stepVersion  - Step version number, for error messages.
+ * @param {string} [_path]      - Internal recursion path prefix.
+ */
+function assertNonDestructive(before, after, stepVersion, _path = '') {
+  const keys = Array.isArray(before) ? [...before.keys()] : Object.keys(before);
+  for (const key of keys) {
+    const path = _path ? `${_path}.${key}` : String(key);
+    if (after == null || !(key in after)) {
+      throw new Error(`[SmartMemory] Migration v${stepVersion} deleted field "${path}".`);
+    }
+    const bVal = before[key];
+    const aVal = after[key];
+    if (bVal !== null && typeof bVal === 'object' && aVal !== null && typeof aVal === 'object') {
+      assertNonDestructive(bVal, aVal, stepVersion, path);
+    } else if (bVal !== aVal) {
+      throw new Error(
+        `[SmartMemory] Migration v${stepVersion} overwrote field "${path}": was ${JSON.stringify(bVal)}, now ${JSON.stringify(aVal)}.`,
+      );
+    }
+  }
+}
+
+/**
  * Applies all pending migration steps to a data container, returning the
  * updated container. If the container is already at SCHEMA_VERSION the
  * original object is returned unchanged.
+ *
+ * After each step, assertNonDestructive verifies that no pre-existing field
+ * was deleted or overwritten. This enforces the CLAUDE.md rule structurally
+ * so a future migration cannot silently corrupt stored data.
  *
  * @param {Object} container - Data object with an optional schema_version field.
  * @param {Map<number, Function>} steps - Ordered map of version -> migration fn.
@@ -705,7 +747,9 @@ function applyMigrations(container, steps) {
   while (version < SCHEMA_VERSION) {
     const step = steps.get(version + 1);
     if (step) {
+      const before = current;
       current = step(current);
+      assertNonDestructive(before, current, version + 1);
       smLog(`[SmartMemory] Applied migration step v${version + 1}.`);
     }
     version++;

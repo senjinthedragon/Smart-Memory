@@ -395,6 +395,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spreads the existing character object before writing the memories array, so the
   entity registry and any future per-character fields stored alongside memories are
   preserved across saves.
+- **Extraction cap is now profile-dependent**: the per-type extraction cap in
+  `longterm.js` was previously hardcoded at 2 entries per type per pass for all
+  users. It is now 4 on Profile B (hosted models) and 2 on Profile A (local
+  hardware). Profile B models rarely over-fire on a single type, so the higher cap
+  lets them produce more diverse memories in a single pass without throttling.
+- **Migration non-destructiveness structurally enforced**: `applyMigrations` in
+  `graph-migration.js` now calls `assertNonDestructive` after each step runs.
+  The helper recursively verifies that no pre-existing field was deleted or
+  overwritten by the step; it throws with a descriptive path if any violation is
+  detected. This enforces the CLAUDE.md rule ("steps must be non-destructive -
+  never delete or overwrite existing field values, only add missing ones")
+  structurally rather than relying solely on code review.
 
 ---
 
