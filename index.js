@@ -30,6 +30,10 @@
  *   Away recap    "Previously on..." summary when returning after a long break.
  *   Continuity    Manual check: does the last response contradict known facts?
  *   /sm-search    Slash command: semantic search across all tiers, shows results popup.
+ *
+ * Group chats are supported. The active speaker is identified from the last AI
+ * message name so long-term memories are attributed to the correct character and
+ * session memories are per-character within the shared chatMetadata store.
  */
 
 import {
@@ -272,12 +276,6 @@ let continuityCheckRunning = false;
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
 
-// Tracks the last group ID for which the group chat warning was shown.
-// Stored as the actual groupId rather than a plain boolean so switching
-// between two different group chats shows the toast once per group, while
-// switching back to a group that was already warned stays silent.
-let lastWarnedGroupId = null;
-
 // Last observed chat length, used to distinguish new messages from swipes.
 // CHARACTER_MESSAGE_RENDERED fires on both; swipes do not grow the chat array.
 let lastKnownChatLength = 0;
@@ -336,9 +334,20 @@ function getSettings() {
   return extension_settings[MODULE_NAME];
 }
 
-/** Returns the active character name, or null if no character is loaded. */
+/**
+ * Returns the active character name, or null if no character is loaded.
+ * In group chats, the last AI message's name is used because context.name2
+ * reflects the group's primary character and does not update per-speaker.
+ */
 function getCurrentCharacterName() {
   const context = getContext();
+  if (context.groupId && context.chat?.length) {
+    const lastAiMsg = context.chat
+      .slice()
+      .reverse()
+      .find((m) => !m.is_user && !m.is_system && m.name);
+    if (lastAiMsg?.name) return lastAiMsg.name;
+  }
   return context.name2 || context.characterName || null;
 }
 
@@ -398,20 +407,6 @@ async function onCharacterMessageRendered() {
 
   const context = getContext();
   if (!context.chat || context.chat.length === 0) return;
-
-  // Group chats are not yet supported - character name resolution is unreliable
-  // in that context and memories could be attributed to the wrong character.
-  if (context.groupId) {
-    if (lastWarnedGroupId !== context.groupId) {
-      lastWarnedGroupId = context.groupId;
-      toastr.warning(
-        'Smart Memory is not active in group chats. 1:1 chats only for now.',
-        'Smart Memory',
-        { timeOut: 6000, positionClass: 'toast-bottom-right' },
-      );
-    }
-    return;
-  }
 
   // Swipe detection: CHARACTER_MESSAGE_RENDERED fires on swipes too, but a swipe
   // replaces the last message in-place - the chat array does not grow. Only
@@ -765,7 +760,6 @@ async function onChatChanged() {
   continuityCheckRunning = false;
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
-  lastWarnedGroupId = null;
   setContinuityBadge(null);
   lastKnownChatLength = 0;
   clearEmbeddingCache();

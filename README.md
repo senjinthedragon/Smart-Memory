@@ -9,8 +9,6 @@ It runs automatically. You don't have to do anything special to use it. Just cha
 
 *This is an independent extension for SillyTavern and is not affiliated with the SillyTavern development team.*
 
-> **Note:** Smart Memory currently supports 1:1 chats only. Group chat support is planned for a future release.
-
 ![Smart Memory settings panel](https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/main/assets/smart-memory.webp)
 
 ## ☕ Support the Developer
