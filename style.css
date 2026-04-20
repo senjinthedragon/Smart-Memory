@@ -620,6 +620,28 @@
   color: #a0b8cc;
 }
 
+/* Auto-continuity badge shown in the header after Profile B checks. */
+#smart_memory_settings #sm_continuity_badge {
+  margin-left: 8px;
+  font-size: 0.75em;
+  font-weight: normal;
+  padding: 1px 6px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+#smart_memory_settings #sm_continuity_badge.sm_continuity_badge_clean {
+  background: rgba(60, 120, 60, 0.25);
+  border: 1px solid rgba(60, 180, 60, 0.4);
+  color: #8fcc8f;
+}
+
+#smart_memory_settings #sm_continuity_badge.sm_continuity_badge_warn {
+  background: rgba(160, 100, 20, 0.25);
+  border: 1px solid rgba(220, 150, 40, 0.5);
+  color: #d4aa5a;
+}
+
 /* ── Profiles display ────────────────────────────────────────────────────── */
 
 #smart_memory_settings .sm_profiles_display {

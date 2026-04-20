@@ -256,6 +256,8 @@ let messagesSinceLastExtraction = 0;
 let compactionRunning = false;
 let extractionRunning = false;
 let consolidationRunning = false;
+// Guards the Profile B auto-continuity check so at most one runs at a time.
+let continuityCheckRunning = false;
 
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
@@ -714,7 +716,30 @@ async function onCharacterMessageRendered() {
   // response turn and should not carry over to the next message.
   clearRepair();
 
-  // Step 5: update lastActive so the away recap threshold stays accurate.
+  // Step 5 (Profile B only): silent continuity check after each AI turn.
+  // Fire-and-forget so it does not block the event handler while the model
+  // responds. The badge in the settings header updates when the check finishes.
+  // On Profile A (local hardware) this stays manual-only - too expensive for
+  // every turn on an RTX 2080.
+  if (getHardwareProfile() === 'b' && !continuityCheckRunning) {
+    continuityCheckRunning = true;
+    checkContinuity(characterName)
+      .then(async (contradictions) => {
+        setContinuityBadge(contradictions.length);
+        if (contradictions.length > 0 && getSettings().continuity_auto_repair) {
+          const note = await generateRepair(contradictions, characterName);
+          injectRepair(note);
+        }
+      })
+      .catch((err) => {
+        console.error('[SmartMemory] Auto-continuity check failed:', err);
+      })
+      .finally(() => {
+        continuityCheckRunning = false;
+      });
+  }
+
+  // Step 6: update lastActive so the away recap threshold stays accurate.
   updateLastActive();
 }
 
@@ -913,6 +938,30 @@ function updateTokenDisplay() {
 /** Updates the status bar text shown at the top of the settings panel. */
 function setStatusMessage(msg) {
   $('#sm_status').text(msg);
+}
+
+/**
+ * Updates the continuity badge shown in the settings panel header.
+ * Called after the Profile B auto-check completes each AI turn.
+ * @param {number|null} count - Contradiction count from checkContinuity, or null to clear.
+ */
+function setContinuityBadge(count) {
+  const $badge = $('#sm_continuity_badge');
+  $badge.removeClass('sm_continuity_badge_clean sm_continuity_badge_warn');
+  if (count === null) {
+    $badge.hide();
+    return;
+  }
+  if (count === 0) {
+    $badge.addClass('sm_continuity_badge_clean').text('clean').show();
+    // Positive state is transient - hide after 4 s so it doesn't linger.
+    setTimeout(() => $badge.hide(), 4000);
+  } else {
+    $badge
+      .addClass('sm_continuity_badge_warn')
+      .text(`${count} conflict${count === 1 ? '' : 's'}`)
+      .show();
+  }
 }
 
 /**

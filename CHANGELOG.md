@@ -195,6 +195,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is no extra API round-trip. Callers pass `lastTurnText` and `w5` in the `hybridPrioritize`
   context; `w5 = 0` (the default) disables the signal entirely, making the change
   backward-compatible for any caller that does not provide it.
+- **Profile B auto-continuity check**: on Profile B (hosted models), the continuity
+  checker now runs automatically after every AI turn without requiring a button click.
+  A badge in the settings panel header shows the result: "clean" (fades after 4 s)
+  or "N conflicts" (stays visible until the next check). If **Auto-repair
+  contradictions** is enabled and issues are found, a repair note is queued for the
+  next AI response exactly as the manual path does. Runs fire-and-forget so it does
+  not delay the event handler. Profile A (local hardware) is unaffected - manual-only
+  as before.
 
 ### Fixed
 

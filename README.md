@@ -87,6 +87,8 @@ A manual tool you can reach for when something feels off. Click **Check Last Res
 
 Enable **Auto-repair contradictions** to go one step further: when contradictions are found, Smart Memory makes a second model call to generate a brief corrective note and injects it into the next AI response turn. The note is cleared automatically after that response - it is a one-shot nudge, not a permanent injection. This costs one extra model call per check, so it is disabled by default.
 
+On **Profile B** (hosted models), the continuity check runs automatically after every AI turn - no button click required. A small badge appears next to the "Smart Memory" header in the settings panel: **clean** (fades after a few seconds) when nothing is found, or **N conflicts** (stays visible until the next check) when issues are detected. Auto-repair still requires the checkbox to be enabled. On Profile A (local hardware) the check remains manual-only.
+
 > **Note:** The continuity checker is only as good as the model doing the checking, and it only knows what is stored in Smart Memory - not what is on the character card by heart. Think of it as a sanity check, not a guarantee.
 
 ### Token Usage Display
