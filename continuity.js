@@ -51,6 +51,7 @@ import { buildContinuityPrompt, buildRepairPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 import { parseContradictions } from './parsers.js';
+import { smLog } from './logging.js';
 
 /**
  * Collects all established facts into a single labelled text block.
@@ -130,7 +131,7 @@ export async function checkContinuity(characterName) {
       responseLength: settings.continuity_response_length ?? 300,
     });
 
-    console.log('[SmartMemory] Continuity check response:', response);
+    smLog('[SmartMemory] Continuity check response:', response);
 
     return parseContradictions(response);
   } catch (err) {
@@ -155,7 +156,7 @@ export async function generateRepair(contradictions, characterName) {
     responseLength: settings.continuity_response_length ?? 300,
   });
 
-  console.log('[SmartMemory] Repair note generated:', note);
+  smLog('[SmartMemory] Repair note generated:', note);
   return note.trim();
 }
 

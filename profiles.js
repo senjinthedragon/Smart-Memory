@@ -50,6 +50,7 @@ import { loadSessionMemories } from './session.js';
 import { loadCharacterEntityRegistry } from './graph-migration.js';
 import { buildProfileGenerationPrompt } from './prompts.js';
 import { parseProfileOutput } from './parsers.js';
+import { smLog } from './logging.js';
 
 // Default staleness threshold: 30 minutes. Profiles generated within this
 // window are considered current and will not be regenerated on chat load.
@@ -136,7 +137,7 @@ export async function generateProfiles(characterName) {
       responseLength: settings.profiles_response_length ?? 400,
     });
 
-    console.log('[SmartMemory] Profile generation response:', response);
+    smLog('[SmartMemory] Profile generation response:', response);
 
     if (!response) return null;
 

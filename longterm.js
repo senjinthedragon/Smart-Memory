@@ -69,6 +69,7 @@ import {
   trimByPriority,
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
+import { smLog } from './logging.js';
 
 // Maximum new entries accepted per type per extraction pass.
 // Prevents one burst of similar events flooding a single type while still
@@ -344,15 +345,13 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       },
     );
 
-    console.log(`[SmartMemory] Raw extraction response for "${characterName}":`, response);
+    smLog(`[SmartMemory] Raw extraction response for "${characterName}":`, response);
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
     const parsed = parseExtractionOutput(response);
     if (parsed.length === 0) {
-      console.log(
-        '[SmartMemory] Extraction response produced no parseable lines. Check format above.',
-      );
+      smLog('[SmartMemory] Extraction response produced no parseable lines. Check format above.');
       return 0;
     }
 
@@ -362,7 +361,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       confirmed: confirmedIds,
     } = await verifyLongtermCandidates(parsed, activeMemories);
     if (newMemories.length === 0) {
-      console.log(
+      smLog(
         `[SmartMemory] All ${parsed.length} extracted candidates were duplicates of existing memories.`,
       );
       return 0;
@@ -402,7 +401,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
         oldMem.valid_to = messageIndex;
         newlyRetiredIds.add(oldId);
 
-        console.log(
+        smLog(
           `[SmartMemory] Supersession: "${oldMem.content.slice(0, 60)}" retired by "${newMem.content.slice(0, 60)}"`,
         );
       }
@@ -459,7 +458,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     // Save: final active set + all retired memories (history is preserved).
     saveCharacterMemories(characterName, [...finalActive, ...updatedRetired]);
 
-    console.log(
+    smLog(
       `[SmartMemory] Saved ${added} new memories for "${characterName}". Active: ${finalActive.length}, Retired: ${updatedRetired.length}`,
     );
     return added;
@@ -551,7 +550,7 @@ export async function consolidateMemories(characterName, force = false) {
         { responseLength: Math.max(400, (base.length + unprocessed.length) * 60) },
       );
 
-      console.log(`[SmartMemory] Consolidation response for [${type}]:`, response);
+      smLog(`[SmartMemory] Consolidation response for [${type}]:`, response);
 
       if (!response || response.trim().toUpperCase() === 'NONE') {
         // Model found nothing to add - mark unprocessed as consolidated as-is.
@@ -586,7 +585,7 @@ export async function consolidateMemories(characterName, force = false) {
       totalRemoved += Math.max(0, removed);
       dirty = true;
 
-      console.log(
+      smLog(
         `[SmartMemory] [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
       );
     } catch (err) {

@@ -39,6 +39,7 @@
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, SCHEMA_VERSION, generateMemoryId } from './constants.js';
+import { smLog } from './logging.js';
 
 // ---- Graph defaults ---------------------------------------------------------
 
@@ -391,7 +392,7 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
     ...entityRegistry.filter((e) => e.memory_ids.length > 0),
   );
   if (entityRegistry.length < before) {
-    console.log(
+    smLog(
       `[SmartMemory] Pruned ${before - entityRegistry.length} entity entries with no linked memories.`,
     );
   }
@@ -705,7 +706,7 @@ function applyMigrations(container, steps) {
     const step = steps.get(version + 1);
     if (step) {
       current = step(current);
-      console.log(`[SmartMemory] Applied migration step v${version + 1}.`);
+      smLog(`[SmartMemory] Applied migration step v${version + 1}.`);
     }
     version++;
   }
@@ -737,15 +738,13 @@ export function ensureCharacterMigrated(characterName) {
 
   if ((charData.schema_version ?? 0) >= SCHEMA_VERSION) return false;
 
-  console.log(
-    `[SmartMemory] Migrating character "${characterName}" to schema v${SCHEMA_VERSION}...`,
-  );
+  smLog(`[SmartMemory] Migrating character "${characterName}" to schema v${SCHEMA_VERSION}...`);
   const migrated = applyMigrations(charData, CHARACTER_MIGRATIONS);
   if (!settings.characters) settings.characters = {};
   settings.characters[characterName] = migrated;
   saveSettingsDebounced();
 
-  console.log(`[SmartMemory] Character "${characterName}" migration complete.`);
+  smLog(`[SmartMemory] Character "${characterName}" migration complete.`);
   return true;
 }
 
@@ -770,10 +769,10 @@ export async function ensureChatMigrated() {
 
   if ((meta.schema_version ?? 0) >= SCHEMA_VERSION) return false;
 
-  console.log(`[SmartMemory] Migrating chat data to schema v${SCHEMA_VERSION}...`);
+  smLog(`[SmartMemory] Migrating chat data to schema v${SCHEMA_VERSION}...`);
   context.chatMetadata[META_KEY] = applyMigrations(meta, CHAT_MIGRATIONS);
   await context.saveMetadata();
 
-  console.log('[SmartMemory] Chat data migration complete.');
+  smLog('[SmartMemory] Chat data migration complete.');
   return true;
 }

@@ -106,51 +106,12 @@ export function displayRecap(recap, hoursAway) {
       ? `You've been away for ${Math.round(hoursRounded / 24)} day(s).`
       : `You're returning after a short break (${hoursRounded}h).`;
 
-  const overlay = $('<div id="sm_recap_overlay">').css({
-    position: 'fixed',
-    inset: '0',
-    background: 'rgba(0,0,0,0.65)',
-    zIndex: 10000,
-    display: 'flex',
-    // flex-start + margin:auto on the card centers when there is room, and
-    // lets the card start at the top (with padding breathing room) when there
-    // is not - preventing the card from being pushed off the top of the screen
-    // on mobile where browser chrome shrinks the visible area below 100vh.
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    overflowY: 'auto',
-    padding: '16px',
-  });
-
-  const card = $('<div>').css({
-    background: 'var(--black-2, #1a1a2e)',
-    border: '1px solid var(--border-color, #444)',
-    borderRadius: '8px',
-    padding: '24px',
-    maxWidth: '580px',
-    width: '100%',
-    // margin:auto distributes free vertical space equally, centering the card
-    // when it fits. When the card is tall, the overlay scrolls instead.
-    marginTop: 'auto',
-    marginBottom: 'auto',
-    overflowY: 'auto',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-  });
-
-  const title = $('<h3>Previously on...</h3>').css({
-    marginTop: 0,
-    fontSize: '1.1em',
-  });
-
-  const timeLabel = $('<p>').text(timeNote).css({
-    fontSize: '0.8em',
-    opacity: 0.6,
-    margin: '0 0 14px 0',
-  });
-
-  const content = $('<p>').text(recap).css({ lineHeight: 1.65, margin: 0 });
-
-  const footer = $('<div>').css({ marginTop: '18px', textAlign: 'right' });
+  const overlay = $('<div id="sm_recap_overlay">');
+  const card = $('<div class="sm_recap_card">');
+  const title = $('<h3 class="sm_recap_title">Previously on...</h3>');
+  const timeLabel = $('<p class="sm_recap_time_label">').text(timeNote);
+  const content = $('<p class="sm_recap_content">').text(recap);
+  const footer = $('<div class="sm_recap_footer">');
   const dismissBtn = $('<button>Dismiss</button>').addClass('menu_button');
 
   dismissBtn.on('click', () => overlay.remove());

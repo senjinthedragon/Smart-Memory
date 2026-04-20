@@ -50,6 +50,10 @@ import { cosineSimilarity, jaccardSimilarity, hasStateChangeMarker } from './sim
 // session avoids redundant API calls during catch-up mode. Cleared on chat change.
 const embeddingCache = new Map();
 
+// Tracks whether the user has already been warned about an embedding failure
+// this session so we don't spam a toastr on every extraction pass.
+let embeddingWarnedThisSession = false;
+
 /**
  * Fetches embedding vectors for a list of texts in a single API call.
  * Texts already in the cache are not re-fetched. Returns a Map from
@@ -110,6 +114,15 @@ export async function getEmbeddingBatch(texts) {
     }
   } catch {
     // Network error, model not found, Ollama not running - callers fall back to Jaccard.
+    // Warn once per session so the user knows deduplication quality is degraded.
+    if (!embeddingWarnedThisSession) {
+      embeddingWarnedThisSession = true;
+      toastr?.warning(
+        'Embedding model unreachable - falling back to keyword matching. Check your embedding URL and model name.',
+        'Smart Memory',
+        { timeOut: 8000 },
+      );
+    }
   }
 
   return result;
@@ -215,6 +228,10 @@ export async function batchVerify(candidates, existing) {
   const vectorMap = await getEmbeddingBatch(allTexts);
   const anyEmbeddings = vectorMap.size > 0;
 
+  // Hoist the profile lookup: it can't change mid-pass and calling it inside
+  // the inner loop is pure overhead proportional to candidates * existing.
+  const profile = getHardwareProfile();
+
   for (const cand of candidates) {
     const candText = String(cand.content || '')
       .toLowerCase()
@@ -242,7 +259,6 @@ export async function batchVerify(candidates, existing) {
       // rejected as duplicates of semantically adjacent but distinct facts.
       // Profile B also uses a lower same-topic threshold to catch more
       // supersession candidates, since hosted models write more varied prose.
-      const profile = getHardwareProfile();
       let score, dupThreshold, crossDupThreshold, sameTopicThreshold;
       if (candVec && exVec) {
         score = cosineSimilarity(candVec, exVec);

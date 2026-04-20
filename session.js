@@ -69,6 +69,7 @@ import {
   sortByTimeline,
   trimByPriority,
 } from './memory-utils.js';
+import { smLog } from './logging.js';
 
 /**
  * Filters session memory candidates against existing entries, removing
@@ -255,7 +256,7 @@ export async function extractSessionMemories(recentMessages) {
       { responseLength: settings.session_response_length ?? 500 },
     );
 
-    console.log('[SmartMemory] Session extraction response:', response);
+    smLog('[SmartMemory] Session extraction response:', response);
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
@@ -294,7 +295,7 @@ export async function extractSessionMemories(recentMessages) {
         oldMem.valid_to = messageIndex;
         newlyRetiredIds.add(oldId);
 
-        console.log(
+        smLog(
           `[SmartMemory] Session supersession: "${oldMem.content.slice(0, 60)}" retired by "${newMem.content.slice(0, 60)}"`,
         );
       }
@@ -403,7 +404,7 @@ export async function consolidateSessionMemories(force = false) {
         { responseLength: Math.max(400, (base.length + unprocessed.length) * 60) },
       );
 
-      console.log(`[SmartMemory] Session consolidation response for [${type}]:`, response);
+      smLog(`[SmartMemory] Session consolidation response for [${type}]:`, response);
 
       if (!response || response.trim().toUpperCase() === 'NONE') {
         // Nothing to add - mark unprocessed as consolidated as-is.
@@ -437,7 +438,7 @@ export async function consolidateSessionMemories(force = false) {
       totalRemoved += Math.max(0, removed);
       dirty = true;
 
-      console.log(
+      smLog(
         `[SmartMemory] Session [${type}] consolidation: ${unprocessed.length} unprocessed -> ${promoted.length} promoted. Base: ${base.length}. Removed: ${Math.max(0, removed)}.`,
       );
     } catch (err) {

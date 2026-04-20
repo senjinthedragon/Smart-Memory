@@ -1077,3 +1077,57 @@
 #sm_search_overlay .sm_type_revelation { background: #8e5a5a; }
 #sm_search_overlay .sm_type_development { background: #7a7a3a; }
 #sm_search_overlay .sm_type_detail { background: #3a7a8e; }
+
+/* ── Away recap modal ──────────────────────────────────────────────────────── */
+
+/* flex-start + margin:auto on the card centers it when there is room, and lets
+   the card start at the top (with padding breathing room) when the card is tall -
+   preventing it from being pushed off the top on mobile where browser chrome
+   shrinks the visible area below 100vh. */
+#sm_recap_overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.sm_recap_card {
+  background: var(--black-2, #1a1a2e);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 580px;
+  width: 100%;
+  /* margin:auto distributes free vertical space equally, centering the card
+     when it fits. When the card is tall, the overlay scrolls instead. */
+  margin-top: auto;
+  margin-bottom: auto;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.sm_recap_title {
+  margin-top: 0;
+  font-size: 1.1em;
+}
+
+.sm_recap_time_label {
+  font-size: 0.8em;
+  opacity: 0.6;
+  margin: 0 0 14px 0;
+}
+
+.sm_recap_content {
+  line-height: 1.65;
+  margin: 0;
+}
+
+.sm_recap_footer {
+  margin-top: 18px;
+  text-align: right;
+}

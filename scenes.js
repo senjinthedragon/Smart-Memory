@@ -45,6 +45,7 @@ import { getContext, extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
 import { buildSceneDetectPrompt, SCENE_SUMMARY_PROMPT } from './prompts.js';
 import { detectSceneBreakHeuristic } from './parsers.js';
+import { smLog } from './logging.js';
 
 // Re-export so index.js can import directly from scenes.js as before.
 export { detectSceneBreakHeuristic };
@@ -178,7 +179,7 @@ export async function processSceneBreak(lastMessageText, recentMessages, previou
 
   if (!isBreak) return false;
 
-  console.log('[SmartMemory] Scene break detected.');
+  smLog('[SmartMemory] Scene break detected.');
 
   const summary = await summarizeScene(recentMessages);
   if (!summary) return false;
@@ -191,7 +192,7 @@ export async function processSceneBreak(lastMessageText, recentMessages, previou
   const SCENE_DEDUP_THRESHOLD = 0.5;
   const lastScene = history[history.length - 1];
   if (lastScene && sceneJaccard(summary, lastScene.summary) >= SCENE_DEDUP_THRESHOLD) {
-    console.log('[SmartMemory] Scene summary too similar to previous - skipping duplicate.');
+    smLog('[SmartMemory] Scene summary too similar to previous - skipping duplicate.');
     return false;
   }
 

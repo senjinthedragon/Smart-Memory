@@ -48,6 +48,7 @@ import { buildArcExtractionPrompt, buildArcSummaryPrompt } from './prompts.js';
 import { parseArcOutput } from './parsers.js';
 import { loadSceneHistory } from './scenes.js';
 import { loadSessionMemories } from './session.js';
+import { smLog } from './logging.js';
 
 // ---- Deduplication ------------------------------------------------------
 
@@ -227,7 +228,7 @@ export async function extractArcs(messages) {
       { responseLength: settings.arcs_response_length ?? 400 },
     );
 
-    console.log('[SmartMemory] Arc extraction response:', response);
+    smLog('[SmartMemory] Arc extraction response:', response);
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
@@ -250,9 +251,7 @@ export async function extractArcs(messages) {
               source_memory_ids: [],
               ts: Date.now(),
             });
-            console.log(
-              `[SmartMemory] Arc summary generated for: "${resolved.content.slice(0, 60)}"`,
-            );
+            smLog(`[SmartMemory] Arc summary generated for: "${resolved.content.slice(0, 60)}"`);
           }
         } catch (err) {
           console.error('[SmartMemory] Arc summary generation failed:', err);

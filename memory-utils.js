@@ -557,7 +557,7 @@ export function hybridScore(mem, context = {}) {
   // (the most temporally specific) score highest.
   const scopeProx = TIME_SCOPE_PROXIMITY[mem.time_scope || 'global'] ?? 0;
   const expProx = EXPIRATION_PROXIMITY[normalizeExpiration(mem.expiration, 'permanent')] ?? 0;
-  const temporalProximity = (scopeProx + expProx) / 4; // normalise to 0-1
+  const temporalProximity = (scopeProx + expProx) / 4; // normalise to 0-1 (scopeProx max 2 + expProx max 2 = 4)
 
   // w5: turn similarity - cosine similarity between this memory and the last AI
   // turn text. Pre-computed by hybridPrioritize and passed in turnSimilarities;

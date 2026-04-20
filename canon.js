@@ -47,6 +47,7 @@ import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT } from './constants.js';
 import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadArcSummaries } from './arcs.js';
+import { smLog } from './logging.js';
 
 // Minimum number of resolved arc summaries before canon is used instead of
 // the compaction summary. Two arcs represents "past multiple arcs" per the design.
@@ -125,7 +126,7 @@ export async function generateCanon(characterName) {
   const settings = extension_settings[MODULE_NAME];
   const arcSummaries = loadArcSummaries();
   if (arcSummaries.length === 0) {
-    console.log('[SmartMemory] Canon generation skipped - no arc summaries available.');
+    smLog('[SmartMemory] Canon generation skipped - no arc summaries available.');
     return null;
   }
 
@@ -147,7 +148,7 @@ export async function generateCanon(characterName) {
 
   const text = response.trim();
   saveCanon(characterName, text);
-  console.log(
+  smLog(
     `[SmartMemory] Canon summary generated for "${characterName}" (${estimateTokens(text)} tokens).`,
   );
   return text;

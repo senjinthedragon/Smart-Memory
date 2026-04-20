@@ -386,6 +386,14 @@ When two stored memories cannot both be true and neither clearly replaces the ot
 
 ---
 
+### Developer
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Verbose logging | Off | Print extraction, consolidation, migration, and scene detection progress to the browser console. Errors are always logged regardless of this setting. |
+
+---
+
 ## License
 
 Licensed under the [GNU Affero General Public License v3.0](LICENSE).

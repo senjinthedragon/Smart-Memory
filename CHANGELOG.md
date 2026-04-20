@@ -210,6 +210,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result count (`/sm-search k=20 the ritual`; default 10, max 50). Embeddings are
   used when available; Jaccard word-overlap is the fallback so the command works even
   without an embedding model configured.
+- **Verbose logging setting**: a new "Verbose logging" checkbox in the Developer
+  section of the settings panel gates all operational extraction, consolidation,
+  migration, and scene detection progress messages. When off (default), only errors
+  (`console.error`) appear in the browser console. When on, the full `[SmartMemory]`
+  log stream is visible - useful for debugging extraction quality or migration issues.
+
 - **Per-memory confidence decay**: memories that are not re-extracted over successive
   passes gradually lose confidence while memories that keep appearing in new text are
   reinforced. Each extraction pass `batchVerify` now returns a `confirmed` set
@@ -227,6 +233,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `1.0` / `0` in `applyGraphDefaults` and backfilled via schema migration v2.
 
 ### Fixed
+
+- **Embedding failure is now surfaced to the user**: when the embedding API call
+  fails (model unreachable, wrong URL, Ollama not running), a one-shot toastr
+  warning is shown so the user knows deduplication is falling back to keyword
+  matching. Previously the error was silently swallowed and the only symptom was
+  reduced deduplication quality.
 
 - **Arc deduplication on extraction**: each extraction pass now compares new arc candidates
   against existing arcs using Jaccard word-overlap (threshold 0.4). Candidates that are
@@ -259,6 +271,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not - making the full popup reachable on all screen sizes.
 
 ### Changed
+
+- **Recap modal styling moved to `style.css`**: the away recap overlay, card, and
+  content elements previously used jQuery inline `.css({...})` calls (~50 lines of
+  JS-embedded styling). All styles are now in CSS classes in `style.css`, consistent
+  with the rest of the extension's UI components. No visual change.
+
+- **`getHardwareProfile()` hoisted out of inner verification loop**: the profile
+  lookup was called once per `(candidate, existing)` pair inside `batchVerify`.
+  The profile cannot change mid-pass, so it is now computed once above the outer
+  loop. In large-chat catch-up with many candidates and existing memories, this
+  eliminates proportional redundant lookups.
 
 - **`similarity.js` extracted from `embeddings.js`**: `cosineSimilarity`, `jaccardSimilarity`,
   `STATE_CHANGE_PATTERNS`, and `hasStateChangeMarker` moved to a new file with no SillyTavern

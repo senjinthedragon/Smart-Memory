@@ -146,6 +146,7 @@ import {
   areProfilesStale,
 } from './profiles.js';
 import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
+import { smLog } from './logging.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -253,6 +254,10 @@ const defaultSettings = {
   // 'a': force Profile A (local/low-VRAM behaviour)
   // 'b': force Profile B (hosted/high-performance behaviour)
   hardware_profile: 'auto',
+
+  // Verbose logging - when false, operational extraction/migration logs are
+  // suppressed. Errors (console.error) are always shown regardless of this flag.
+  verbose_logging: false,
 
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
@@ -3245,6 +3250,14 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  // ---- Developer / debug ----------------------------------------------
+  $('#sm_verbose_logging')
+    .prop('checked', s.verbose_logging)
+    .on('change', function () {
+      getSettings().verbose_logging = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
   $('#sm_check_continuity').on('click', async function () {
     const characterName = getCurrentCharacterName();
     $(this).prop('disabled', true);
@@ -3533,5 +3546,5 @@ jQuery(async function () {
     }),
   );
 
-  console.log('[SmartMemory] Loaded.');
+  smLog('[SmartMemory] Loaded.');
 });
