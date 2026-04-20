@@ -752,9 +752,11 @@ async function onChatChanged() {
   messagesSinceLastExtraction = 0;
   compactionRunning = false;
   extractionRunning = false;
+  continuityCheckRunning = false;
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
   lastWarnedGroupId = null;
+  setContinuityBadge(null);
   lastKnownChatLength = 0;
   clearEmbeddingCache();
 
