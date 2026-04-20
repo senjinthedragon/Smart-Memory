@@ -82,17 +82,10 @@ export function estimateTokens(text) {
 
 /**
  * Generates a stable UUID v4 for a new memory entry.
- * Uses crypto.randomUUID() when available (all modern browsers), with a
- * Math.random()-based fallback for environments that lack it.
+ * SillyTavern runs exclusively in modern browsers where crypto.randomUUID()
+ * is always available - no fallback needed.
  * @returns {string} UUID v4 string.
  */
 export function generateMemoryId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  // Fallback: RFC 4122-compliant v4 UUID via Math.random().
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
+  return crypto.randomUUID();
 }
