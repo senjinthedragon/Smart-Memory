@@ -98,6 +98,12 @@
   transform: rotate(90deg);
 }
 
+#smart_memory_settings details.sm-section > summary .sm-section-toggle {
+  margin: 0 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 #smart_memory_settings details.sm-section > .sm-section-content {
   padding: 4px 0 6px 0;
 }
@@ -1069,14 +1075,30 @@
 }
 
 /* Type badge colours reused in search overlay (same values as panel badges). */
-#sm_search_overlay .sm_type_fact { background: #4a6fa5; }
-#sm_search_overlay .sm_type_relationship { background: #8e5a8e; }
-#sm_search_overlay .sm_type_preference { background: #5a8e5a; }
-#sm_search_overlay .sm_type_event { background: #8e6e3a; }
-#sm_search_overlay .sm_type_scene { background: #5a8e7a; }
-#sm_search_overlay .sm_type_revelation { background: #8e5a5a; }
-#sm_search_overlay .sm_type_development { background: #7a7a3a; }
-#sm_search_overlay .sm_type_detail { background: #3a7a8e; }
+#sm_search_overlay .sm_type_fact {
+  background: #4a6fa5;
+}
+#sm_search_overlay .sm_type_relationship {
+  background: #8e5a8e;
+}
+#sm_search_overlay .sm_type_preference {
+  background: #5a8e5a;
+}
+#sm_search_overlay .sm_type_event {
+  background: #8e6e3a;
+}
+#sm_search_overlay .sm_type_scene {
+  background: #5a8e7a;
+}
+#sm_search_overlay .sm_type_revelation {
+  background: #8e5a5a;
+}
+#sm_search_overlay .sm_type_development {
+  background: #7a7a3a;
+}
+#sm_search_overlay .sm_type_detail {
+  background: #3a7a8e;
+}
 
 /* ── Away recap modal ──────────────────────────────────────────────────────── */
 

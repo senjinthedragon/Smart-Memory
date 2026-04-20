@@ -209,6 +209,7 @@
       <details class="sm-section">
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_longterm_enabled" class="sm-section-toggle" />
           Long-term Memory
           <span
             class="sm-info"
@@ -217,11 +218,24 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_longterm_enabled" type="checkbox" />
-              <span>Enable long-term memory</span>
-            </label>
+          <p class="sm-section-title">Memories for Current Character</p>
+          <div id="sm_memories_list" class="sm_memories_list"></div>
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+            <button id="sm_extract_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>
+                Extract Now
+                <span
+                  class="sm-info"
+                  data-tooltip="Extracts long-term memories from the last 20 messages. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
+              </span>
+            </button>
+            <button id="sm_clear_memories" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Memories</span>
+            </button>
           </div>
 
           <p class="sm-section-title">Behaviour</p>
@@ -407,26 +421,6 @@
               </label>
             </div>
           </div>
-
-          <p class="sm-section-title">Memories for Current Character</p>
-          <div id="sm_memories_list" class="sm_memories_list"></div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
-            <button id="sm_extract_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <span>
-                Extract Now
-                <span
-                  class="sm-info"
-                  data-tooltip="Extracts long-term memories from the last 20 messages. For the full chat backlog use Catch Up instead."
-                  >ⓘ</span
-                >
-              </span>
-            </button>
-            <button id="sm_clear_memories" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-trash-can"></i>
-              <span>Clear Memories</span>
-            </button>
-          </div>
         </div>
       </details>
 
@@ -434,6 +428,7 @@
       <details class="sm-section">
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_session_enabled" class="sm-section-toggle" />
           Session Memory
           <span
             class="sm-info"
@@ -442,11 +437,24 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_session_enabled" type="checkbox" />
-              <span>Enable session memory</span>
-            </label>
+          <p class="sm-section-title">Memories for Current Session</p>
+          <div id="sm_session_list" class="sm_memories_list"></div>
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+            <button id="sm_extract_session_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>
+                Extract Now
+                <span
+                  class="sm-info"
+                  data-tooltip="Extracts session details from the last 40 messages. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
+              </span>
+            </button>
+            <button id="sm_clear_session" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Session Memories</span>
+            </button>
           </div>
 
           <p class="sm-section-title">Extraction</p>
@@ -556,26 +564,6 @@
               </label>
             </div>
           </div>
-
-          <p class="sm-section-title">Memories for Current Session</p>
-          <div id="sm_session_list" class="sm_memories_list"></div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
-            <button id="sm_extract_session_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <span>
-                Extract Now
-                <span
-                  class="sm-info"
-                  data-tooltip="Extracts session details from the last 40 messages. For the full chat backlog use Catch Up instead."
-                  >ⓘ</span
-                >
-              </span>
-            </button>
-            <button id="sm_clear_session" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-trash-can"></i>
-              <span>Clear Session Memories</span>
-            </button>
-          </div>
         </div>
       </details>
 
@@ -583,6 +571,7 @@
       <details class="sm-section">
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_compaction_enabled" class="sm-section-toggle" />
           Short-term Memory
           <span
             class="sm-info"
@@ -591,12 +580,36 @@
           >
         </summary>
         <div class="sm-section-content">
+          <p class="sm-section-title">Current Summary</p>
           <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_compaction_enabled" type="checkbox" />
-              <span>Enable auto-summarization</span>
+            <label>
+              Summary
+              <small style="color: var(--SmartReplyColor, #aaa)"
+                >(editable - changes apply immediately)</small
+              >
             </label>
+            <textarea
+              id="sm_current_summary"
+              class="text_pole textarea_compact"
+              rows="5"
+              placeholder="No summary yet. One will be generated automatically when the context threshold is reached."
+            ></textarea>
           </div>
+          <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap">
+            <button id="sm_summarize_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-brain"></i>
+              <span>Summarize Now</span>
+            </button>
+            <button
+              id="sm_generate_canon"
+              class="menu_button menu_button_icon"
+              title="Generate a stable canon narrative from resolved arc summaries and high-importance memories. Replaces the compaction summary once at least 2 arcs have been resolved."
+            >
+              <i class="fa-solid fa-book-open"></i>
+              <span>Generate Canon</span>
+            </button>
+          </div>
+          <div id="sm_canon_status" class="sm_canon_status"></div>
 
           <p class="sm-section-title">Extraction</p>
           <div class="sm-block">
@@ -631,6 +644,7 @@
               value="{{defaultSettings.compaction_response_length}}"
             />
           </div>
+
           <p class="sm-section-title">Injection</p>
           <div class="sm-block">
             <label>
@@ -679,37 +693,6 @@
               </label>
             </div>
           </div>
-
-          <p class="sm-section-title">Current Summary</p>
-          <div class="sm-block">
-            <label>
-              Summary
-              <small style="color: var(--SmartReplyColor, #aaa)"
-                >(editable - changes apply immediately)</small
-              >
-            </label>
-            <textarea
-              id="sm_current_summary"
-              class="text_pole textarea_compact"
-              rows="5"
-              placeholder="No summary yet. One will be generated automatically when the context threshold is reached."
-            ></textarea>
-          </div>
-          <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap">
-            <button id="sm_summarize_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-brain"></i>
-              <span>Summarize Now</span>
-            </button>
-            <button
-              id="sm_generate_canon"
-              class="menu_button menu_button_icon"
-              title="Generate a stable canon narrative from resolved arc summaries and high-importance memories. Replaces the compaction summary once at least 2 arcs have been resolved."
-            >
-              <i class="fa-solid fa-book-open"></i>
-              <span>Generate Canon</span>
-            </button>
-          </div>
-          <div id="sm_canon_status" class="sm_canon_status"></div>
         </div>
       </details>
 
@@ -717,6 +700,7 @@
       <details class="sm-section">
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_scene_enabled" class="sm-section-toggle" />
           Scene Detection &amp; History
           <span
             class="sm-info"
@@ -725,11 +709,26 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_scene_enabled" type="checkbox" />
-              <span>Enable scene detection</span>
-            </label>
+          <p class="sm-section-title">Scene History</p>
+          <div id="sm_scenes_list" class="sm_scenes_list">
+            <div class="sm_no_char">No scenes recorded yet.</div>
+          </div>
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+            <button id="sm_extract_scenes_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>
+                Extract Scene
+                <span
+                  class="sm-info"
+                  data-tooltip="Summarizes the current scene buffer (messages since the last detected scene break) as a scene entry. Falls back to the last 40 messages if no buffer exists. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
+              </span>
+            </button>
+            <button id="sm_clear_scenes" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Scene History</span>
+            </button>
           </div>
 
           <p class="sm-section-title">Detection</p>
@@ -745,6 +744,32 @@
                 >
               </span>
             </label>
+          </div>
+
+          <p class="sm-section-title">Settings</p>
+          <div class="sm-block">
+            <label
+              >Keep last <b><span id="sm_scene_max_history_value"></span></b> scenes</label
+            >
+            <input
+              id="sm_scene_max_history"
+              type="range"
+              min="1"
+              max="15"
+              step="1"
+              value="{{defaultSettings.scene_max_history}}"
+            />
+          </div>
+          <div class="sm-block">
+            <label>
+              Injection token budget: <b><span id="sm_scene_inject_budget_value"></span></b>
+              <span
+                class="sm-info"
+                data-tooltip="Maximum tokens injected per generation. Oldest scenes are dropped first if the total would exceed this limit."
+                >ⓘ</span
+              >
+            </label>
+            <input id="sm_scene_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
 
           <p class="sm-section-title">Injection</p>
@@ -779,52 +804,6 @@
               </label>
             </div>
           </div>
-
-          <p class="sm-section-title">Scene History</p>
-          <div class="sm-block">
-            <label
-              >Keep last <b><span id="sm_scene_max_history_value"></span></b> scenes</label
-            >
-            <input
-              id="sm_scene_max_history"
-              type="range"
-              min="1"
-              max="15"
-              step="1"
-              value="{{defaultSettings.scene_max_history}}"
-            />
-          </div>
-          <div class="sm-block">
-            <label>
-              Injection token budget: <b><span id="sm_scene_inject_budget_value"></span></b>
-              <span
-                class="sm-info"
-                data-tooltip="Maximum tokens injected per generation. Oldest scenes are dropped first if the total would exceed this limit."
-                >ⓘ</span
-              >
-            </label>
-            <input id="sm_scene_inject_budget" type="range" min="100" max="2000" step="50" />
-          </div>
-          <div id="sm_scenes_list" class="sm_scenes_list">
-            <div class="sm_no_char">No scenes recorded yet.</div>
-          </div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
-            <button id="sm_extract_scenes_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <span>
-                Extract Scene
-                <span
-                  class="sm-info"
-                  data-tooltip="Summarizes the current scene buffer (messages since the last detected scene break) as a scene entry. Falls back to the last 40 messages if no buffer exists. For the full chat backlog use Catch Up instead."
-                  >ⓘ</span
-                >
-              </span>
-            </button>
-            <button id="sm_clear_scenes" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-trash-can"></i>
-              <span>Clear Scene History</span>
-            </button>
-          </div>
         </div>
       </details>
 
@@ -832,6 +811,7 @@
       <details class="sm-section">
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_arcs_enabled" class="sm-section-toggle" />
           Story Arcs
           <span
             class="sm-info"
@@ -840,11 +820,26 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_arcs_enabled" type="checkbox" />
-              <span>Enable story arc tracking</span>
-            </label>
+          <p class="sm-section-title">Active Threads</p>
+          <div id="sm_arcs_list" class="sm_arcs_list">
+            <div class="sm_no_char">No open story threads.</div>
+          </div>
+          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+            <button id="sm_extract_arcs_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>
+                Extract Arcs Now
+                <span
+                  class="sm-info"
+                  data-tooltip="Extracts story arcs from the last 100 messages. Arcs need a broader window than other tiers to detect resolutions. For the full chat backlog use Catch Up instead."
+                  >ⓘ</span
+                >
+              </span>
+            </button>
+            <button id="sm_clear_arcs" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clear Arcs</span>
+            </button>
           </div>
 
           <p class="sm-section-title">Extraction</p>
@@ -905,28 +900,6 @@
               </label>
             </div>
           </div>
-
-          <p class="sm-section-title">Active Threads</p>
-          <div id="sm_arcs_list" class="sm_arcs_list">
-            <div class="sm_no_char">No open story threads.</div>
-          </div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
-            <button id="sm_extract_arcs_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <span>
-                Extract Arcs Now
-                <span
-                  class="sm-info"
-                  data-tooltip="Extracts story arcs from the last 100 messages. Arcs need a broader window than other tiers to detect resolutions. For the full chat backlog use Catch Up instead."
-                  >ⓘ</span
-                >
-              </span>
-            </button>
-            <button id="sm_clear_arcs" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-trash-can"></i>
-              <span>Clear Arcs</span>
-            </button>
-          </div>
         </div>
       </details>
 
@@ -934,6 +907,7 @@
       <details class="sm-section">
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_profiles_enabled" class="sm-section-toggle" />
           Character &amp; World Profiles
           <span
             class="sm-info"
@@ -942,11 +916,15 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_profiles_enabled" type="checkbox" />
-              <span>Enable profiles</span>
-            </label>
+          <p class="sm-section-title">Current Profiles</p>
+          <div id="sm_profiles_display" class="sm_profiles_display">
+            <span class="sm-muted">No profiles generated yet.</span>
+          </div>
+          <div class="sm-block" style="margin-top: 4px">
+            <button id="sm_profiles_regenerate" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-rotate"></i>
+              <span>Regenerate Profiles Now</span>
+            </button>
           </div>
 
           <p class="sm-section-title">Generation</p>
@@ -964,7 +942,6 @@
               value="{{defaultSettings.profiles_stale_threshold_minutes}}"
             />
           </div>
-
           <div class="sm-block">
             <label
               >Also regenerate every:
@@ -983,13 +960,6 @@
               step="1"
               value="{{defaultSettings.profiles_regen_every}}"
             />
-          </div>
-
-          <div class="sm-block" style="margin-top: 4px">
-            <button id="sm_profiles_regenerate" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-rotate"></i>
-              <span>Regenerate Profiles Now</span>
-            </button>
           </div>
 
           <p class="sm-section-title">Injection</p>
@@ -1034,11 +1004,6 @@
                 </select>
               </label>
             </div>
-          </div>
-
-          <p class="sm-section-title">Current Profiles</p>
-          <div id="sm_profiles_display" class="sm_profiles_display">
-            <span class="sm-muted">No profiles generated yet.</span>
           </div>
         </div>
       </details>
@@ -1151,6 +1116,19 @@
         </summary>
         <div class="sm-section-content">
           <div class="sm-block">
+            <button id="sm_check_continuity" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-scale-balanced"></i>
+              <span>Check Last Response</span>
+            </button>
+          </div>
+
+          <div
+            id="sm_continuity_result"
+            class="sm_continuity_result"
+            style="display: none; margin-top: 8px"
+          ></div>
+
+          <div class="sm-block" style="margin-top: 8px">
             <label class="checkbox_label">
               <input id="sm_auto_repair" type="checkbox" />
               <span
@@ -1163,19 +1141,6 @@
               >
             </label>
           </div>
-
-          <div class="sm-block">
-            <button id="sm_check_continuity" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-scale-balanced"></i>
-              <span>Check Last Response</span>
-            </button>
-          </div>
-
-          <div
-            id="sm_continuity_result"
-            class="sm_continuity_result"
-            style="display: none; margin-top: 8px"
-          ></div>
         </div>
       </details>
 
@@ -1183,6 +1148,7 @@
       <details class="sm-section">
         <summary>
           <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_recap_enabled" class="sm-section-toggle" />
           Away Recap
           <span
             class="sm-info"
@@ -1191,11 +1157,11 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block">
-            <label class="checkbox_label">
-              <input id="sm_recap_enabled" type="checkbox" />
-              <span>Enable away recap</span>
-            </label>
+          <div class="sm-block" style="margin-top: 4px">
+            <button id="sm_recap_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <span>Generate Recap Now</span>
+            </button>
           </div>
 
           <p class="sm-section-title">Trigger</p>
@@ -1211,13 +1177,6 @@
               step="1"
               value="{{defaultSettings.recap_threshold_hours}}"
             />
-          </div>
-
-          <div class="sm-block" style="margin-top: 4px">
-            <button id="sm_recap_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-clock-rotate-left"></i>
-              <span>Generate Recap Now</span>
-            </button>
           </div>
         </div>
       </details>

@@ -1995,6 +1995,11 @@ function isCatchUpRunning() {
 function bindSettingsUI() {
   const s = getSettings();
 
+  // Prevent section-header enable checkboxes from toggling the <details> open/closed
+  // when clicked. Without this, clicking the checkbox both changes the setting and
+  // collapses the section, which is never what the user intends.
+  $(document).on('click', '.sm-section-toggle', (e) => e.stopPropagation());
+
   // ---- Master toggle --------------------------------------------------
   $('#sm_enabled')
     .prop('checked', s.enabled)
