@@ -57,7 +57,7 @@ import {
 } from './graph-migration.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import { parseSessionOutput } from './parsers.js';
-import { batchVerify } from './embeddings.js';
+import { batchVerify, getEmbeddingBatch } from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
@@ -401,10 +401,13 @@ export async function consolidateSessionMemories(force = false) {
 
       // Reconcile promoted entries with the base so "updated" base entries
       // replace older variants instead of being appended as duplicates.
-      const reconciledType = await reconcileTypeEntries(base, promoted, 0.65, [
-        ...base,
-        ...unprocessed,
-      ]);
+      const reconciledType = await reconcileTypeEntries(
+        base,
+        promoted,
+        0.65,
+        [...base, ...unprocessed],
+        getEmbeddingBatch,
+      );
 
       // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
@@ -497,6 +500,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
     trimmed = await hybridPrioritize(memories, {
       turnMentions,
       floorTypes: ['development', 'scene'],
+      embedFn: getEmbeddingBatch,
     });
   } else {
     trimmed = prioritizeMemories(memories);

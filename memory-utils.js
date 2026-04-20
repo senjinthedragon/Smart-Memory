@@ -26,24 +26,19 @@
  * sortByTimeline            - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
  * extractTurnEntityMentions - lightweight regex extraction of proper-noun candidates from last messages
  * hybridScore               - weighted blend of utility, entity overlap, arc relevance, and temporal proximity
- * hybridPrioritize          - sorts a memory array by hybridScore then applies a diversity floor
+ * hybridPrioritize          - sorts a memory array by hybridScore then applies a diversity floor;
+ *                             accepts embedFn in context (pass getEmbeddingBatch from embeddings.js)
  * classifyTurn              - heuristic turn-type classifier (dialogue/action/transition/intimate)
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
+ *
+ * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
+ * the embedFn parameter so tests can run under plain Node without loading extensions.js.
  */
 
-import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
+import { cosineSimilarity, jaccardSimilarity } from './similarity.js';
 
 function tokenSet(text) {
   return new Set((text || '').toLowerCase().split(/\s+/).filter(Boolean));
-}
-
-function jaccardSimilarity(a, b) {
-  const aWords = tokenSet(a);
-  const bWords = tokenSet(b);
-  if (aWords.size === 0 || bWords.size === 0) return 0;
-  const intersection = [...aWords].filter((w) => bWords.has(w)).length;
-  const union = new Set([...aWords, ...bWords]).size;
-  return union > 0 ? intersection / union : 0;
 }
 
 const STOPWORDS = new Set([
@@ -306,16 +301,25 @@ export function buildCurrentSceneStateBlock(memories) {
  * @param {Array<{type: string, content: string}>} promoted - Entries output by consolidation for the same type.
  * @param {number} threshold - Jaccard overlap threshold above which a promoted entry replaces a base entry.
  * @param {Array<{type: string, content: string, ts?: number}>} [timelinePool=[]] - Candidate entries for timestamp inference.
- * @returns {Array} The reconciled array (new array, base is not mutated).
+ * @param {function(string[]): Promise<Map<string, number[]>>} [embedFn] - Embedding fetcher.
+ *   Defaults to a no-op (returns empty Map) so callers in tests do not need the ST runtime.
+ *   Production callers should pass getEmbeddingBatch from embeddings.js.
+ * @returns {Promise<Array>} The reconciled array (new array, base is not mutated).
  */
-export async function reconcileTypeEntries(base, promoted, threshold, timelinePool = []) {
+export async function reconcileTypeEntries(
+  base,
+  promoted,
+  threshold,
+  timelinePool = [],
+  embedFn = async () => new Map(),
+) {
   const sourcePool = timelinePool.length > 0 ? timelinePool : base;
 
   // Batch-embed all unique content strings up front so similarity checks use
   // cosine distance rather than Jaccard word-overlap. Falls back to Jaccard
   // per-pair when the embedding call fails or returns no vector for a text.
   const allTexts = [...new Set([...base, ...promoted, ...sourcePool].map((m) => m.content))];
-  const vectorMap = await getEmbeddingBatch(allTexts);
+  const vectorMap = await embedFn(allTexts);
 
   const simFn = (a, b) => {
     const va = vectorMap.get(a);
@@ -576,7 +580,9 @@ export function hybridScore(mem, context = {}) {
  *   turnMentions?: Set<string>,
  *   entityRegistry?: Array,
  *   arcs?: Array,
- * }} [context={}]
+ *   embedFn?: function(string[]): Promise<Map<string, number[]>>,
+ * }} [context={}] - embedFn defaults to a no-op so tests do not need the ST runtime.
+ *   Production callers should pass getEmbeddingBatch from embeddings.js.
  * @returns {Promise<Array>}
  */
 /**
@@ -614,7 +620,7 @@ function applyDiversityFloor(sorted, floorTypes) {
 }
 
 export async function hybridPrioritize(memories, context = {}) {
-  const { arcs = null, floorTypes = [] } = context;
+  const { arcs = null, floorTypes = [], embedFn = async () => new Map() } = context;
   const keywordFreq = buildKeywordFrequency(memories);
 
   // Pre-compute arc similarities via embeddings when arcs are present.
@@ -623,7 +629,7 @@ export async function hybridPrioritize(memories, context = {}) {
   if (arcs && arcs.length > 0 && memories.length > 0) {
     const memTexts = memories.map((m) => m.content);
     const arcTexts = arcs.map((a) => a.content);
-    const vectorMap = await getEmbeddingBatch([...memTexts, ...arcTexts]);
+    const vectorMap = await embedFn([...memTexts, ...arcTexts]);
 
     if (vectorMap.size > 0) {
       arcSimilarities = new Map();

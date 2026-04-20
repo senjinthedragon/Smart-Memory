@@ -32,7 +32,7 @@
  *
  * getEmbeddingBatch   - fetches vectors for multiple texts in one API call
  * getEmbedding        - single-text wrapper around getEmbeddingBatch
- * cosineSimilarity    - computes cosine similarity between two vectors
+ * cosineSimilarity    - re-exported from similarity.js for callers that import here
  * batchVerify         - compares candidates against existing memories; returns
  *                       passed (new), superseded (state-change updates), and
  *                       rejected (duplicates)
@@ -43,6 +43,7 @@
 import { extension_settings } from '../../../extensions.js';
 import { MODULE_NAME } from './constants.js';
 import { memory_sources } from './generate.js';
+import { cosineSimilarity, jaccardSimilarity, hasStateChangeMarker } from './similarity.js';
 
 // In-session embedding cache: normalized text -> vector.
 // Embeddings are deterministic for a given text + model, so caching within a
@@ -128,76 +129,11 @@ export async function getEmbedding(text) {
   return result.get(normalized) ?? null;
 }
 
-/**
- * Computes cosine similarity between two equal-length vectors.
- * Returns 0 if either argument is null/empty or the lengths differ.
- * @param {number[]|null} a
- * @param {number[]|null} b
- * @returns {number} Similarity in [0, 1].
- */
-export function cosineSimilarity(a, b) {
-  if (!a || !b || a.length !== b.length || a.length === 0) return 0;
-  let dot = 0,
-    magA = 0,
-    magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(magA) * Math.sqrt(magB);
-  return denom === 0 ? 0 : dot / denom;
-}
-
-// Patterns that signal a memory is describing a state change rather than
-// restating an existing fact. Used to distinguish supersession from duplication:
-// two memories about the same topic where the new one contains a state-change
-// marker are treated as supersession (old fact retired), not duplication (rejected).
-//
-// Deliberately conservative - false negatives (missing a supersession) are
-// handled by later consolidation; false positives (wrongly retiring a valid
-// memory) are harder to recover from.
-const STATE_CHANGE_PATTERNS = [
-  /\bno longer\b/i,
-  /\bnot anymore\b/i,
-  /\bno more\b/i,
-  /\bstopped\b/i,
-  /\bmoved (?:to|away|from|out)\b/i,
-  /\bbroke up\b/i,
-  /\bformerly\b/i,
-  /\bused to\b/i,
-  /\bbecame\b/i,
-  /\bswitched (?:to|from)\b/i,
-  /\bnow (?:lives?|works?|is|has)\b/i,
-  /\breconciled\b/i,
-  /\bseparated\b/i,
-  /\bended the\b/i,
-];
-
-/**
- * Returns true if the text contains a word or phrase that signals a change
- * in state rather than a restatement of an existing fact.
- * @param {string} text
- * @returns {boolean}
- */
-function hasStateChangeMarker(text) {
-  return STATE_CHANGE_PATTERNS.some((p) => p.test(text));
-}
-
-/**
- * Jaccard word-overlap similarity between two strings. Used as a fallback when
- * embeddings are unavailable.
- * @param {string} a
- * @param {string} b
- * @returns {number} Similarity in [0, 1].
- */
-function jaccardSimilarity(a, b) {
-  const setA = new Set(a.toLowerCase().split(/\s+/));
-  const setB = new Set(b.toLowerCase().split(/\s+/));
-  const overlap = [...setA].filter((w) => setB.has(w)).length;
-  const union = new Set([...setA, ...setB]).size || 1;
-  return overlap / union;
-}
+// cosineSimilarity, jaccardSimilarity, STATE_CHANGE_PATTERNS, and hasStateChangeMarker
+// live in similarity.js (no ST runtime deps) so unit tests can load embeddings
+// consumers without pulling in extensions.js. Re-exported here for callers that
+// already import from embeddings.js.
+export { cosineSimilarity } from './similarity.js';
 
 /**
  * Returns the active hardware profile: 'a' (local/low-VRAM) or 'b' (hosted).

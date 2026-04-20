@@ -222,6 +222,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`similarity.js` extracted from `embeddings.js`**: `cosineSimilarity`, `jaccardSimilarity`,
+  `STATE_CHANGE_PATTERNS`, and `hasStateChangeMarker` moved to a new file with no SillyTavern
+  runtime dependencies. `reconcileTypeEntries` and `hybridPrioritize` in `memory-utils.js`
+  now accept an optional `embedFn` parameter instead of importing `getEmbeddingBatch` directly.
+  No behaviour change at runtime; the `memory-utils.test.js` suite now runs fully under
+  `node --test` (previously blocked by the ST import chain).
+
 - **Per-container schema versioning replaces global migration flag**: each data
   container (per-character store, per-chat block) now carries its own
   `schema_version` field. Previously a single global `graph_schema_version` flag

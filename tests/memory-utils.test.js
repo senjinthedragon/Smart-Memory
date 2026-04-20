@@ -80,36 +80,36 @@ test('prioritizeMemories boosts recurring keywords compared to one-off details',
   assert.equal(prioritized[1].content, 'They opened the crypt gate at midnight');
 });
 
-test('reconcileTypeEntries replaces overlapping base entry with promoted update', () => {
+test('reconcileTypeEntries replaces overlapping base entry with promoted update', async () => {
   const base = [{ type: 'relationship', content: 'We are married.', ts: 1234 }];
   const promoted = [{ type: 'relationship', content: 'We are married. Happily.', ts: 9999 }];
 
-  const reconciled = reconcileTypeEntries(base, promoted, 0.65);
+  const reconciled = await reconcileTypeEntries(base, promoted, 0.65);
 
   assert.equal(reconciled.length, 1);
   assert.equal(reconciled[0].content, promoted[0].content);
   assert.equal(reconciled[0].ts, 1234);
 });
 
-test('reconcileTypeEntries appends genuinely new entries', () => {
+test('reconcileTypeEntries appends genuinely new entries', async () => {
   const base = [{ type: 'fact', content: 'The ring is silver.' }];
   const promoted = [{ type: 'fact', content: 'The house has a red door.' }];
 
-  const reconciled = reconcileTypeEntries(base, promoted, 0.7);
+  const reconciled = await reconcileTypeEntries(base, promoted, 0.7);
 
   assert.equal(reconciled.length, 2);
   assert.ok(reconciled.some((m) => m.content === 'The ring is silver.'));
   assert.ok(reconciled.some((m) => m.content === 'The house has a red door.'));
 });
 
-test('reconcileTypeEntries infers timestamp for new promoted entries from timeline pool', () => {
+test('reconcileTypeEntries infers timestamp for new promoted entries from timeline pool', async () => {
   const base = [{ type: 'event', content: 'We escaped the city.', ts: 2000 }];
   const unprocessed = [{ type: 'event', content: 'We escaped the city at dawn.', ts: 3000 }];
   const promoted = [
     { type: 'event', content: 'We escaped the city at dawn via the east gate.', ts: 9999 },
   ];
 
-  const reconciled = reconcileTypeEntries(base, promoted, 0.7, [...base, ...unprocessed]);
+  const reconciled = await reconcileTypeEntries(base, promoted, 0.7, [...base, ...unprocessed]);
   const added = reconciled.find((m) => m.content === promoted[0].content);
 
   assert.ok(added);

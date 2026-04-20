@@ -68,7 +68,7 @@ import {
   sortByTimeline,
   trimByPriority,
 } from './memory-utils.js';
-import { batchVerify } from './embeddings.js';
+import { batchVerify, getEmbeddingBatch } from './embeddings.js';
 
 // Maximum new entries accepted per type per extraction pass.
 // Prevents one burst of similar events flooding a single type while still
@@ -545,10 +545,13 @@ export async function consolidateMemories(characterName, force = false) {
 
       // Reconcile promoted entries with the base so "updated" base entries
       // replace older variants instead of being appended as duplicates.
-      const reconciledType = await reconcileTypeEntries(base, promoted, 0.7, [
-        ...base,
-        ...unprocessed,
-      ]);
+      const reconciledType = await reconcileTypeEntries(
+        base,
+        promoted,
+        0.7,
+        [...base, ...unprocessed],
+        getEmbeddingBatch,
+      );
 
       // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
@@ -638,6 +641,7 @@ export async function injectMemories(characterName, freshStart = false, updateTe
       turnMentions,
       entityRegistry,
       floorTypes: ['relationship', 'fact'],
+      embedFn: getEmbeddingBatch,
     });
   } else {
     trimmed = prioritizeMemories(memories);
