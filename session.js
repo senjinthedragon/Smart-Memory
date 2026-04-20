@@ -81,14 +81,15 @@ import {
  *
  * @param {Array} candidates - Newly extracted session memory objects.
  * @param {Array} existing   - Active (non-retired) session memories.
- * @returns {Promise<{verified: Array, superseded: Map<string, string>}>}
+ * @returns {Promise<{verified: Array, superseded: Map<string, string>, confirmed: Set<string>}>}
  *   verified  - Candidates that passed dedup and should be added.
  *   superseded - Map from candidate content (lowercase) to the id of the
  *                existing memory it replaces.
+ *   confirmed  - Set of existing memory ids re-extracted this pass (still true).
  */
 async function verifySessionCandidates(candidates, existing) {
   if (!Array.isArray(candidates) || candidates.length === 0) {
-    return { verified: [], superseded: new Map() };
+    return { verified: [], superseded: new Map(), confirmed: new Set() };
   }
 
   const seen = new Set();
@@ -101,9 +102,9 @@ async function verifySessionCandidates(candidates, existing) {
     return true;
   });
 
-  if (filtered.length === 0) return { verified: [], superseded: new Map() };
+  if (filtered.length === 0) return { verified: [], superseded: new Map(), confirmed: new Set() };
 
-  const { passed, superseded } = await batchVerify(filtered, existing);
+  const { passed, superseded, confirmed } = await batchVerify(filtered, existing);
   const verified = filtered.filter((m) =>
     passed.has(
       String(m.content || '')
@@ -111,7 +112,7 @@ async function verifySessionCandidates(candidates, existing) {
         .trim(),
     ),
   );
-  return { verified, superseded };
+  return { verified, superseded, confirmed };
 }
 
 // ---- Storage (chatMetadata) ---------------------------------------------
@@ -258,10 +259,11 @@ export async function extractSessionMemories(recentMessages) {
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const { verified: incoming, superseded: supersessionMap } = await verifySessionCandidates(
-      parseSessionOutput(response),
-      existing,
-    );
+    const {
+      verified: incoming,
+      superseded: supersessionMap,
+      confirmed: confirmedIds,
+    } = await verifySessionCandidates(parseSessionOutput(response), existing);
     if (incoming.length === 0) return 0;
 
     const max = settings.session_max_memories ?? 30;
@@ -300,6 +302,22 @@ export async function extractSessionMemories(recentMessages) {
 
     // Remove newly retired entries from the active merged set.
     const finalActive = merged.filter((m) => !newlyRetiredIds.has(m.id));
+
+    // Confidence decay pass - mirrors the long-term logic.
+    const DECAY_THRESHOLD = 10;
+    const now = Date.now();
+    for (const mem of finalActive) {
+      if (confirmedIds.has(mem.id)) {
+        mem.last_confirmed_ts = now;
+        mem.confidence = Math.min(1.0, (mem.confidence ?? 1.0) + 0.05);
+        mem.unconfirmed_since = 0;
+      } else {
+        mem.unconfirmed_since = (mem.unconfirmed_since ?? 0) + 1;
+        if (mem.unconfirmed_since >= DECAY_THRESHOLD) {
+          mem.confidence = Math.max(0.3, (mem.confidence ?? 1.0) - 0.02);
+        }
+      }
+    }
 
     // Resolve entity names to ids for any new memories that carried
     // _raw_entity_names through the pipeline. The session entity registry is

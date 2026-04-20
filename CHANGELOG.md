@@ -203,6 +203,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next AI response exactly as the manual path does. Runs fire-and-forget so it does
   not delay the event handler. Profile A (local hardware) is unaffected - manual-only
   as before.
+- **Per-memory confidence decay**: memories that are not re-extracted over successive
+  passes gradually lose confidence while memories that keep appearing in new text are
+  reinforced. Each extraction pass `batchVerify` now returns a `confirmed` set
+  containing the ids of existing memories whose content was re-extracted as a near-
+  duplicate candidate - indicating the model still sees that fact as true. Confirmed
+  memories receive a +0.05 confidence boost (capped at 1.0) and their unconfirmed
+  counter resets to zero. Non-confirmed active memories increment an `unconfirmed_since`
+  counter; once it reaches 10 consecutive unconfirmed passes the memory's confidence
+  decays by 0.02 per pass down to a floor of 0.3. `memoryUtilityScore` already uses
+  confidence as a factor (max 25 points), so decayed memories naturally sort lower
+  and are evicted first by `trimByPriority` when the memory cap is reached - without
+  needing an explicit retire step. Importance is never decayed: memories judged
+  important due to narrative intensity remain so regardless of how long ago they
+  occurred. Both `confidence` and `unconfirmed_since` are new graph fields defaulted
+  to `1.0` / `0` in `applyGraphDefaults` and backfilled via schema migration v2.
 
 ### Fixed
 

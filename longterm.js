@@ -98,14 +98,15 @@ function incomingPriorityScore(mem) {
  *
  * @param {Array} candidates - Newly extracted memory objects to evaluate.
  * @param {Array} existing   - Active (non-retired) memories to compare against.
- * @returns {Promise<{verified: Array, superseded: Map<string, string>}>}
+ * @returns {Promise<{verified: Array, superseded: Map<string, string>, confirmed: Set<string>}>}
  *   verified  - Candidates that passed dedup and should be added.
  *   superseded - Map from candidate content (lowercase) to the id of the
  *                existing memory it replaces.
+ *   confirmed  - Set of existing memory ids re-extracted this pass (still true).
  */
 async function verifyLongtermCandidates(candidates, existing) {
   if (!Array.isArray(candidates) || candidates.length === 0) {
-    return { verified: [], superseded: new Map() };
+    return { verified: [], superseded: new Map(), confirmed: new Set() };
   }
 
   const bannedPhrases = ['maybe', 'might be', 'possibly', 'i think', 'perhaps', 'seems like'];
@@ -123,10 +124,10 @@ async function verifyLongtermCandidates(candidates, existing) {
     return true;
   });
 
-  if (filtered.length === 0) return { verified: [], superseded: new Map() };
+  if (filtered.length === 0) return { verified: [], superseded: new Map(), confirmed: new Set() };
 
   // Batch-embed all candidates and existing memories in one API call.
-  const { passed, superseded } = await batchVerify(filtered, existing);
+  const { passed, superseded, confirmed } = await batchVerify(filtered, existing);
   const verified = filtered.filter((m) =>
     passed.has(
       String(m.content || '')
@@ -134,7 +135,7 @@ async function verifyLongtermCandidates(candidates, existing) {
         .trim(),
     ),
   );
-  return { verified, superseded };
+  return { verified, superseded, confirmed };
 }
 
 // ---- Storage helpers ----------------------------------------------------
@@ -355,10 +356,11 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       return 0;
     }
 
-    const { verified: newMemories, superseded: supersessionMap } = await verifyLongtermCandidates(
-      parsed,
-      activeMemories,
-    );
+    const {
+      verified: newMemories,
+      superseded: supersessionMap,
+      confirmed: confirmedIds,
+    } = await verifyLongtermCandidates(parsed, activeMemories);
     if (newMemories.length === 0) {
       console.log(
         `[SmartMemory] All ${parsed.length} extracted candidates were duplicates of existing memories.`,
@@ -409,6 +411,27 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     // Remove newly retired entries from the active merged set - they move to
     // the retired pool so they stay in storage but are excluded from injection.
     const finalActive = merged.filter((m) => !newlyRetiredIds.has(m.id));
+
+    // Confidence decay pass.
+    // Confirmed memories (re-extracted this pass) get a small confidence boost
+    // and reset their unconfirmed counter. All other active memories increment
+    // their unconfirmed counter; once it reaches the threshold, confidence
+    // decays slightly. Importance does not decay - only confidence (recall
+    // freshness) does, so impactful memories remain prioritised even as they fade.
+    const DECAY_THRESHOLD = 10;
+    const now = Date.now();
+    for (const mem of finalActive) {
+      if (confirmedIds.has(mem.id)) {
+        mem.last_confirmed_ts = now;
+        mem.confidence = Math.min(1.0, (mem.confidence ?? 1.0) + 0.05);
+        mem.unconfirmed_since = 0;
+      } else {
+        mem.unconfirmed_since = (mem.unconfirmed_since ?? 0) + 1;
+        if (mem.unconfirmed_since >= DECAY_THRESHOLD) {
+          mem.confidence = Math.max(0.3, (mem.confidence ?? 1.0) - 0.02);
+        }
+      }
+    }
 
     // Resolve entity names to ids for any new memories that carried
     // _raw_entity_names through the pipeline. The entity registry is loaded,

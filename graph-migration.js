@@ -72,6 +72,8 @@ export function applyGraphDefaults(mem) {
     supersedes: mem.supersedes ?? [],
     superseded_by: mem.superseded_by ?? null,
     contradicts: mem.contradicts ?? [],
+    confidence: mem.confidence ?? 1.0,
+    unconfirmed_since: mem.unconfirmed_since ?? 0,
   };
 }
 
@@ -641,12 +643,47 @@ function migrateChat_v1(chatMeta) {
   return { ...chatMeta, sessionMemories, entities };
 }
 
+/**
+ * CHARACTER migration: version 1 -> 2
+ *
+ * Adds confidence decay fields (confidence, unconfirmed_since) to every
+ * long-term memory. These fields are used by the per-memory confidence decay
+ * system introduced in v1.4.0.
+ *
+ * @param {Object} charData - Character data object.
+ * @returns {Object} Updated character data with schema_version NOT yet set.
+ */
+function migrateCharacter_v2(charData) {
+  const memories = (charData.memories ?? []).map(applyGraphDefaults);
+  return { ...charData, memories };
+}
+
+/**
+ * CHAT migration: version 1 -> 2
+ *
+ * Adds confidence decay fields (confidence, unconfirmed_since) to every
+ * session memory.
+ *
+ * @param {Object} chatMeta - chatMetadata[META_KEY] block.
+ * @returns {Object} Updated chat meta block with schema_version NOT yet set.
+ */
+function migrateChat_v2(chatMeta) {
+  const sessionMemories = (chatMeta.sessionMemories ?? []).map(applyGraphDefaults);
+  return { ...chatMeta, sessionMemories };
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn> - add new entries here when SCHEMA_VERSION is bumped.
 
-const CHARACTER_MIGRATIONS = new Map([[1, migrateCharacter_v1]]);
+const CHARACTER_MIGRATIONS = new Map([
+  [1, migrateCharacter_v1],
+  [2, migrateCharacter_v2],
+]);
 
-const CHAT_MIGRATIONS = new Map([[1, migrateChat_v1]]);
+const CHAT_MIGRATIONS = new Map([
+  [1, migrateChat_v1],
+  [2, migrateChat_v2],
+]);
 
 // ---- Migration runner -------------------------------------------------------
 

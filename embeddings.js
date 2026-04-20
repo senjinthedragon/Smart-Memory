@@ -184,16 +184,20 @@ export function getHardwareProfile() {
  *
  * @param {Array<{content: string, type: string, id?: string}>} candidates
  * @param {Array<{content: string, type: string, id?: string}>} existing
- * @returns {Promise<{passed: Set<string>, superseded: Map<string, string>, semantic: boolean}>}
+ * @returns {Promise<{passed: Set<string>, superseded: Map<string, string>, confirmed: Set<string>, semantic: boolean}>}
  *   passed     - Set of candidate content strings (lowercase) that are new
  *   superseded - Map from candidate content string to the id of the existing
  *                memory it replaces (only present when ex.id is available)
+ *   confirmed  - Set of existing memory ids that were re-extracted this pass
+ *                (duplicate candidate matched them, confirming they are still true)
  *   semantic   - true if cosine similarity was used, false if Jaccard
  */
 export async function batchVerify(candidates, existing) {
   const passed = new Set();
   const superseded = new Map(); // candContent -> existingId
-  if (!candidates || candidates.length === 0) return { passed, superseded, semantic: false };
+  const confirmed = new Set(); // existingId -> confirmed this extraction pass
+  if (!candidates || candidates.length === 0)
+    return { passed, superseded, confirmed, semantic: false };
 
   // Embed all unique texts in one call.
   const allTexts = [
@@ -219,6 +223,7 @@ export async function batchVerify(candidates, existing) {
     const candHasStateChange = hasStateChangeMarker(candText);
 
     let isDuplicate = false;
+    let confirmedId = null; // id of the existing memory being confirmed by this duplicate
     let bestSupersessionScore = 0;
     let bestSupersessionId = null;
 
@@ -274,6 +279,7 @@ export async function batchVerify(candidates, existing) {
           bestSupersessionId = ex.id;
         } else {
           isDuplicate = true;
+          confirmedId = ex.id ?? null;
           break;
         }
       } else if (isSameType && score >= sameTopicThreshold && candHasStateChange && ex.id) {
@@ -286,7 +292,11 @@ export async function batchVerify(candidates, existing) {
       }
     }
 
-    if (isDuplicate) continue; // silently drop
+    if (isDuplicate) {
+      // The candidate matched an existing memory - that memory is confirmed still true.
+      if (confirmedId) confirmed.add(confirmedId);
+      continue; // silently drop the candidate
+    }
 
     if (bestSupersessionId !== null) {
       // Supersession: candidate replaces an existing memory.
@@ -297,7 +307,7 @@ export async function batchVerify(candidates, existing) {
     }
   }
 
-  return { passed, superseded, semantic: anyEmbeddings };
+  return { passed, superseded, confirmed, semantic: anyEmbeddings };
 }
 
 /**
