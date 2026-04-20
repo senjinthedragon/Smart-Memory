@@ -346,7 +346,7 @@ Manual edits take effect immediately and are injected into the prompt on the nex
 | `/sm-summarize` | Force a short-term summary generation now |
 | `/sm-extract` | Run long-term, session, and arc extraction against the current chat now |
 | `/sm-recap` | Generate and show a "Previously on..." recap popup now |
-| `/sm-search <query>` | Search all memories by semantic similarity and show a results popup. Optional `k=N` sets the result count (default 10, max 50); `min=N` sets a minimum similarity threshold to filter weak matches (default 0.25, range 0-1). Falls back to keyword overlap when the embedding model is unavailable. |
+| `/sm-search <query>` | Search all memories by semantic similarity and show a results popup. Optional `k=N` sets the result count (default 10, max 50); `min=N` sets a minimum similarity threshold to filter weak matches (default 0.5, range 0-1). Falls back to keyword overlap when the embedding model is unavailable. |
 
 ---
 

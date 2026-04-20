@@ -3499,10 +3499,7 @@ jQuery(async function () {
         }
 
         const topK = Math.max(1, Math.min(50, Number(args?.k) || 10));
-        const minScore = Math.max(
-          0,
-          Math.min(1, args?.min !== undefined ? Number(args.min) : 0.25),
-        );
+        const minScore = Math.max(0, Math.min(1, args?.min !== undefined ? Number(args.min) : 0.5));
         const qLower = q.toLowerCase();
         const memTexts = allMems.map((m) =>
           String(m.content || '')
@@ -3531,7 +3528,7 @@ jQuery(async function () {
       },
       unnamedArgumentList: [new SlashCommandArgument('search query', [ARGUMENT_TYPE.STRING], true)],
       helpString:
-        'Searches long-term and session memories by semantic similarity. Displays top matching memories with type and tier labels. Optional: k sets result count (default 10, max 50); min sets the minimum similarity threshold to filter weak matches (default 0.25, range 0-1).',
+        'Searches long-term and session memories by semantic similarity. Displays top matching memories with type and tier labels. Optional: k sets result count (default 10, max 50); min sets the minimum similarity threshold to filter weak matches (default 0.5, range 0-1).',
       returns: ARGUMENT_TYPE.STRING,
     }),
   );
