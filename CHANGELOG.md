@@ -203,14 +203,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next AI response exactly as the manual path does. Runs fire-and-forget so it does
   not delay the event handler. Profile A (local hardware) is unaffected - manual-only
   as before.
-- **Group chat support**: Smart Memory is now active in group chats. The speaking
-  character is identified from the last AI message's name rather than
-  `context.name2`, which only reflects the group's primary character and does not
-  update per-speaker. Long-term memories are correctly attributed to whichever
-  character just spoke. Session memories are tagged with the speaking character's
-  name and injected only when that character is active, so each character builds
-  its own session memory set within the shared chat. Untagged memories from
-  existing chats are treated as shared and remain visible to all characters.
 - **`/sm-search` slash command**: search all active memories (long-term and session)
   by semantic similarity. Type `/sm-search the ritual` in the chat input and a popup
   shows the top matching memories with tier labels (long-term / session), type badges,

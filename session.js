@@ -25,10 +25,6 @@
  * capturing scene details, named objects, specific revelations - but do not
  * survive past the current chat.
  *
- * In group chats, each character's memories are tagged with a `character` field
- * and injected only when that character is active. Untagged (legacy) memories
- * are treated as shared and injected for all characters.
- *
  * loadSessionMemories        - returns the current session memory array
  * saveSessionMemories        - persists the session memory array to chatMetadata
  * clearSessionMemories       - empties session memories for the current chat
@@ -220,32 +216,8 @@ function deduplicateSession(existing, incoming, max) {
 // ---- Extraction ---------------------------------------------------------
 
 /**
- * Returns the name of the character who last spoke, for use in tagging session
- * memories. In group chats, context.name2 reflects the group's primary character
- * and does not update per-speaker, so the last AI message's name is used instead.
- * @returns {string|null}
- */
-function getActiveSpeakerName() {
-  const context = getContext();
-  if (context.groupId && context.chat?.length) {
-    const lastAiMsg = context.chat
-      .slice()
-      .reverse()
-      .find((m) => !m.is_user && !m.is_system && m.name);
-    if (lastAiMsg?.name) return lastAiMsg.name;
-  }
-  return context.name2 || context.characterName || null;
-}
-
-/**
  * Extracts session-level details from recent messages via the model and merges
  * them into chatMetadata. Returns the count of new items saved.
- *
- * In group chats, the speaking character is identified from the last AI message
- * name. New memories are tagged with that character so each character builds its
- * own session memory set within the shared chatMetadata store. Untagged (legacy)
- * memories are treated as shared and remain visible to all characters.
- *
  * @param {Array} recentMessages - Last N message objects from context.chat.
  * @returns {Promise<number>} Count of new items added (0 on failure or nothing found).
  */
@@ -263,27 +235,17 @@ export async function extractSessionMemories(recentMessages) {
 
     const existingAll = loadSessionMemories();
 
-    // Identify the speaking character so memories can be attributed correctly.
-    // In group chats this is the last AI message's name; in 1:1 chats it is the
-    // single character loaded in the session.
-    const characterName = getActiveSpeakerName();
-
-    // Separate active from retired memories. Only compare against this character's
-    // active memories (+ untagged legacy entries) so that group-chat characters
-    // don't deduplicate against each other's separate memory stores.
-    const existing = existingAll.filter(
-      (m) => !m.superseded_by && (!m.character || m.character === characterName),
-    );
-    // Active memories belonging to other characters - preserved as-is on save.
-    const otherCharacterMemories = existingAll.filter(
-      (m) => !m.superseded_by && m.character && m.character !== characterName,
-    );
+    // Separate active from retired memories. Verification and merge operate only
+    // on active entries; retired ones are preserved in storage for history but
+    // should not be compared against (or count toward caps during merge).
+    const existing = existingAll.filter((m) => !m.superseded_by);
     const retiredMemories = existingAll.filter((m) => m.superseded_by);
 
     const existingText = existing.map((m) => `[${m.type}] ${m.content}`).join('\n');
 
     // Pass long-term memories so the model skips facts already stored there.
     // Cap to 15 entries to avoid inflating the prompt on local hardware.
+    const characterName = getContext().name2 || getContext().characterName || null;
     const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
     const longtermText =
       longtermMemories.length > 0 ? formatMemoriesForPrompt(longtermMemories.slice(0, 15)) : '';
@@ -341,13 +303,6 @@ export async function extractSessionMemories(recentMessages) {
     // Remove newly retired entries from the active merged set.
     const finalActive = merged.filter((m) => !newlyRetiredIds.has(m.id));
 
-    // Tag any new memories with the speaking character so injection can filter
-    // by character in group chats. Existing memories already have their tag (or
-    // none, for legacy untagged entries).
-    for (const mem of finalActive) {
-      if (!mem.character && characterName) mem.character = characterName;
-    }
-
     // Confidence decay pass - mirrors the long-term logic.
     const DECAY_THRESHOLD = 10;
     const now = Date.now();
@@ -385,8 +340,7 @@ export async function extractSessionMemories(recentMessages) {
     ];
 
     const added = finalActive.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
-    // Preserve other characters' active memories alongside this character's result.
-    await saveSessionMemories([...finalActive, ...otherCharacterMemories, ...updatedRetired]);
+    await saveSessionMemories([...finalActive, ...updatedRetired]);
 
     return added;
   } catch (err) {
@@ -532,11 +486,6 @@ export function formatSessionMemories(memories) {
 /**
  * Injects session memories into the prompt via setExtensionPrompt.
  * Clears the slot if session memory is disabled or no memories exist.
- *
- * Only injects memories belonging to the current speaker (plus untagged legacy
- * memories). In group chats this ensures each character sees only its own session
- * context rather than a merged view of all characters' memories.
- *
  * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
  *   Only pass true from the post-extraction path (one real AI response turn).
  * @returns {Promise<void>}
@@ -548,12 +497,9 @@ export async function injectSessionMemories(updateTelemetry = false) {
     return;
   }
 
-  // Only inject active memories for the current character. Untagged (legacy)
-  // memories are included for all characters to preserve backward compatibility.
-  const speakerName = getActiveSpeakerName();
-  const memories = loadSessionMemories().filter(
-    (m) => !m.superseded_by && (!m.character || m.character === speakerName),
-  );
+  // Only inject active memories - retired ones (superseded_by set) are kept in
+  // storage for history but must not appear in the prompt.
+  const memories = loadSessionMemories().filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
     return;
