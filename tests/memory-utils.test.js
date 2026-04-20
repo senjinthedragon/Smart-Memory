@@ -216,6 +216,36 @@ test('hybridScore boosts memories with entity overlap and arc relevance', () => 
   assert.ok(hybridScore(focused, context) > hybridScore(unfocused, context));
 });
 
+test('hybridScore applies w5 turn similarity boost when turnSimilarities provided', () => {
+  const base = {
+    type: 'fact',
+    content: 'The key is hidden in the tower.',
+    importance: 2,
+    expiration: 'permanent',
+    ts: 1000,
+    entities: [],
+    time_scope: 'global',
+    contradicts: [],
+  };
+  const highTurnSim = { ...base, id: 'mem-relevant' };
+  const lowTurnSim = { ...base, id: 'mem-irrelevant' };
+
+  const context = {
+    turnSimilarities: new Map([
+      ['mem-relevant', 0.9],
+      ['mem-irrelevant', 0.05],
+    ]),
+    w5: 0.6,
+  };
+
+  assert.ok(hybridScore(highTurnSim, context) > hybridScore(lowTurnSim, context));
+  // w5 = 0 should produce equal scores (both use the same base fields)
+  assert.equal(
+    hybridScore(highTurnSim, { ...context, w5: 0 }),
+    hybridScore(lowTurnSim, { ...context, w5: 0 }),
+  );
+});
+
 test('hybridScore penalizes unresolved contradictions', () => {
   const clean = {
     type: 'fact',

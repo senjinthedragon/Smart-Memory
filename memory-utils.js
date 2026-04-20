@@ -25,9 +25,10 @@
  * reconcileTypeEntries      - merges promoted consolidation entries into a base, replacing overlapping originals
  * sortByTimeline            - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
  * extractTurnEntityMentions - lightweight regex extraction of proper-noun candidates from last messages
- * hybridScore               - weighted blend of utility, entity overlap, arc relevance, and temporal proximity
+ * hybridScore               - weighted blend of utility, entity overlap, arc relevance, temporal proximity,
+ *                             and w5 turn similarity (cosine sim to last AI turn text)
  * hybridPrioritize          - sorts a memory array by hybridScore then applies a diversity floor;
- *                             accepts embedFn in context (pass getEmbeddingBatch from embeddings.js)
+ *                             accepts embedFn, lastTurnText, and w5 in context
  * classifyTurn              - heuristic turn-type classifier (dialogue/action/transition/intimate)
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
  *
@@ -474,12 +475,15 @@ const EXPIRATION_PROXIMITY = { scene: 2, session: 1, permanent: 0 };
 /**
  * Computes the weighted hybrid retrieval score for a single memory.
  *
- * Combines four signals:
+ * Combines five signals:
  *   w1 * utility_score       - existing importance/durability/retrieval composite
  *   w2 * entity_overlap      - 0-1, fraction of memory entities mentioned in the current turn
  *   w3 * arc_relevance       - 0-1, cosine similarity to the most relevant open arc
  *                              (pre-computed by hybridPrioritize; falls back to Jaccard)
  *   w4 * temporal_proximity  - 0-1, how time-scoped the memory is relative to the current moment
+ *   w5 * turn_similarity     - 0-1, cosine similarity to the last AI turn text
+ *                              (pre-computed by hybridPrioritize; 0 when absent)
+ *                              w5 = 0.2 (Profile A) or 0.6 (Profile B)
  *   - contradiction_penalty  - flat deduction when the memory has unresolved contradictions
  *
  * @param {Object} mem - Memory object.
@@ -489,8 +493,10 @@ const EXPIRATION_PROXIMITY = { scene: 2, session: 1, permanent: 0 };
  *   entityRegistry?: Array<{id: string, name: string, aliases?: string[]}>,
  *   arcs?: Array<{content: string}>,
  *   arcSimilarities?: Map<string, number>,
- * }} [context={}] - Optional per-turn signals. arcSimilarities maps memory id to
- *   pre-computed max cosine similarity against all open arcs - provided by hybridPrioritize.
+ *   turnSimilarities?: Map<string, number>,
+ *   w5?: number,
+ * }} [context={}] - Optional per-turn signals. arcSimilarities and turnSimilarities map
+ *   memory id to pre-computed cosine scores - provided by hybridPrioritize.
  * @returns {number}
  */
 export function hybridScore(mem, context = {}) {
@@ -502,6 +508,8 @@ export function hybridScore(mem, context = {}) {
     entityRegistry = null,
     arcs = null,
     arcSimilarities = null,
+    turnSimilarities = null,
+    w5 = 0,
   } = context;
 
   // w1: existing utility score (0-500+ range, dominates when other signals are absent)
@@ -551,6 +559,11 @@ export function hybridScore(mem, context = {}) {
   const expProx = EXPIRATION_PROXIMITY[normalizeExpiration(mem.expiration, 'permanent')] ?? 0;
   const temporalProximity = (scopeProx + expProx) / 4; // normalise to 0-1
 
+  // w5: turn similarity - cosine similarity between this memory and the last AI
+  // turn text. Pre-computed by hybridPrioritize and passed in turnSimilarities;
+  // 0 when not available (no embeddings, no lastTurnText, or w5 = 0).
+  const turnSim = turnSimilarities?.get(mem.id) ?? 0;
+
   // Contradiction penalty: subtract a fixed amount when the memory has
   // unresolved contradictions so the retrieval system prefers clean facts.
   const contradictionPenalty =
@@ -560,7 +573,8 @@ export function hybridScore(mem, context = {}) {
     utility +
     entityOverlap * 100 +
     arcRelevance * 60 +
-    temporalProximity * 30 -
+    temporalProximity * 30 +
+    turnSim * w5 * 100 -
     contradictionPenalty
   );
 }
@@ -620,30 +634,57 @@ function applyDiversityFloor(sorted, floorTypes) {
 }
 
 export async function hybridPrioritize(memories, context = {}) {
-  const { arcs = null, floorTypes = [], embedFn = async () => new Map() } = context;
+  const {
+    arcs = null,
+    floorTypes = [],
+    embedFn = async () => new Map(),
+    lastTurnText = '',
+    w5 = 0,
+  } = context;
   const keywordFreq = buildKeywordFrequency(memories);
 
-  // Pre-compute arc similarities via embeddings when arcs are present.
-  // Batch all memory + arc texts in one API call.
+  // Pre-compute arc and turn similarities via a single embedding batch.
+  // Includes memory texts + arc texts + the last-turn text when any of these
+  // signals are active - one API call regardless of how many are requested.
+  const memTexts = memories.map((m) => m.content);
+  const arcTexts = arcs ? arcs.map((a) => a.content) : [];
+  const lastTurnNorm = String(lastTurnText || '').trim();
+  const needsEmbeddings =
+    memories.length > 0 && (arcTexts.length > 0 || (lastTurnNorm.length > 0 && w5 > 0));
+
   let arcSimilarities = null;
-  if (arcs && arcs.length > 0 && memories.length > 0) {
-    const memTexts = memories.map((m) => m.content);
-    const arcTexts = arcs.map((a) => a.content);
-    const vectorMap = await embedFn([...memTexts, ...arcTexts]);
+  let turnSimilarities = null;
+
+  if (needsEmbeddings) {
+    const allTexts = [...memTexts, ...arcTexts, ...(lastTurnNorm && w5 > 0 ? [lastTurnNorm] : [])];
+    const vectorMap = await embedFn(allTexts);
 
     if (vectorMap.size > 0) {
-      arcSimilarities = new Map();
-      const arcVectors = arcTexts.map((t) => vectorMap.get(t)).filter(Boolean);
-      for (const mem of memories) {
-        const memVec = vectorMap.get(mem.content);
-        if (!memVec || arcVectors.length === 0) continue;
-        const maxSim = Math.max(...arcVectors.map((av) => cosineSimilarity(memVec, av)));
-        arcSimilarities.set(mem.id, maxSim);
+      if (arcTexts.length > 0) {
+        arcSimilarities = new Map();
+        const arcVectors = arcTexts.map((t) => vectorMap.get(t)).filter(Boolean);
+        for (const mem of memories) {
+          const memVec = vectorMap.get(mem.content);
+          if (!memVec || arcVectors.length === 0) continue;
+          const maxSim = Math.max(...arcVectors.map((av) => cosineSimilarity(memVec, av)));
+          arcSimilarities.set(mem.id, maxSim);
+        }
+      }
+
+      if (lastTurnNorm && w5 > 0) {
+        const turnVec = vectorMap.get(lastTurnNorm);
+        if (turnVec) {
+          turnSimilarities = new Map();
+          for (const mem of memories) {
+            const memVec = vectorMap.get(mem.content);
+            if (memVec) turnSimilarities.set(mem.id, cosineSimilarity(memVec, turnVec));
+          }
+        }
       }
     }
   }
 
-  const ctx = { ...context, keywordFreq, arcSimilarities };
+  const ctx = { ...context, keywordFreq, arcSimilarities, turnSimilarities };
   const sorted = [...memories].sort((a, b) => {
     const sa = hybridScore(a, ctx);
     const sb = hybridScore(b, ctx);

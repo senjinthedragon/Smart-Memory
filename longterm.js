@@ -68,7 +68,7 @@ import {
   sortByTimeline,
   trimByPriority,
 } from './memory-utils.js';
-import { batchVerify, getEmbeddingBatch } from './embeddings.js';
+import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 
 // Maximum new entries accepted per type per extraction pass.
 // Prevents one burst of similar events flooding a single type while still
@@ -642,6 +642,8 @@ export async function injectMemories(characterName, freshStart = false, updateTe
       entityRegistry,
       floorTypes: ['relationship', 'fact'],
       embedFn: getEmbeddingBatch,
+      lastTurnText: lastMessages[lastMessages.length - 1]?.mes ?? '',
+      w5: getHardwareProfile() === 'b' ? 0.6 : 0.2,
     });
   } else {
     trimmed = prioritizeMemories(memories);

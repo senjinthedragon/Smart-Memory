@@ -187,6 +187,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reconcileEntityRegistry` also prunes entities whose `memory_ids` array is empty
   after reconciliation - these arise from priority eviction or the pronoun edge case
   and contribute nothing to retrieval or the panel.
+- **w5 turn-similarity signal in hybrid retrieval**: `hybridScore` now includes a fifth
+  signal - cosine similarity between the memory content and the last AI turn text. Memories
+  that closely match the current topic score higher and surface first in injection. The weight
+  is profile-dependent: `w5 = 0.2` on Profile A (local), `w5 = 0.6` on Profile B (hosted).
+  The turn text is embedded in the same batch call already used for arc relevance, so there
+  is no extra API round-trip. Callers pass `lastTurnText` and `w5` in the `hybridPrioritize`
+  context; `w5 = 0` (the default) disables the signal entirely, making the change
+  backward-compatible for any caller that does not provide it.
 
 ### Fixed
 

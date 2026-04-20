@@ -57,7 +57,7 @@ import {
 } from './graph-migration.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import { parseSessionOutput } from './parsers.js';
-import { batchVerify, getEmbeddingBatch } from './embeddings.js';
+import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
@@ -501,6 +501,8 @@ export async function injectSessionMemories(updateTelemetry = false) {
       turnMentions,
       floorTypes: ['development', 'scene'],
       embedFn: getEmbeddingBatch,
+      lastTurnText: lastMessages[lastMessages.length - 1]?.mes ?? '',
+      w5: getHardwareProfile() === 'b' ? 0.6 : 0.2,
     });
   } else {
     trimmed = prioritizeMemories(memories);
