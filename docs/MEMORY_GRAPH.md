@@ -387,7 +387,8 @@ Migration is non-destructive - existing data is extended in place. No memories a
 - [x] Diversity floor enforcement - `applyDiversityFloor` promotes the best entry of each
       required type to the front of the sorted output so it appears prominently regardless
       of its raw hybrid score. Long-term floor: relationship + fact. Session floor: development + scene.
-- [ ] Semantic weight downscaling for Profile A (w5 deferred - requires async embed call)
+- [x] Semantic weight downscaling for Profile A - `w5 = 0.2` on Profile A, `w5 = 0.6` on Profile B;
+      turn text embedded in the existing arc-relevance batch call so no extra round-trip
 
 ### Adaptive budget
 
@@ -417,7 +418,10 @@ Migration is non-destructive - existing data is extended in place. No memories a
 
 - [x] Hardware profile auto-detection from configured source
 - [x] Schema version check and migration on load
-- [ ] Tests for entity normalizer, supersession classifier, hybrid scorer, turn classifier
+- [x] Tests for hybrid scorer, turn classifier, budget allocator, reconcileTypeEntries (20 tests in
+      memory-utils.test.js); 56 parser tests in parsers.test.js - 76 total, all passing
+- [ ] Tests for entity normalizer and supersession classifier (deferred - no unit-testable
+      extraction path exists yet without a full ST runtime mock)
 - [x] Entity registry re-link after consolidation is substring-based - if the model uses pronouns
       in a merged memory (e.g. "she" instead of "Alex"), the entity loses its link to that memory.
       Fixed: `reconcileTypeEntries` now carries the base entry's `entities` array forward when
@@ -435,9 +439,9 @@ Migration is non-destructive - existing data is extended in place. No memories a
       memories from powerful models while catching more supersession candidates
 - [x] Auto-canon regeneration after arc extraction (Profile B only, requires arcs_enabled +
       at least 2 resolved arc summaries)
-- [ ] `hybridPrioritize` - semantic weight (`w5`) active on Profile B, downscaled on Profile A
-      (currently deferred - requires additional async embed call in scoring path)
-- [ ] Contradiction check auto-run on Profile B (currently manual-only on both profiles;
-      hosted models can afford periodic auto-checks but schedule/trigger not yet defined)
-- [ ] Profile regeneration on its own scheduled call every N messages (Profile B only;
-      currently regenerates on every extraction pass which is already sufficient for most use)
+- [x] `hybridPrioritize` - `w5 = 0.2` on Profile A, `w5 = 0.6` on Profile B; embedded in the
+      existing arc-relevance batch call, no extra round-trip
+- [x] Contradiction check auto-run on Profile B - fires after every AI turn; badge in settings
+      header shows "clean" / "N conflicts"; auto-repair queues a repair note when enabled
+- [x] Profile regeneration on its own scheduled call every N messages (Profile B only) - new
+      "Also regenerate every N messages" slider; 0 (default) retains extraction-pass-only behaviour
