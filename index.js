@@ -1488,18 +1488,18 @@ function updateEntityPanel(characterName) {
   const ltEntities = characterName ? loadCharacterEntityRegistry(characterName) : [];
   const sessionEntities = loadSessionEntityRegistry();
 
-  // Merge by canonical name (case-insensitive) rather than by UUID.
+  // Merge by canonical name + type (case-insensitive) rather than by UUID.
   // The lt and session registries are independent stores with separate UUIDs,
   // so the same named entity (e.g. "Senjin") will have different ids in each.
-  // Merging by name produces one row per real-world entity and combines their
-  // memory_ids so the timeline shows memories from both registries.
+  // Keying by name|type avoids collisions when two distinct entities share a
+  // name but differ by type (e.g. a place "Hollow" vs. a character "Hollow").
   const byName = new Map();
   for (const e of ltEntities) {
-    const key = e.name.toLowerCase().trim();
+    const key = `${e.name.toLowerCase().trim()}|${e.type ?? 'unknown'}`;
     byName.set(key, { ...e, memory_ids: [...(e.memory_ids ?? [])] });
   }
   for (const e of sessionEntities) {
-    const key = e.name.toLowerCase().trim();
+    const key = `${e.name.toLowerCase().trim()}|${e.type ?? 'unknown'}`;
     if (byName.has(key)) {
       // Merge memory_ids and update last_seen.
       const merged = byName.get(key);
