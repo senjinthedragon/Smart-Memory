@@ -203,6 +203,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next AI response exactly as the manual path does. Runs fire-and-forget so it does
   not delay the event handler. Profile A (local hardware) is unaffected - manual-only
   as before.
+- **Scheduled profile regeneration (Profile B)**: a new "Also regenerate every N
+  messages" slider in the Profiles section lets Profile B users keep profiles fresh
+  between extraction passes. Set to a positive value (e.g. 5) to regenerate profiles
+  every N AI messages even when extraction has not fired. 0 (default) retains the
+  existing behaviour: profiles only regenerate on extraction passes and on chat load
+  when stale. Fire-and-forget - does not block the event handler. Profile A is
+  unaffected (profiles already regenerate on each extraction pass there).
+
 - **`/sm-search` slash command**: search all active memories (long-term and session)
   by semantic similarity. Type `/sm-search the ritual` in the chat input and a popup
   shows the top matching memories with tier labels (long-term / session), type badges,

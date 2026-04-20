@@ -1098,7 +1098,7 @@
           Character &amp; World Profiles
           <span
             class="sm-info"
-            data-tooltip="Compact state snapshots (current goals, emotional posture, world state, relationships) generated from stored memories and injected every turn as a stable anchor for the AI. Regenerated automatically after each extraction pass and on chat load when stale."
+            data-tooltip="Compact state snapshots (current goals, emotional posture, world state, relationships) generated from stored memories and injected every turn as a stable anchor for the AI. Regenerated after each extraction pass, on chat load when stale, and optionally on a separate message-count schedule (Profile B only)."
             >ⓘ</span
           >
         </summary>
@@ -1123,6 +1123,26 @@
               max="120"
               step="5"
               value="{{defaultSettings.profiles_stale_threshold_minutes}}"
+            />
+          </div>
+
+          <div class="sm-block">
+            <label
+              >Also regenerate every:
+              <b><span id="sm_profiles_regen_every_value"></span></b>
+              <span
+                class="sm-info"
+                data-tooltip="Profile B only. Regenerate profiles every N messages even if extraction did not run. 0 = extraction-pass only (default). Useful when your extraction frequency is high but you want profiles to stay fresh between passes."
+                >ⓘ</span
+              >
+            </label>
+            <input
+              id="sm_profiles_regen_every"
+              type="range"
+              min="0"
+              max="20"
+              step="1"
+              value="{{defaultSettings.profiles_regen_every}}"
             />
           </div>
 

@@ -242,6 +242,9 @@ const defaultSettings = {
   // Character/world profiles
   profiles_enabled: true,
   profiles_stale_threshold_minutes: 30,
+  // 0 = regenerate only on extraction passes; positive = also regenerate every N
+  // messages even if extraction did not run (Profile B only - too expensive on local).
+  profiles_regen_every: 0,
   profiles_response_length: 600,
   profiles_inject_budget: 400,
   profiles_position: extension_prompt_types.IN_PROMPT,
@@ -268,6 +271,9 @@ const defaultSettings = {
 // Guards prevent re-entrant model calls if ST fires events faster than
 // the previous async job completes.
 let messagesSinceLastExtraction = 0;
+// Tracks messages since the last profile generation (extraction-pass or scheduled).
+// Reset to 0 whenever profiles are regenerated so the two triggers don't stack.
+let messagesSinceLastProfileRegen = 0;
 let compactionRunning = false;
 let extractionRunning = false;
 let consolidationRunning = false;
@@ -533,6 +539,7 @@ async function onCharacterMessageRendered() {
   // falls behind if one is configured more frequently than the other.
   if (!extractionRunning) {
     messagesSinceLastExtraction++;
+    messagesSinceLastProfileRegen++;
     const extractEvery = Math.min(
       settings.session_extract_every ?? 3,
       settings.longterm_extract_every ?? 3,
@@ -690,6 +697,8 @@ async function onCharacterMessageRendered() {
               }
             })
             .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
+          // Reset the scheduled-regen counter since we just regenerated.
+          messagesSinceLastProfileRegen = 0;
         }
 
         // Profile B only: auto-regenerate canon after arc extraction when
@@ -727,11 +736,34 @@ async function onCharacterMessageRendered() {
     }
   }
 
-  // Step 4: clear any pending continuity repair - it was injected for this
+  // Step 4 (Profile B only): scheduled profile regeneration between extraction passes.
+  // Fires when profiles_regen_every > 0 and enough messages have elapsed since the
+  // last generation (extraction-pass or a previous scheduled regen). Fire-and-forget
+  // so it does not block the handler. Profile A skips this - profiles regenerate on
+  // extraction passes there and extra calls are too expensive on local hardware.
+  if (
+    settings.profiles_enabled &&
+    (settings.profiles_regen_every ?? 0) > 0 &&
+    getHardwareProfile() === 'b' &&
+    characterName &&
+    messagesSinceLastProfileRegen >= settings.profiles_regen_every
+  ) {
+    messagesSinceLastProfileRegen = 0;
+    generateProfiles(characterName)
+      .then((profiles) => {
+        if (profiles) {
+          injectProfiles();
+          updateProfilesUI(profiles);
+        }
+      })
+      .catch((err) => console.error('[SmartMemory] Scheduled profile regeneration error:', err));
+  }
+
+  // Step 5: clear any pending continuity repair - it was injected for this
   // response turn and should not carry over to the next message.
   clearRepair();
 
-  // Step 5 (Profile B only): silent continuity check after each AI turn.
+  // Step 6 (Profile B only): silent continuity check after each AI turn.
   // Fire-and-forget so it does not block the event handler while the model
   // responds. The badge in the settings header updates when the check finishes.
   // On Profile A (local hardware) this stays manual-only - too expensive for
@@ -754,7 +786,7 @@ async function onCharacterMessageRendered() {
       });
   }
 
-  // Step 6: update lastActive so the away recap threshold stays accurate.
+  // Step 7: update lastActive so the away recap threshold stays accurate.
   updateLastActive();
 }
 
@@ -765,6 +797,7 @@ async function onCharacterMessageRendered() {
  */
 async function onChatChanged() {
   messagesSinceLastExtraction = 0;
+  messagesSinceLastProfileRegen = 0;
   compactionRunning = false;
   extractionRunning = false;
   continuityCheckRunning = false;
@@ -3173,6 +3206,18 @@ function bindSettingsUI() {
       const v = Number($(this).val());
       $profilesThresholdVal.text(formatProfilesThreshold(v));
       getSettings().profiles_stale_threshold_minutes = v;
+      saveSettingsDebounced();
+    });
+
+  const $regenEveryVal = $('#sm_profiles_regen_every_value');
+  const formatRegenEvery = (v) => (v === 0 ? 'extraction only' : `${v} msg${v === 1 ? '' : 's'}`);
+  $regenEveryVal.text(formatRegenEvery(s.profiles_regen_every ?? 0));
+  $('#sm_profiles_regen_every')
+    .val(s.profiles_regen_every ?? 0)
+    .on('input', function () {
+      const v = Number($(this).val());
+      $regenEveryVal.text(formatRegenEvery(v));
+      getSettings().profiles_regen_every = v;
       saveSettingsDebounced();
     });
 

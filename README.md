@@ -67,7 +67,7 @@ After each extraction pass, Smart Memory generates compact state snapshots from 
 - **World state** - active threads in the setting, recent developments, current scene context
 - **Relationship matrix** - one-line directional summary per named entity with a confidence score
 
-Profiles are regenerated automatically on a schedule and on chat load if stale. A manual regenerate button is available in the settings panel.
+Profiles are regenerated after each extraction pass and on chat load if stale. On Profile B, an optional message-count schedule can keep them fresh between extraction passes. A manual regenerate button is available in the settings panel.
 
 ### Scene Detection and History
 
@@ -225,6 +225,7 @@ The long-term list shows a **retired** badge on superseded entries. A "Show reti
 | --- | --- | --- |
 | Enable profiles | On | Generate and inject state snapshots after each extraction pass |
 | Stale threshold | 30 minutes | Regenerate on chat load if profiles are older than this |
+| Also regenerate every | Off (0) | Profile B only. Regenerate every N messages even if extraction did not run. 0 = extraction-pass only |
 | Response length | 600 tokens | Budget for the profile generation model call |
 | Injection token budget | 400 | Trim profiles content if it exceeds this many tokens |
 | Injection position | In-prompt | Where in the prompt profiles appear |
