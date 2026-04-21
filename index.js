@@ -2476,11 +2476,17 @@ function bindSettingsUI() {
     });
 
   // ---- Group chat character selector ----------------------------------
-  $('#sm_group_char_select').on('change', function () {
+  $('#sm_group_char_select').on('change', async function () {
     selectedGroupCharacter = $(this).val() || null;
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
+    // Re-inject the character-specific slots so updateTokenDisplay reads
+    // the selected character's content rather than whoever responded last.
+    // onGroupMemberDrafted will overwrite these again before the next Generate().
+    await injectMemories(selectedGroupCharacter, isFreshStart());
+    await injectSessionMemories();
+    injectCanon(selectedGroupCharacter);
     updateTokenDisplay();
   });
 
