@@ -352,6 +352,23 @@ function getCurrentCharacterName() {
   return context.name2 || context.characterName || null;
 }
 
+// Tracks which group member the settings panel is currently showing.
+// Only meaningful when context.groupId is set. Null means "no selection yet"
+// which falls back to context.name2 in getSelectedCharacterName.
+let selectedGroupCharacter = null;
+
+/**
+ * Returns the character name the settings panel should operate on.
+ * In group chats this is the explicitly-selected group member; in 1:1 chats
+ * it falls through to the standard active-character lookup.
+ *
+ * @returns {string|null}
+ */
+function getSelectedCharacterName() {
+  if (getContext().groupId && selectedGroupCharacter) return selectedGroupCharacter;
+  return getCurrentCharacterName();
+}
+
 /**
  * Clears all active injection slots. Called when the master toggle is turned
  * off so that no Smart Memory content lingers in the current prompt.
@@ -811,6 +828,7 @@ async function onChatChanged() {
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
   respondedThisRound = new Set();
+  selectedGroupCharacter = null;
   setContinuityBadge(null);
   lastKnownChatLength = 0;
   clearEmbeddingCache();
@@ -832,6 +850,14 @@ async function onChatChanged() {
     injectArcs();
     updateScenesUI();
     updateArcsUI();
+
+    // Show the group character selector and pre-populate long-term panel
+    // for whichever member is selected (or the first member by default).
+    updateGroupCharSelector();
+    updateLongTermUI(selectedGroupCharacter);
+    updateSessionUI();
+    updateFreshStartUI(isFreshStart());
+
     updateTokenDisplay();
 
     if (settings.recap_enabled) {
@@ -853,6 +879,9 @@ async function onChatChanged() {
     updateLastActive();
     return;
   }
+
+  // 1:1 chat - hide the group selector so it doesn't bleed between chat types.
+  $('#sm_group_char_row').hide();
 
   const characterName = getCurrentCharacterName();
 
@@ -941,6 +970,43 @@ async function onChatChanged() {
   }
 
   updateLastActive();
+}
+
+// ---- Group chat helpers -------------------------------------------------
+
+/**
+ * Populates the group character selector dropdown with the current group's
+ * members, shows the selector row, and sets selectedGroupCharacter to
+ * whichever member is currently selected (or the first member if none is).
+ * Should be called from onChatChanged when context.groupId is set.
+ */
+function updateGroupCharSelector() {
+  const context = getContext();
+  const group = context.groups?.find((g) => g.id === context.groupId);
+  if (!group) return;
+
+  const members = (group.members ?? [])
+    .map((avatarId) => context.characters.find((c) => c.avatar === avatarId)?.name)
+    .filter(Boolean);
+
+  if (members.length === 0) return;
+
+  const $select = $('#sm_group_char_select');
+  $select.empty();
+  for (const name of members) {
+    $select.append($('<option>', { value: name, text: name }));
+  }
+
+  // Preserve the current selection if the character is still in the group;
+  // otherwise default to the first member.
+  if (selectedGroupCharacter && members.includes(selectedGroupCharacter)) {
+    $select.val(selectedGroupCharacter);
+  } else {
+    selectedGroupCharacter = members[0];
+    $select.val(selectedGroupCharacter);
+  }
+
+  $('#sm_group_char_row').show();
 }
 
 // ---- Group chat handlers ------------------------------------------------
@@ -2400,6 +2466,15 @@ function bindSettingsUI() {
       }
     });
 
+  // ---- Group chat character selector ----------------------------------
+  $('#sm_group_char_select').on('change', function () {
+    selectedGroupCharacter = $(this).val() || null;
+    updateLongTermUI(selectedGroupCharacter);
+    updateSessionUI();
+    updateFreshStartUI(isFreshStart());
+    updateTokenDisplay();
+  });
+
   // ---- LLM source -----------------------------------------------------
 
   /**
@@ -2610,7 +2685,7 @@ function bindSettingsUI() {
 
   $('#sm_generate_canon').on('click', async function () {
     if (isCatchUpRunning()) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) {
       toastr.warning('No character loaded.', 'Smart Memory');
       return;
@@ -2662,7 +2737,7 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().longterm_enabled = $(this).prop('checked');
       saveSettingsDebounced();
-      injectMemories(getCurrentCharacterName(), isFreshStart()).catch(console.error);
+      injectMemories(getSelectedCharacterName(), isFreshStart()).catch(console.error);
     });
 
   $('#sm_longterm_consolidate')
@@ -2776,13 +2851,13 @@ function bindSettingsUI() {
   $('#sm_fresh_start').on('change', async function () {
     const val = $(this).prop('checked');
     await setFreshStart(val);
-    await injectMemories(getCurrentCharacterName(), val);
+    await injectMemories(getSelectedCharacterName(), val);
   });
 
   $('#sm_extract_now').on('click', async function () {
     if (isCatchUpRunning()) return;
     if (extractionRunning || consolidationRunning) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) return;
     extractionRunning = true;
     $(this).prop('disabled', true);
@@ -2809,7 +2884,7 @@ function bindSettingsUI() {
 
   $('#sm_clear_memories').on('click', function () {
     if (isCatchUpRunning()) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) return;
     if (!confirm(`Clear all memories for "${characterName}"?`)) return;
     clearCharacterMemories(characterName);
@@ -3159,7 +3234,7 @@ function bindSettingsUI() {
       toastr.warning('An extraction is already running.', 'Smart Memory', { timeOut: 3000 });
       return;
     }
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) {
       toastr.warning('No character is active.', 'Smart Memory', { timeOut: 3000 });
       return;
@@ -3442,7 +3517,7 @@ function bindSettingsUI() {
     )
       return;
 
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     const context = getContext();
     if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
@@ -3482,7 +3557,7 @@ function bindSettingsUI() {
   // ---- Fresh Start ----------------------------------------------------
   $('#sm_fresh_start_button').on('click', async function () {
     if (isCatchUpRunning()) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
       !confirm(
@@ -3612,7 +3687,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_profiles_regenerate').on('click', async function () {
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) {
       toastr.warning('No active character - profiles need a character.', 'Smart Memory', {
         timeOut: 3000,
@@ -3694,7 +3769,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_check_continuity').on('click', async function () {
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     $(this).prop('disabled', true);
     setStatusMessage('Checking continuity...');
     $('#sm_continuity_result').hide().empty();
