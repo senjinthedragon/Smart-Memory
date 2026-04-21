@@ -1066,8 +1066,11 @@ async function onGroupMemberDrafted(chId) {
   injectProfiles();
   loadAndInjectRepair();
 
-  updateLongTermUI(characterName);
-  updateSessionUI();
+  // Token display is cheap and keeps the budget numbers live during a round.
+  // Long-term and session UI are intentionally NOT updated here - updating
+  // them with the generating character's name would clobber the selector
+  // choice and confuse the user if they are viewing a different character.
+  // Those panels are refreshed by onGroupWrapperFinished after extraction.
   updateTokenDisplay();
 }
 
@@ -1296,6 +1299,12 @@ async function onGroupWrapperFinished() {
           // Refresh entity panel with the last character who responded.
           const lastResponder = [...respondedThisRound].at(-1);
           if (lastResponder) updateEntityPanel(lastResponder);
+
+          // Refresh the settings panel for whichever character the selector
+          // is showing so new memories appear without the user having to
+          // manually switch selection.
+          updateLongTermUI(selectedGroupCharacter);
+          updateSessionUI();
 
           updateTokenDisplay();
           setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
