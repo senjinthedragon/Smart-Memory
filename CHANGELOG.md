@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Group chat token display correct on initial load**: opening a group chat no
+  longer shows the wrong character's token bars. The root cause was that
+  `onGroupMemberDrafted` called `updateTokenDisplay()` after swapping injection
+  slots to the generating character (including the Expressions extension's quiet
+  generate that fires automatically on chat open). The token display is now only
+  updated at the end of `onGroupWrapperFinished`, after injection slots are
+  restored to the selected character.
+
 ## [1.4.0] - 2026-04-20
 
 ### Added

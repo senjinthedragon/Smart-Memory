@@ -814,12 +814,22 @@ async function onCharacterMessageRendered() {
   updateLastActive();
 }
 
+// Debounce timer for onChatChanged. ST fires both CHAT_LOADED and CHAT_CHANGED
+// on a fresh load, sometimes before context.groupId is set. Collapsing them
+// into one deferred run ensures the context is stable before we act on it.
+let chatChangedTimer = null;
+
+function onChatChanged() {
+  clearTimeout(chatChangedTimer);
+  chatChangedTimer = setTimeout(() => onChatChangedImpl().catch(console.error), 100);
+}
+
 /**
- * Fires when a chat is loaded or switched.
+ * Fires when a chat is loaded or switched (debounced via onChatChanged).
  * Resets all module-level state, restores stored injections, and generates
  * an away recap if the user has been gone longer than the configured threshold.
  */
-async function onChatChanged() {
+async function onChatChangedImpl() {
   messagesSinceLastExtraction = 0;
   messagesSinceLastProfileRegen = 0;
   compactionRunning = false;
@@ -840,10 +850,11 @@ async function onChatChanged() {
   const settings = getSettings();
   if (!settings.enabled) return;
 
-  // Group chats: inject only chat-wide slots. Character-specific slots (long-term,
-  // session, profiles, canon) are set by onGroupMemberDrafted when the next
-  // character is about to respond, so leave them empty here.
+  // Group chats: clear stale slots first (they may hold content from the
+  // previous session's last responder), then inject fresh. onGroupMemberDrafted
+  // will overwrite the character-specific slots before each Generate().
   if (getContext().groupId) {
+    clearAllInjections();
     const summary = loadAndInjectSummary();
     updateShortTermUI(summary);
     injectSceneHistory();
@@ -851,9 +862,12 @@ async function onChatChanged() {
     updateScenesUI();
     updateArcsUI();
 
-    // Show the group character selector and pre-populate long-term panel
-    // for whichever member is selected (or the first member by default).
+    // Show the group character selector and pre-populate panels and token
+    // display for whichever member is selected (first member by default).
     updateGroupCharSelector();
+    await injectMemories(selectedGroupCharacter, isFreshStart());
+    await injectSessionMemories();
+    injectCanon(selectedGroupCharacter);
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
@@ -1066,12 +1080,11 @@ async function onGroupMemberDrafted(chId) {
   injectProfiles();
   loadAndInjectRepair();
 
-  // Token display is cheap and keeps the budget numbers live during a round.
-  // Long-term and session UI are intentionally NOT updated here - updating
-  // them with the generating character's name would clobber the selector
-  // choice and confuse the user if they are viewing a different character.
-  // Those panels are refreshed by onGroupWrapperFinished after extraction.
-  updateTokenDisplay();
+  // The token display is NOT updated here. Injecting this character's slots
+  // is correct for the model, but updating the display here would overwrite
+  // the selected character's token bars with the generating character's data.
+  // onGroupWrapperFinished restores the selected character's slots and
+  // updates the display once the entire round is done.
 }
 
 /**
@@ -1306,7 +1319,6 @@ async function onGroupWrapperFinished() {
           updateLongTermUI(selectedGroupCharacter);
           updateSessionUI();
 
-          updateTokenDisplay();
           setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
         } catch (err) {
           console.error('[SmartMemory] Extraction error:', err);
@@ -1366,7 +1378,17 @@ async function onGroupWrapperFinished() {
       });
   }
 
-  // Step 7: update lastActive.
+  // Step 7: restore injection slots to the selected character. onGroupMemberDrafted
+  // swaps slots to each generating character in turn; after the round ends the
+  // last responder's data is still in the slots. Re-inject for the selector choice
+  // so the token display reflects what the panel is showing, not who generated last.
+  if (selectedGroupCharacter) {
+    await injectMemories(selectedGroupCharacter, isFreshStart());
+    injectCanon(selectedGroupCharacter);
+    updateTokenDisplay();
+  }
+
+  // Step 8: update lastActive.
   updateLastActive();
 }
 
