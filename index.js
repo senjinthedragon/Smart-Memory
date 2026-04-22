@@ -2660,15 +2660,29 @@ function bindSettingsUI() {
     $('#sm_hardware_profile_label').text(PROFILE_LABELS[active] ?? '');
   }
 
+  /**
+   * Dims and disables settings that only apply to Profile B when Profile A is
+   * active, so users are not confused by controls that silently do nothing.
+   */
+  function syncProfileGating() {
+    const isB = getHardwareProfile() === 'b';
+    $('#smart_memory_settings .sm-profile-b-only').each(function () {
+      $(this).toggleClass('sm-gated', !isB);
+      $(this).find('input, select, button').prop('disabled', !isB);
+    });
+  }
+
   $('#sm_hardware_profile')
     .val(s.hardware_profile ?? 'auto')
     .on('change', function () {
       getSettings().hardware_profile = $(this).val();
       saveSettingsDebounced();
       updateProfileLabel();
+      syncProfileGating();
     });
 
   updateProfileLabel();
+  syncProfileGating();
 
   // ---- Short-term (compaction) ----------------------------------------
   $('#sm_compaction_enabled')
