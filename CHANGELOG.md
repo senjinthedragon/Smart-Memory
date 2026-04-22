@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Continuity auto-check toggle**: new checkbox in the Continuity Checker section
+  to disable the automatic check that Profile B runs after every response. Previously
+  the only way to stop it was to switch to Profile A entirely. The toggle defaults to
+  on so existing behaviour is unchanged.
 - **Group chat per-character extraction window (Phase 2)**: long-term extraction
   now filters the message window to each character's own messages plus user
   messages before calling the extraction model. Previously all characters in a

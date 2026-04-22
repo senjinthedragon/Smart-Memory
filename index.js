@@ -231,6 +231,7 @@ const defaultSettings = {
 
   // Continuity
   continuity_response_length: 300,
+  continuity_auto_check: true,
   continuity_auto_repair: false,
 
   // Semantic embedding deduplication
@@ -792,7 +793,7 @@ async function onCharacterMessageRendered() {
   // responds. The badge in the settings header updates when the check finishes.
   // On Profile A (local hardware) this stays manual-only - too expensive for
   // every turn on an RTX 2080.
-  if (getHardwareProfile() === 'b' && !continuityCheckRunning) {
+  if (getHardwareProfile() === 'b' && settings.continuity_auto_check && !continuityCheckRunning) {
     continuityCheckRunning = true;
     checkContinuity(characterName)
       .then(async (contradictions) => {
@@ -1382,7 +1383,12 @@ async function onGroupWrapperFinished({ type } = {}) {
   // the last character who responded. Running per-character would multiply
   // model calls by character count for the same round of messages.
   const lastResponder = [...respondedThisRound].at(-1);
-  if (getHardwareProfile() === 'b' && lastResponder && !continuityCheckRunning) {
+  if (
+    getHardwareProfile() === 'b' &&
+    settings.continuity_auto_check &&
+    lastResponder &&
+    !continuityCheckRunning
+  ) {
     continuityCheckRunning = true;
     checkContinuity(lastResponder)
       .then(async (contradictions) => {
@@ -3812,6 +3818,13 @@ function bindSettingsUI() {
   updateProfilesUI(loadProfiles());
 
   // ---- Continuity checker ---------------------------------------------
+  $('#sm_auto_check')
+    .prop('checked', s.continuity_auto_check)
+    .on('change', function () {
+      getSettings().continuity_auto_check = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
   $('#sm_auto_repair')
     .prop('checked', s.continuity_auto_repair)
     .on('change', function () {
