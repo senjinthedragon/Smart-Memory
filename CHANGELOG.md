@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generate that fires automatically on chat open). The token display is now only
   updated at the end of `onGroupWrapperFinished`, after injection slots are
   restored to the selected character.
+- **Group chat long-term extraction now fires with correct character list**: the
+  Expressions extension fires a quiet generate after every real round, which goes
+  through the full group wrapper event chain. `GROUP_WRAPPER_STARTED` was clearing
+  `respondedThisRound` for those quiet rounds, erasing the real round's participant
+  list before extraction could loop over it. `GROUP_WRAPPER_FINISHED` was also
+  incrementing the extraction counter for quiet rounds, so the counter could reach
+  the threshold from inside a quiet wrapper when the participant set was already
+  empty. Both handlers now check the event `type` and return immediately for
+  `type === 'quiet'`, keeping the counter and participant tracking in sync with
+  actual story progress.
 
 ## [1.4.0] - 2026-04-20
 

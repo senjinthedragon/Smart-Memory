@@ -1028,8 +1028,14 @@ function updateGroupCharSelector() {
 /**
  * Fires at the start of each group chat round (GROUP_WRAPPER_STARTED).
  * Clears the per-round participation set so the new round starts clean.
+ *
+ * @param {{ type?: string }} [event] - ST event payload; type='quiet' for background generates.
  */
-function onGroupWrapperStarted() {
+function onGroupWrapperStarted({ type } = {}) {
+  // Quiet generates (e.g. the Expressions extension classifying emotion after each round)
+  // are not real user turns. Clearing the set here would erase the responders from the
+  // preceding real round before onGroupWrapperFinished can loop over them.
+  if (type === 'quiet') return;
   respondedThisRound = new Set();
 }
 
@@ -1092,8 +1098,14 @@ async function onGroupMemberDrafted(chId) {
  * (GROUP_WRAPPER_FINISHED). Runs compaction, scene break detection, and
  * batched extraction once per round rather than once per character response.
  * Profile B continuity also fires once here instead of per-character.
+ *
+ * @param {{ type?: string }} [event] - ST event payload; type='quiet' for background generates.
  */
-async function onGroupWrapperFinished() {
+async function onGroupWrapperFinished({ type } = {}) {
+  // Quiet generates (e.g. the Expressions extension) are not real user turns.
+  // Skipping them keeps the extraction counter and respondedThisRound in sync with
+  // actual story progress rather than firing on every post-round expression classify.
+  if (type === 'quiet') return;
   if (is_send_press) return;
   const settings = getSettings();
   if (!settings.enabled) return;
