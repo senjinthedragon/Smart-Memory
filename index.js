@@ -881,6 +881,7 @@ async function onChatChangedImpl() {
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
     updateProfilesUI(loadProfiles(selectedGroupCharacter));
+    updateEntityPanel(selectedGroupCharacter);
 
     updateTokenDisplay();
 
@@ -1430,6 +1431,7 @@ async function onGroupWrapperFinished({ type } = {}) {
   if (selectedGroupCharacter) {
     await injectMemories(selectedGroupCharacter, isFreshStart());
     injectCanon(selectedGroupCharacter);
+    injectProfiles(selectedGroupCharacter);
     updateTokenDisplay();
   }
 
