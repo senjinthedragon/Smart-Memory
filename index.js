@@ -1193,7 +1193,10 @@ async function onGroupWrapperFinished({ type } = {}) {
       extractionRunning = true;
 
       const sessionWindow = getStableExtractionWindow(context.chat, 40);
-      const longtermWindow = getStableExtractionWindow(context.chat, 20);
+      // Scale the raw window by character count so that after per-character
+      // filtering each character still gets roughly 20 messages of context.
+      const longtermRawSize = 20 * Math.max(1, respondedThisRound.size);
+      const longtermWindow = getStableExtractionWindow(context.chat, longtermRawSize);
 
       if (longtermWindow.length === 0 && sessionWindow.length === 0) {
         extractionRunning = false;
@@ -1221,9 +1224,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           settings.arcs_inject_budget = budgets.arcs;
           settings.profiles_inject_budget = budgets.profiles;
 
-          // Session extraction is chat-wide and uses context.name2 internally
-          // (the last character who responded this round). Phase 2 will pass
-          // character name explicitly to filter the window per character.
+          // Session extraction is chat-wide - all characters share one session store.
           if (settings.session_enabled && sessionWindow.length > 0) {
             const priorSessionIds = new Set(
               loadSessionMemories()
@@ -1261,13 +1262,22 @@ async function onGroupWrapperFinished({ type } = {}) {
           // Long-term extraction and profiles run per character since each
           // character has their own store. Sequential per CLAUDE.md constraint.
           for (const characterName of respondedThisRound) {
-            if (settings.longterm_enabled && longtermWindow.length > 0) {
-              const count = await extractAndStoreMemories(characterName, longtermWindow).catch(
-                (err) => {
-                  console.error('[SmartMemory] Long-term extraction error:', err);
-                  return 0;
-                },
-              );
+            // Filter to this character's messages plus user messages so the
+            // model only sees context directly relevant to the character being
+            // extracted. User messages are included because they address all
+            // characters and provide shared narrative context.
+            const characterLongtermWindow = longtermWindow.filter(
+              (m) => m.is_user || m.name === characterName,
+            );
+
+            if (settings.longterm_enabled && characterLongtermWindow.length > 0) {
+              const count = await extractAndStoreMemories(
+                characterName,
+                characterLongtermWindow,
+              ).catch((err) => {
+                console.error('[SmartMemory] Long-term extraction error:', err);
+                return 0;
+              });
               if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
                 consolidationRunning = true;
                 const removed = await consolidateMemories(characterName).catch((err) => {

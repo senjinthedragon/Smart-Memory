@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Group chat per-character extraction window (Phase 2)**: long-term extraction
+  now filters the message window to each character's own messages plus user
+  messages before calling the extraction model. Previously all characters in a
+  round received the same unfiltered window, relying solely on the prompt
+  instruction to limit scope. The raw window is also scaled by character count
+  so each character still gets roughly 20 messages of context after filtering.
+
 ### Fixed
 
 - **Group chat token display correct on initial load**: opening a group chat no
