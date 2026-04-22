@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hide summarized messages**: new checkbox in the Short-term Memory section.
+  When enabled, all messages folded into the compaction summary are automatically
+  hidden after each compaction run. They remain in the chat file but are visually
+  collapsed and excluded from the LLM context window - the injected summary
+  already covers their content. The hidden state is persisted to disk so it
+  survives reloads. Toggling the checkbox on an existing chat with a summary
+  immediately hides or restores the affected messages. Off by default.
 - **Continuity auto-check toggle**: new checkbox in the Continuity Checker section
   to disable the automatic check that Profile B runs after every response. Previously
   the only way to stop it was to switch to Profile A entirely. The toggle defaults to

@@ -71,6 +71,7 @@ import {
 } from '../../../slash-commands/SlashCommandArgument.js';
 
 import { shouldCompact, runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
+import { hideChatMessageRange } from '../../../chats.js';
 import {
   extractAndStoreMemories,
   consolidateMemories,
@@ -228,6 +229,9 @@ const defaultSettings = {
   recap_enabled: true,
   recap_threshold_hours: 4,
   recap_response_length: 300,
+
+  // Short-term / compaction
+  compaction_hide_summarized: false,
 
   // Continuity
   continuity_response_length: 300,
@@ -526,6 +530,9 @@ async function onCharacterMessageRendered() {
           updateShortTermUI(summary);
           updateTokenDisplay();
           setStatusMessage('Summary updated.');
+          if (settings.compaction_hide_summarized) {
+            await applySummarizedHiding(true);
+          }
         } else {
           setStatusMessage('');
         }
@@ -1150,6 +1157,9 @@ async function onGroupWrapperFinished({ type } = {}) {
           updateShortTermUI(summary);
           updateTokenDisplay();
           setStatusMessage('Summary updated.');
+          if (settings.compaction_hide_summarized) {
+            await applySummarizedHiding(true);
+          }
         } else {
           setStatusMessage('');
         }
@@ -1616,6 +1626,21 @@ function initTooltips() {
 /** Syncs the short-term summary textarea with the current summary text. */
 function updateShortTermUI(summary) {
   $('#sm_current_summary').val(summary || '');
+}
+
+/**
+ * Hides or restores all messages covered by the current compaction summary.
+ * Uses ST's hideChatMessageRange which sets is_system on each message - hiding
+ * them from the visible chat AND excluding them from the LLM context window.
+ * The injected summary already covers their content, so excluding them is correct.
+ * @param {boolean} hide - true to hide summarized messages, false to restore them
+ */
+async function applySummarizedHiding(hide) {
+  const context = getContext();
+  const summaryEnd = context.chatMetadata?.[META_KEY]?.summaryEnd ?? 0;
+  if (summaryEnd <= 0) return;
+  // hideChatMessageRange third param is `unhide`, so invert our hide flag.
+  await hideChatMessageRange(0, summaryEnd - 1, !hide);
 }
 
 /** Re-renders the long-term memories list and entity panel for the given character. */
@@ -2711,6 +2736,15 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
   $('#sm_compaction_response_length_value').text(s.compaction_response_length);
+
+  $('#sm_hide_summarized')
+    .prop('checked', s.compaction_hide_summarized)
+    .on('change', async function () {
+      const hide = $(this).prop('checked');
+      getSettings().compaction_hide_summarized = hide;
+      saveSettingsDebounced();
+      await applySummarizedHiding(hide);
+    });
 
   $('#sm_compaction_template')
     .val(s.compaction_template)
