@@ -3353,13 +3353,28 @@ function bindSettingsUI() {
       return;
     }
 
-    // Warn if memories already exist - running catch-up again on the same chat
-    // can introduce near-duplicate entries that displace lower-importance ones.
-    const existingMemories = loadCharacterMemories(characterName);
-    if (existingMemories.length > 0) {
+    // In group chats, build the full list of active member names so long-term
+    // extraction runs for every character, not just the one in the selector.
+    // Solo chats collapse to a single-element array using the active character.
+    const catchUpContext = getContext();
+    const catchUpCharacterNames = (() => {
+      if (!catchUpContext.groupId) return [characterName];
+      const group = catchUpContext.groups?.find((g) => g.id === catchUpContext.groupId);
+      if (!group) return [characterName];
+      return group.members
+        .filter((avatar) => !(group.disabled_members ?? []).includes(avatar))
+        .map((avatar) => catchUpContext.characters.find((c) => c.avatar === avatar)?.name)
+        .filter(Boolean);
+    })();
+
+    // Warn if memories already exist for any character in the list.
+    const existingMemories = catchUpCharacterNames.some(
+      (name) => loadCharacterMemories(name).length > 0,
+    );
+    if (existingMemories) {
       if (
         !confirm(
-          'Memories already exist for this character. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
+          'Memories already exist for one or more characters. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
         )
       )
         return;
@@ -3422,20 +3437,28 @@ function bindSettingsUI() {
           `Catching up... (${i}/${total} messages, ${Math.round((i / total) * 100)}%)`,
         );
 
-        if (settings.longterm_enabled && characterName) {
-          setStatusMessage(`Catching up... (${i}/${total} messages - extracting long-term)`);
-          await extractAndStoreMemories(characterName, chunk).catch((err) => {
-            console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
-          });
-          // Consolidate after each chunk so near-duplicates are collapsed before
-          // the next chunk can add more similar entries. Without this, a full chat
-          // with many thematically similar exchanges floods the unprocessed queue
-          // with variants that all slip under the per-entry Jaccard threshold.
-          if (settings.longterm_consolidate) {
-            setStatusMessage(`Catching up... (${i}/${total} messages - consolidating long-term)`);
-            await consolidateMemories(characterName).catch((err) => {
-              console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
+        if (settings.longterm_enabled) {
+          for (const name of catchUpCharacterNames) {
+            // Filter chunk to this character's messages + user messages, matching
+            // the Phase 2 per-character window filtering used in automatic extraction.
+            const nameChunk = catchUpContext.groupId
+              ? chunk.filter((m) => m.is_user || m.name === name)
+              : chunk;
+            if (nameChunk.length === 0) continue;
+            setStatusMessage(
+              `Catching up... (${i}/${total} messages - extracting long-term for ${name})`,
+            );
+            await extractAndStoreMemories(name, nameChunk).catch((err) => {
+              console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
             });
+            // Consolidate after each chunk so near-duplicates are collapsed before
+            // the next chunk can add more similar entries.
+            if (settings.longterm_consolidate) {
+              setStatusMessage(`Catching up... (${i}/${total} messages - consolidating ${name})`);
+              await consolidateMemories(name).catch((err) => {
+                console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
+              });
+            }
           }
         }
         if (settings.session_enabled) {
@@ -3527,11 +3550,13 @@ function bindSettingsUI() {
         // Final consolidation pass for any entries that didn't accumulate enough
         // to hit the per-chunk threshold (e.g. a type that only got 1-2 new entries
         // across the whole chat). Forces consolidation regardless of threshold.
-        if (settings.longterm_enabled && settings.longterm_consolidate && characterName) {
-          setStatusMessage('Consolidating long-term memories...');
-          await consolidateMemories(characterName, true).catch((err) => {
-            console.error('[SmartMemory] Catch-up final consolidation failed:', err);
-          });
+        if (settings.longterm_enabled && settings.longterm_consolidate) {
+          for (const name of catchUpCharacterNames) {
+            setStatusMessage(`Consolidating long-term memories for ${name}...`);
+            await consolidateMemories(name, true).catch((err) => {
+              console.error('[SmartMemory] Catch-up final consolidation failed:', err);
+            });
+          }
           updateTokenDisplay();
         }
         if (settings.session_enabled) {
@@ -3562,15 +3587,24 @@ function bindSettingsUI() {
 
       // Generate character & world profiles once at the end of a completed run.
       // Skipped on cancel - partial data may produce low-quality profiles.
-      if (!catchUpCancelled && settings.profiles_enabled && characterName) {
-        setStatusMessage('Generating character & world profiles...');
-        const profiles = await generateProfiles(characterName).catch((err) => {
-          console.error('[SmartMemory] Catch-up profile generation failed:', err);
-          return null;
-        });
-        if (profiles) {
+      if (!catchUpCancelled && settings.profiles_enabled) {
+        for (const name of catchUpCharacterNames) {
+          setStatusMessage(`Generating character & world profiles for ${name}...`);
+          const profiles = await generateProfiles(name).catch((err) => {
+            console.error('[SmartMemory] Catch-up profile generation failed:', err);
+            return null;
+          });
+          // Update UI with the selected character's profiles - other characters'
+          // profiles are stored but only the active character is displayed.
+          if (profiles && name === characterName) {
+            injectProfiles();
+            updateProfilesUI(profiles);
+          }
+        }
+        // If the selected character wasn't in the group (edge case), inject
+        // whatever profiles exist for them anyway.
+        if (!catchUpCharacterNames.includes(characterName)) {
           injectProfiles();
-          updateProfilesUI(profiles);
         }
       }
 
