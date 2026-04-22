@@ -7,9 +7,9 @@ Give your AI a memory. Smart Memory is a SillyTavern extension that quietly work
 
 It runs automatically. You don't have to do anything special to use it. Just chat, and it takes care of the rest.
 
-*This is an independent extension for SillyTavern and is not affiliated with the SillyTavern development team.*
+Both 1:1 chats and group chats are supported. In group chats, each character gets their own long-term memory store and receives their own memory context before they generate.
 
-> **Note:** Smart Memory currently supports 1:1 chats only. Group chat support is planned for a future release.
+*This is an independent extension for SillyTavern and is not affiliated with the SillyTavern development team.*
 
 ![Smart Memory settings panel](https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/main/assets/smart-memory.webp)
 
@@ -87,7 +87,7 @@ A manual tool you can reach for when something feels off. Click **Check Last Res
 
 Enable **Auto-repair contradictions** to go one step further: when contradictions are found, Smart Memory makes a second model call to generate a brief corrective note and injects it into the next AI response turn. The note is cleared automatically after that response - it is a one-shot nudge, not a permanent injection. This costs one extra model call per check, so it is disabled by default.
 
-On **Profile B** (hosted models), the continuity check runs automatically after every AI turn - no button click required. A small badge appears next to the "Smart Memory" header in the settings panel: **clean** (fades after a few seconds) when nothing is found, or **N conflicts** (stays visible until the next check) when issues are detected. Auto-repair still requires the checkbox to be enabled. On Profile A (local hardware) the check remains manual-only.
+On **Profile B** (hosted models), the continuity check runs automatically after every AI turn - no button click required. A small badge appears next to the "Smart Memory" header in the settings panel: **clean** (fades after a few seconds) when nothing is found, or **N conflicts** (stays visible until the next check) when issues are detected. The **Auto-check after each response** checkbox lets you disable this automatic check while staying on Profile B - useful if you prefer to run checks manually or want to reduce model calls. Auto-repair still requires its own checkbox to be enabled. On Profile A (local hardware) the check is manual-only and the auto-check and auto-repair controls are dimmed.
 
 > **Note:** The continuity checker is only as good as the model doing the checking, and it only knows what is stored in Smart Memory - not what is on the character card by heart. Think of it as a sanity check, not a guarantee.
 
@@ -188,6 +188,7 @@ ollama pull nomic-embed-text
 | Enable auto-summarization | On | Summarize automatically at threshold |
 | Context threshold | 80% | Summarize when context reaches this % of the model's limit |
 | Summary response length | 2000 tokens | Length budget for the summary - also acts as the injection cap |
+| Hide summarized messages | Off | After each compaction, automatically hide all messages that have been folded into the summary. They remain in the chat file but are visually collapsed and excluded from the context window - the injected summary already covers their content. Toggling this on an existing chat applies or restores hiding immediately |
 | Injection template | `Story so far:\n{{summary}}` | Wrapper text around the summary |
 | Injection position | In-prompt | Where in the prompt the summary appears |
 
@@ -257,6 +258,13 @@ A live token count shows how many tokens the current profiles are using. A **Reg
 | --- | --- | --- |
 | Enable recap | On | Show a recap popup when returning after a gap |
 | Threshold | 4 hours | Minimum time away before a recap is generated |
+
+### Continuity Checker
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Auto-check after each response | On | Profile B only. Automatically run the continuity check after every AI response. Disable to reduce model calls while staying on Profile B |
+| Auto-repair contradictions | Off | Profile B only. When contradictions are found, generate a brief corrective note and inject it into the next response. Cleared automatically after that response. Costs one extra model call per check |
 
 ---
 
