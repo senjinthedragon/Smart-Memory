@@ -724,7 +724,7 @@ async function onCharacterMessageRendered() {
           await generateProfiles(characterName)
             .then((profiles) => {
               if (profiles) {
-                injectProfiles();
+                injectProfiles(characterName);
                 updateProfilesUI(profiles);
               }
             })
@@ -784,7 +784,7 @@ async function onCharacterMessageRendered() {
     generateProfiles(characterName)
       .then((profiles) => {
         if (profiles) {
-          injectProfiles();
+          injectProfiles(characterName);
           updateProfilesUI(profiles);
         }
       })
@@ -876,9 +876,11 @@ async function onChatChangedImpl() {
     await injectMemories(selectedGroupCharacter, isFreshStart());
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
+    injectProfiles(selectedGroupCharacter);
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
+    updateProfilesUI(loadProfiles(selectedGroupCharacter));
 
     updateTokenDisplay();
 
@@ -939,7 +941,7 @@ async function onChatChangedImpl() {
   await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
-  injectProfiles();
+  injectProfiles(characterName);
   loadAndInjectRepair();
 
   updateLongTermUI(characterName);
@@ -947,7 +949,7 @@ async function onChatChangedImpl() {
   updateSessionUI();
   updateScenesUI();
   updateArcsUI();
-  updateProfilesUI(loadProfiles());
+  updateProfilesUI(loadProfiles(characterName));
   updateTokenDisplay();
 
   // Regenerate profiles in the background if they are stale. Non-blocking -
@@ -955,11 +957,11 @@ async function onChatChangedImpl() {
   // user sees coherent context immediately and the refresh is invisible.
   if (settings.profiles_enabled && characterName && !freshStart) {
     const thresholdMs = (settings.profiles_stale_threshold_minutes ?? 30) * 60 * 1000;
-    if (areProfilesStale(thresholdMs)) {
+    if (areProfilesStale(thresholdMs, characterName)) {
       generateProfiles(characterName)
         .then((profiles) => {
           if (profiles) {
-            injectProfiles();
+            injectProfiles(characterName);
             updateProfilesUI(profiles);
           }
         })
@@ -1091,7 +1093,7 @@ async function onGroupMemberDrafted(chId) {
   await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
-  injectProfiles();
+  injectProfiles(characterName);
   loadAndInjectRepair();
 
   // The token display is NOT updated here. Injecting this character's slots
@@ -1311,7 +1313,12 @@ async function onGroupWrapperFinished({ type } = {}) {
             if (settings.profiles_enabled && characterName) {
               await generateProfiles(characterName)
                 .then((profiles) => {
-                  if (profiles) updateProfilesUI(profiles);
+                  if (profiles) {
+                    // Only update the UI panel if this is the character currently
+                    // shown in the selector - other characters' profiles are stored
+                    // but the display follows the selector.
+                    if (characterName === selectedGroupCharacter) updateProfilesUI(profiles);
+                  }
                 })
                 .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
               messagesSinceLastProfileRegen = 0;
@@ -1378,8 +1385,8 @@ async function onGroupWrapperFinished({ type } = {}) {
       generateProfiles(characterName)
         .then((profiles) => {
           if (profiles) {
-            injectProfiles();
-            updateProfilesUI(profiles);
+            injectProfiles(characterName);
+            if (characterName === selectedGroupCharacter) updateProfilesUI(profiles);
           }
         })
         .catch((err) => console.error('[SmartMemory] Scheduled profile regeneration error:', err));
@@ -2556,12 +2563,14 @@ function bindSettingsUI() {
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
+    updateProfilesUI(loadProfiles(selectedGroupCharacter));
     // Re-inject the character-specific slots so updateTokenDisplay reads
     // the selected character's content rather than whoever responded last.
     // onGroupMemberDrafted will overwrite these again before the next Generate().
     await injectMemories(selectedGroupCharacter, isFreshStart());
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
+    injectProfiles(selectedGroupCharacter);
     updateTokenDisplay();
   });
 
@@ -3597,14 +3606,14 @@ function bindSettingsUI() {
           // Update UI with the selected character's profiles - other characters'
           // profiles are stored but only the active character is displayed.
           if (profiles && name === characterName) {
-            injectProfiles();
+            injectProfiles(name);
             updateProfilesUI(profiles);
           }
         }
         // If the selected character wasn't in the group (edge case), inject
         // whatever profiles exist for them anyway.
         if (!catchUpCharacterNames.includes(characterName)) {
-          injectProfiles();
+          injectProfiles(characterName);
         }
       }
 
@@ -3614,11 +3623,12 @@ function bindSettingsUI() {
       injectSessionMemories();
       injectSceneHistory();
       injectArcs();
-      injectProfiles();
+      injectProfiles(characterName);
       updateLongTermUI(characterName);
       updateSessionUI();
       updateScenesUI();
       updateArcsUI();
+      updateProfilesUI(loadProfiles(characterName));
       updateEntityPanel(characterName);
       updateTokenDisplay();
       saveSettingsDebounced();
@@ -3687,7 +3697,7 @@ function bindSettingsUI() {
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
-    injectProfiles();
+    injectProfiles(characterName);
 
     updateShortTermUI(null);
     updateSessionUI();
@@ -3733,7 +3743,7 @@ function bindSettingsUI() {
     await clearSceneHistory();
     await clearArcs();
     await clearArcSummaries();
-    await clearProfiles();
+    await clearProfiles(characterName);
     // Dismiss any open recap modal.
     $('#sm_recap_overlay').remove();
 
@@ -3745,7 +3755,7 @@ function bindSettingsUI() {
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
-    injectProfiles();
+    injectProfiles(characterName);
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);
@@ -3805,7 +3815,7 @@ function bindSettingsUI() {
         setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
         updateTokenDisplay();
       } else {
-        injectProfiles();
+        injectProfiles(getSelectedCharacterName());
       }
     });
 
@@ -3847,7 +3857,7 @@ function bindSettingsUI() {
     try {
       const profiles = await generateProfiles(characterName);
       if (profiles) {
-        injectProfiles();
+        injectProfiles(characterName);
         updateProfilesUI(profiles);
         setStatusMessage('Profiles updated.');
       } else {
@@ -3869,7 +3879,7 @@ function bindSettingsUI() {
       getSettings().profiles_inject_budget = val;
       $profilesBudgetVal.text(val + ' tokens');
       saveSettingsDebounced();
-      injectProfiles();
+      injectProfiles(getSelectedCharacterName());
     });
   $profilesBudgetVal.text((s.profiles_inject_budget ?? 400) + ' tokens');
 
@@ -3878,7 +3888,7 @@ function bindSettingsUI() {
   $('input[name="sm_profiles_position"]').on('change', function () {
     getSettings().profiles_position = parseInt($(this).val(), 10);
     saveSettingsDebounced();
-    injectProfiles();
+    injectProfiles(getSelectedCharacterName());
   });
 
   $('#sm_profiles_depth')
@@ -3886,7 +3896,7 @@ function bindSettingsUI() {
     .on('input', function () {
       getSettings().profiles_depth = parseInt($(this).val(), 10);
       saveSettingsDebounced();
-      injectProfiles();
+      injectProfiles(getSelectedCharacterName());
     });
 
   $('#sm_profiles_role')
@@ -3894,10 +3904,10 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().profiles_role = parseInt($(this).val(), 10);
       saveSettingsDebounced();
-      injectProfiles();
+      injectProfiles(getSelectedCharacterName());
     });
 
-  updateProfilesUI(loadProfiles());
+  updateProfilesUI(loadProfiles(getSelectedCharacterName()));
 
   // ---- Continuity checker ---------------------------------------------
   $('#sm_auto_check')

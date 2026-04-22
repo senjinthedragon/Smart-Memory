@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Character and World profiles are now per-character in group chats**: profiles
+  were previously stored in a single chat-wide slot, so in group chats each
+  generation pass overwrote the previous character's profile. Profiles are now
+  keyed by character name in `chatMetadata`. Switching the character selector in
+  the settings panel immediately shows the correct character's profile, and each
+  group member's profile is injected independently when they draft a response.
+  Existing chats with the old flat profile structure are automatically migrated
+  (the old entry is dropped and regenerated on the next extraction pass).
 - **Group chat token display correct on initial load**: opening a group chat no
   longer shows the wrong character's token bars. The root cause was that
   `onGroupMemberDrafted` called `updateTokenDisplay()` after swapping injection
