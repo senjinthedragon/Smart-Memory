@@ -26,9 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round received the same unfiltered window, relying solely on the prompt
   instruction to limit scope. The raw window is also scaled by character count
   so each character still gets roughly 20 messages of context after filtering.
+- **Canon gets its own injection slot**: canon is now injected via a dedicated
+  `smart_memory_canon` slot instead of overwriting the short-term summary slot.
+  Both tiers coexist independently - the rolling summary covers recent events
+  while canon covers the broader character history. A new Canon section in the
+  settings panel provides an editable textarea, injection budget, template, and
+  position controls. Canon requires at least one resolved arc summary (previously
+  two) and is available as soon as the first arc closes. On Profile B, auto-canon
+  also triggers after the first arc summary rather than the second.
 
 ### Fixed
 
+- **Spurious recap on chat switch**: switching away from a chat and back within
+  the recap threshold could trigger the recap popup again. `updateLastActive` was
+  using a debounced metadata save, so the updated timestamp sometimes did not
+  reach disk before the switch. Changed to an immediate save so the "I was here"
+  timestamp always persists before the user can leave.
+- **"No character loaded" when clicking buttons after switching group chats**: ST
+  fires both `CHAT_CHANGED` and `CHAT_LOADED` when switching chats, which could
+  cause a second `onChatChangedImpl` run to reset `selectedGroupCharacter` to null
+  while the selector DOM still showed a character. Any button click during the
+  brief async window before `updateGroupCharSelector` re-set the value would
+  produce "No character loaded". `getSelectedCharacterName` now falls back to the
+  DOM selector value in group chats when the module variable is temporarily null.
 - **Character and World profiles are now per-character in group chats**: profiles
   were previously stored in a single chat-wide slot, so in group chats each
   generation pass overwrote the previous character's profile. Profiles are now
