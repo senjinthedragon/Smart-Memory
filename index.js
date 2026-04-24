@@ -2310,7 +2310,12 @@ function showEntityTimeline(entity, characterName) {
     const $list = $('<div class="sm_timeline_list">');
     for (const mem of linked) {
       const isRetired = Boolean(mem.superseded_by);
-      const when = mem.valid_from != null ? `msg #${mem.valid_from}` : 'unknown';
+      const when =
+        mem.valid_from != null
+          ? `msg #${mem.valid_from}`
+          : mem.ts != null
+            ? new Date(mem.ts).toLocaleString()
+            : 'unknown';
       const $entry = $(`
         <div class="sm_timeline_entry${isRetired ? ' sm_timeline_entry_retired' : ''}">
           <div class="sm_timeline_dot"></div>
