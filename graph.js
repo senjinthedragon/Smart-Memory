@@ -51,7 +51,7 @@ const MEMORY_COLORS = {
   detail: '#3a7a8e',
 };
 
-const ENTITY_RADIUS = 22;
+const ENTITY_RADIUS = 32;
 // Memory node radii by importance level (1/2/3).
 // Wide ratio so tiers read clearly on large screens.
 const MEMORY_RADII = [7, 13, 21];
