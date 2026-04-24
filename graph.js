@@ -52,7 +52,8 @@ const MEMORY_COLORS = {
 };
 
 const ENTITY_RADIUS = 22;
-const MEMORY_BASE_RADIUS = 7; // +0/1/2 for importance 1/2/3
+// Memory node radii by importance level (1/2/3) - distinct enough to read at a glance.
+const MEMORY_RADII = [6, 9, 13];
 
 // ---- Force simulation constants ---------------------------------------------
 
@@ -189,7 +190,7 @@ function buildGraph(characterName, opts) {
   const visibleIds = new Set(visible.map((m) => m.id));
 
   for (const mem of visible) {
-    const r = MEMORY_BASE_RADIUS + ((mem.importance ?? 1) - 1);
+    const r = MEMORY_RADII[(mem.importance ?? 1) - 1] ?? MEMORY_RADII[0];
     const node = {
       id: mem.id,
       nodeType: 'memory',
