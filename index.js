@@ -715,6 +715,10 @@ async function onCharacterMessageRendered() {
           total += count;
         }
 
+        // Snapshot arc summary count before extraction so we can detect a new
+        // resolution in this pass (the count only grows when an arc closes).
+        const arcSummaryCountBefore = settings.arcs_enabled ? loadArcSummaries().length : 0;
+
         if (settings.arcs_enabled) {
           // Arc extraction uses a wider window than other tiers so it can catch
           // arcs opened earlier in the session, but is capped to avoid overflowing
@@ -745,14 +749,14 @@ async function onCharacterMessageRendered() {
           messagesSinceLastProfileRegen = 0;
         }
 
-        // Profile B only: auto-regenerate canon after arc extraction when
-        // enough resolved arc summaries are available. On Profile A this is
-        // too expensive for local models, so it stays manual-only there.
+        // Profile B only: auto-regenerate canon when a new arc resolved this
+        // pass. Gating on an increase (not just count >= 2) avoids a model call
+        // on every extraction batch once the chat has two summaries.
         if (
           settings.arcs_enabled &&
           characterName &&
           getHardwareProfile() === 'b' &&
-          loadArcSummaries().length >= 2
+          loadArcSummaries().length > arcSummaryCountBefore
         ) {
           await generateCanon(characterName)
             .then(() => injectCanon(characterName))
@@ -1333,21 +1337,13 @@ async function onGroupWrapperFinished({ type } = {}) {
                 .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
               messagesSinceLastProfileRegen = 0;
             }
-
-            // Profile B only: auto-regenerate canon after arc extraction when
-            // enough resolved arc summaries are available.
-            if (
-              settings.arcs_enabled &&
-              getHardwareProfile() === 'b' &&
-              loadArcSummaries().length >= 2
-            ) {
-              await generateCanon(characterName)
-                .then(() => injectCanon(characterName))
-                .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
-            }
           }
 
           // Arc extraction is chat-wide - once per round after all characters.
+          // Snapshot summary count first so the canon check below can detect a
+          // new resolution without re-running extraction.
+          const arcSummaryCountBefore = settings.arcs_enabled ? loadArcSummaries().length : 0;
+
           if (settings.arcs_enabled) {
             const arcWindow = getStableExtractionWindow(context.chat, 100);
             const count = await extractArcs(arcWindow).catch((err) => {
@@ -1357,6 +1353,21 @@ async function onGroupWrapperFinished({ type } = {}) {
             injectArcs();
             updateArcsUI();
             total += count;
+          }
+
+          // Profile B only: auto-regenerate canon per responding character when
+          // a new arc resolved this pass. Runs after arc extraction so it can
+          // react to arcs closed in this round.
+          if (
+            settings.arcs_enabled &&
+            getHardwareProfile() === 'b' &&
+            loadArcSummaries().length > arcSummaryCountBefore
+          ) {
+            for (const characterName of respondedThisRound) {
+              await generateCanon(characterName)
+                .then(() => injectCanon(characterName))
+                .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
+            }
           }
 
           // Refresh entity panel with the last character who responded.

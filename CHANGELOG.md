@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Migration v3 crash on pre-1.5.0 chats with profiles**: the schema migration
+  that restructures profiles from a flat object to a per-character map threw an
+  assertion error when the old flat key was deleted, causing Smart Memory to
+  silently fail to initialise on any chat that had profiles generated before
+  v1.5.0. The migration runner now supports declared deletions for steps that
+  intentionally drop regenerable cache.
+- **Canon auto-regeneration firing on every extraction pass**: on Profile B,
+  canon was regenerated once per extraction batch whenever the chat had two or
+  more arc summaries - not only when a new arc resolved. Canon now regenerates
+  only when the arc summary count increases during an extraction pass. Also
+  fixes a group chat ordering bug where the canon check ran before arc
+  extraction and could never react to an arc closing in the current round.
+
 ## [1.5.0] - 2026-04-24
 
 ### Added

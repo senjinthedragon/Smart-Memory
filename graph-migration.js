@@ -690,7 +690,9 @@ function migrateChat_v3(chatMeta) {
 }
 
 // ---- Step registries --------------------------------------------------------
-// Map<version, stepFn> - add new entries here when SCHEMA_VERSION is bumped.
+// Map<version, stepFn | { fn, deletePaths }> - add new entries here when
+// SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
+// intentionally drops regenerable cache (not user-authored data).
 
 const CHARACTER_MIGRATIONS = new Map([
   [1, migrateCharacter_v1],
@@ -700,7 +702,8 @@ const CHARACTER_MIGRATIONS = new Map([
 const CHAT_MIGRATIONS = new Map([
   [1, migrateChat_v1],
   [2, migrateChat_v2],
-  [3, migrateChat_v3],
+  // v3 drops the old flat profiles cache - regenerable, not user data.
+  [3, { fn: migrateChat_v3, deletePaths: ['profiles'] }],
 ]);
 
 // ---- Migration runner -------------------------------------------------------
@@ -715,22 +718,27 @@ const CHAT_MIGRATIONS = new Map([
  * Arrays are checked element-by-element at the same indices so that existing
  * memory objects cannot have their content silently cleared.
  *
- * @param {Object|Array} before - Container snapshot before the step ran.
- * @param {Object|Array} after  - Container returned by the step.
- * @param {number} stepVersion  - Step version number, for error messages.
- * @param {string} [_path]      - Internal recursion path prefix.
+ * Paths listed in `allowDelete` are exempt from the deletion check - use this
+ * only for regenerable cache that a step is intentionally dropping.
+ *
+ * @param {Object|Array} before       - Container snapshot before the step ran.
+ * @param {Object|Array} after        - Container returned by the step.
+ * @param {number} stepVersion        - Step version number, for error messages.
+ * @param {string} [_path]            - Internal recursion path prefix.
+ * @param {Set<string>} [allowDelete] - Top-level paths exempt from deletion check.
  */
-function assertNonDestructive(before, after, stepVersion, _path = '') {
+function assertNonDestructive(before, after, stepVersion, _path = '', allowDelete = new Set()) {
   const keys = Array.isArray(before) ? [...before.keys()] : Object.keys(before);
   for (const key of keys) {
     const path = _path ? `${_path}.${key}` : String(key);
     if (after == null || !(key in after)) {
+      if (allowDelete.has(path)) continue;
       throw new Error(`[SmartMemory] Migration v${stepVersion} deleted field "${path}".`);
     }
     const bVal = before[key];
     const aVal = after[key];
     if (bVal !== null && typeof bVal === 'object' && aVal !== null && typeof aVal === 'object') {
-      assertNonDestructive(bVal, aVal, stepVersion, path);
+      assertNonDestructive(bVal, aVal, stepVersion, path, allowDelete);
     } else if (bVal !== aVal) {
       throw new Error(
         `[SmartMemory] Migration v${stepVersion} overwrote field "${path}": was ${JSON.stringify(bVal)}, now ${JSON.stringify(aVal)}.`,
@@ -758,11 +766,13 @@ function applyMigrations(container, steps) {
 
   let current = container;
   while (version < SCHEMA_VERSION) {
-    const step = steps.get(version + 1);
-    if (step) {
+    const entry = steps.get(version + 1);
+    if (entry) {
+      const stepFn = typeof entry === 'function' ? entry : entry.fn;
+      const allowDelete = new Set(typeof entry === 'function' ? [] : (entry.deletePaths ?? []));
       const before = current;
-      current = step(current);
-      assertNonDestructive(before, current, version + 1);
+      current = stepFn(current);
+      assertNonDestructive(before, current, version + 1, '', allowDelete);
       smLog(`[SmartMemory] Applied migration step v${version + 1}.`);
     }
     version++;
