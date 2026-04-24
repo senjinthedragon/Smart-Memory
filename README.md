@@ -7,7 +7,7 @@ Give your AI a memory. Smart Memory is a SillyTavern extension that quietly work
 
 It runs automatically. You don't have to do anything special to use it. Just chat, and it takes care of the rest.
 
-Both 1:1 chats and group chats are supported. In group chats, each character gets their own long-term memory store and receives their own memory context before they generate.
+Both 1:1 chats and group chats are supported. In group chats, each character gets their own independent memory store and receives their own memory context before they generate. A character selector in the settings panel lets you switch between group members to view and manage each character's memories, profiles, and entity registry independently.
 
 *This is an independent extension for SillyTavern and is not affiliated with the SillyTavern development team.*
 
@@ -68,6 +68,8 @@ After each extraction pass, Smart Memory generates compact state snapshots from 
 - **Relationship matrix** - one-line directional summary per named entity with a confidence score
 
 Profiles are regenerated after each extraction pass and on chat load if stale. On Profile B, an optional message-count schedule can keep them fresh between extraction passes. A manual regenerate button is available in the settings panel.
+
+In group chats, each character has their own independent profile. Switching the character selector updates the profiles panel to show that character's snapshot, and each character's profile is injected into context when they are about to respond.
 
 ### Scene Detection and History
 
@@ -291,9 +293,11 @@ All manual operations are in the **Configuration** section at the top of the pan
 
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
 
+In group chats, Memorize Chat processes all active group members - not just the one currently selected in the character selector. Each member gets their own extraction pass with a filtered message window (their own messages plus user messages), their own consolidation pass, and their own profiles generated at the end.
+
 A **Cancel** button appears during processing. Cancelling stops the loop cleanly between chunks - partial results are saved.
 
-If memories already exist for the character, a confirmation prompt will appear before processing begins - running Memorize Chat repeatedly on the same chat can introduce near-duplicate entries on top of existing ones. Use **Forget This Chat** first if you want a clean re-run.
+If memories already exist for one or more characters, a confirmation prompt will appear before processing begins - running Memorize Chat repeatedly on the same chat can introduce near-duplicate entries on top of existing ones. Use **Forget This Chat** first if you want a clean re-run.
 
 Only accepted messages are processed - swiped alternatives are ignored.
 
