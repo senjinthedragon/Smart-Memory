@@ -36,14 +36,16 @@ import { RECAP_PROMPT } from './prompts.js';
 /**
  * Records the current timestamp as lastActive in chatMetadata.
  * Called on chat load and after each AI response to keep the clock accurate.
- * Uses the debounced save to avoid hammering storage on every message.
+ * Uses a non-debounced save so the timestamp reaches disk immediately - if
+ * the user switches chats before a debounced save fires, the stale timestamp
+ * on disk would cause a spurious recap the next time they return.
  */
 export function updateLastActive() {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].lastActive = Date.now();
-  context.saveMetadataDebounced?.();
+  context.saveMetadata?.();
 }
 
 /**
