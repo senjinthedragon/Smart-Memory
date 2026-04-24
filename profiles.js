@@ -33,7 +33,6 @@
  * selector in the settings panel shows the correct character's profile.
  *
  * loadProfiles         - returns stored profiles for a character from chatMetadata (null if none)
- * saveProfiles         - persists profiles for a character to chatMetadata
  * areProfilesStale     - true if a character's profiles are older than the configured threshold
  * generateProfiles     - calls the model and saves the result; returns the profiles
  * injectProfiles       - pushes the specified character's profiles into the prompt
@@ -77,7 +76,7 @@ export function loadProfiles(characterName) {
  * @param {{character_state: string, world_state: string, relationship_matrix: string, generated_at: number}} profiles
  * @param {string} characterName
  */
-export async function saveProfiles(profiles, characterName) {
+async function saveProfiles(profiles, characterName) {
   if (!characterName) return;
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};

@@ -29,9 +29,6 @@
 /** Extension name as registered in extension_settings. */
 export const MODULE_NAME = 'smart_memory';
 
-/** Directory name used for template loading. */
-export const EXT_DIR = 'Smart-Memory';
-
 // Keys passed to setExtensionPrompt - each tier has its own named slot.
 export const PROMPT_KEY_SHORT = 'smart_memory_short';
 export const PROMPT_KEY_LONG = 'smart_memory_long';

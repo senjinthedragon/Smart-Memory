@@ -31,7 +31,6 @@
  * for users who have not installed an embedding model.
  *
  * getEmbeddingBatch   - fetches vectors for multiple texts in one API call
- * getEmbedding        - single-text wrapper around getEmbeddingBatch
  * cosineSimilarity    - re-exported from similarity.js for callers that import here
  * batchVerify         - compares candidates against existing memories; returns
  *                       passed (new), superseded (state-change updates), and
@@ -126,20 +125,6 @@ export async function getEmbeddingBatch(texts) {
   }
 
   return result;
-}
-
-/**
- * Fetches a normalized embedding vector for a single text.
- * Convenience wrapper around getEmbeddingBatch for single-text callers.
- * Returns null if embeddings are disabled or the API call fails.
- * @param {string} text
- * @returns {Promise<number[]|null>}
- */
-export async function getEmbedding(text) {
-  const normalized = String(text || '').trim();
-  if (!normalized) return null;
-  const result = await getEmbeddingBatch([normalized]);
-  return result.get(normalized) ?? null;
 }
 
 // cosineSimilarity, jaccardSimilarity, STATE_CHANGE_PATTERNS, and hasStateChangeMarker

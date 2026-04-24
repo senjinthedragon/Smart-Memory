@@ -25,7 +25,6 @@
  * completed scene and appends it to the per-chat scene history in chatMetadata.
  *
  * detectSceneBreakHeuristic  - pattern-based scene break check (cheap, no model call); includes dawn/sleep/wake patterns
- * detectSceneBreakAI         - model-based scene break check (accurate, costs a call)
  * loadSceneHistory           - returns the stored scene history array
  * saveSceneHistory           - persists the scene history array to chatMetadata
  * clearSceneHistory          - empties scene history for the current chat
@@ -79,7 +78,7 @@ function sceneJaccard(a, b) {
  * @param {string} [previousMessageText] - The preceding AI message for context.
  * @returns {Promise<boolean>}
  */
-export async function detectSceneBreakAI(messageText, previousMessageText) {
+async function detectSceneBreakAI(messageText, previousMessageText) {
   try {
     const prompt = buildSceneDetectPrompt(messageText, previousMessageText);
     const response = await generateMemoryExtract(prompt, { responseLength: 5 });

@@ -32,7 +32,6 @@
  * extractArcs       - runs extraction against the conversation, deduplicates, and updates the arc list
  * injectArcs        - pushes active arcs into the prompt via setExtensionPrompt
  * loadArcSummaries  - returns the stored arc summary array for the current chat
- * saveArcSummaries  - persists the arc summary array to chatMetadata
  * clearArcSummaries - empties all arc summaries for the current chat
  */
 
@@ -144,7 +143,7 @@ export function loadArcSummaries() {
  * Persists the arc summaries array to chatMetadata.
  * @param {Array} summaries
  */
-export async function saveArcSummaries(summaries) {
+async function saveArcSummaries(summaries) {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};

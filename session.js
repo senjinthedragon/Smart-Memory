@@ -30,7 +30,6 @@
  * clearSessionMemories       - empties session memories for the current chat
  * extractSessionMemories     - runs extraction against recent messages and merges results
  * consolidateSessionMemories - evaluates unprocessed entries against the consolidated base per type
- * formatSessionMemories      - formats the memory array as [type] content lines
  * injectSessionMemories      - pushes session memories into the prompt via setExtensionPrompt
  */
 
@@ -477,7 +476,7 @@ export async function consolidateSessionMemories(force = false) {
  * @param {Array<{type: string, content: string}>} memories
  * @returns {string}
  */
-export function formatSessionMemories(memories) {
+function formatSessionMemories(memories) {
   if (!memories || memories.length === 0) return '';
   return sortByTimeline(memories)
     .map((m) => `- ${m.content}`)

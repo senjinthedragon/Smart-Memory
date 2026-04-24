@@ -26,16 +26,13 @@
  * buildSummaryPrompt           - assembles the full compaction prompt (first-time summary)
  * buildUpdateSummaryPrompt     - assembles the progressive update prompt (extends existing summary)
  * RECAP_PROMPT                 - away recap "Previously on..." prompt
- * SESSION_EXTRACTION_SYSTEM    - system role string for session extraction
  * buildSessionExtractionPrompt - assembles the session extraction prompt
  * buildSceneDetectPrompt       - assembles the yes/no scene break detection prompt with prior context
  * SCENE_SUMMARY_PROMPT         - scene mini-summary prompt
- * ARC_EXTRACTION_SYSTEM        - system role string for arc extraction
  * buildArcExtractionPrompt     - assembles the arc extraction prompt
  * buildArcSummaryPrompt        - assembles the arc resolution summary prompt
  * buildContinuityPrompt        - assembles the continuity check prompt
  * buildRepairPrompt            - assembles the corrective note prompt from a contradiction list
- * EXTRACTION_SYSTEM_PROMPT     - system role string for long-term extraction
  * buildExtractionPrompt        - assembles the long-term memory extraction prompt
  * buildLongtermConsolidationPrompt - evaluates a batch of unprocessed long-term entries against the consolidated base for one type
  * buildSessionConsolidationPrompt  - same as above but for session memory types (scene, revelation, development, detail)
@@ -161,8 +158,6 @@ export const RECAP_PROMPT =
 
 // ---- Session memory -----------------------------------------------------
 
-export const SESSION_EXTRACTION_SYSTEM = `You are a session archivist. You extract detailed within-session facts from roleplay conversations. You do not roleplay or continue the story. You only extract structured data.`;
-
 /**
  * Assembles the session memory extraction prompt.
  * @param {string} chatHistory - Formatted recent messages (name: text pairs).
@@ -271,8 +266,6 @@ SCENE:
 {{scene_text}}`;
 
 // ---- Story arcs ---------------------------------------------------------
-
-export const ARC_EXTRACTION_SYSTEM = `You are a story analyst. You extract open story threads and unresolved narrative elements from roleplay conversations. You do not roleplay. You only identify story structure.`;
 
 /**
  * Assembles the story arc extraction prompt.
@@ -567,8 +560,6 @@ Time: [time context - time of day, season, elapsed time since a key event, or "u
 }
 
 // ---- Long-term memory extraction ----------------------------------------
-
-export const EXTRACTION_SYSTEM_PROMPT = `You are a memory archivist. Your only job is to read roleplay transcripts and extract facts worth preserving across future sessions. You do not roleplay, continue the story, or speak as any character. You output structured data only.`;
 
 /**
  * Assembles the long-term memory extraction prompt.
