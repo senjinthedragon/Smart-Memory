@@ -59,6 +59,7 @@ import {
   PROMPT_KEY_ARCS,
   PROMPT_KEY_REPAIR,
   PROMPT_KEY_PROFILES,
+  PROMPT_KEY_CANON,
   MEMORY_TYPES,
   SESSION_TYPES,
 } from './constants.js';
@@ -125,7 +126,7 @@ import {
   cosineSimilarity,
 } from './embeddings.js';
 import { jaccardSimilarity } from './similarity.js';
-import { clearCanon, generateCanon, injectCanon } from './canon.js';
+import { clearCanon, generateCanon, injectCanon, loadCanon, saveCanon } from './canon.js';
 import {
   ensureCharacterMigrated,
   ensureChatMigrated,
@@ -224,6 +225,11 @@ const defaultSettings = {
   arcs_role: extension_prompt_roles.SYSTEM,
   arc_summary_response_length: 300,
   canon_response_length: 600,
+  canon_inject_budget: 800,
+  canon_position: extension_prompt_types.IN_PROMPT,
+  canon_depth: 0,
+  canon_role: extension_prompt_roles.SYSTEM,
+  canon_template: 'Character history:\n{{canon}}',
 
   // Away recap
   recap_enabled: true,
@@ -389,6 +395,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_ARCS, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_REPAIR, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_PROFILES, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_CANON, '', none, 0);
   updateTokenDisplay();
 }
 
@@ -880,6 +887,7 @@ async function onChatChangedImpl() {
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
+    updateCanonUI(selectedGroupCharacter);
     updateProfilesUI(loadProfiles(selectedGroupCharacter));
     updateEntityPanel(selectedGroupCharacter);
 
@@ -930,9 +938,6 @@ async function onChatChangedImpl() {
   const freshStart = isFreshStart();
 
   // Restore all injected context from the previous session.
-  // loadAndInjectSummary() writes the compaction summary to the short-term slot
-  // and returns the text for the UI. Canon then overwrites the slot when active
-  // (canon wins once enough arc summaries exist).
   const summary = loadAndInjectSummary();
   injectCanon(characterName);
   updateShortTermUI(summary);
@@ -950,6 +955,7 @@ async function onChatChangedImpl() {
   updateSessionUI();
   updateScenesUI();
   updateArcsUI();
+  updateCanonUI(characterName);
   updateProfilesUI(loadProfiles(characterName));
   updateTokenDisplay();
 
@@ -1083,9 +1089,7 @@ async function onGroupMemberDrafted(chId) {
 
   const freshStart = isFreshStart();
 
-  // Restore all injected context for this character. The short-term summary
-  // is chat-wide and was injected at load, but canon overwrites the slot when
-  // active, so we re-apply it here per character.
+  // Restore all injected context for this character.
   const summary = loadAndInjectSummary();
   injectCanon(characterName);
   updateShortTermUI(summary);
@@ -1332,9 +1336,9 @@ async function onGroupWrapperFinished({ type } = {}) {
               getHardwareProfile() === 'b' &&
               loadArcSummaries().length >= 2
             ) {
-              await generateCanon(characterName).catch((err) =>
-                console.error('[SmartMemory] Auto-canon error:', err),
-              );
+              await generateCanon(characterName)
+                .then(() => injectCanon(characterName))
+                .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
             }
           }
 
@@ -1449,6 +1453,7 @@ const TOKEN_TIERS = [
   { key: PROMPT_KEY_LONG, label: 'Long-term', color: '#4a6fa5' },
   { key: PROMPT_KEY_SESSION, label: 'Session', color: '#8e5a8e' },
   { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
+  { key: PROMPT_KEY_CANON, label: 'Canon', color: '#a05870' },
   { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#a07840' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
   { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: '#5a9ea0' },
@@ -1635,6 +1640,24 @@ function initTooltips() {
 /** Syncs the short-term summary textarea with the current summary text. */
 function updateShortTermUI(summary) {
   $('#sm_current_summary').val(summary || '');
+}
+
+/**
+ * Updates the Canon section UI to reflect the currently stored canon for the
+ * given character. Populates the display textarea and status line.
+ * @param {string|null} characterName
+ */
+function updateCanonUI(characterName) {
+  const canon = characterName ? loadCanon(characterName) : null;
+  $('#sm_canon_display').val(canon?.text || '');
+  if (canon) {
+    const arcCount = loadArcSummaries().length;
+    $('#sm_canon_status').text(
+      `Canon: ${estimateTokens(canon.text)} tokens, sourced from ${arcCount} arc summar${arcCount === 1 ? 'y' : 'ies'}.`,
+    );
+  } else {
+    $('#sm_canon_status').text('');
+  }
 }
 
 /**
@@ -2565,6 +2588,7 @@ function bindSettingsUI() {
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
+    updateCanonUI(selectedGroupCharacter);
     updateProfilesUI(loadProfiles(selectedGroupCharacter));
     // Re-inject the character-specific slots so updateTokenDisplay reads
     // the selected character's content rather than whoever responded last.
@@ -2784,6 +2808,59 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
+  // ---- Canon ----------------------------------------------------------
+
+  $('#sm_canon_inject_budget')
+    .val(s.canon_inject_budget)
+    .on('input', function () {
+      const val = parseInt($(this).val(), 10);
+      getSettings().canon_inject_budget = val;
+      $('#sm_canon_inject_budget_value').text(val);
+      saveSettingsDebounced();
+    });
+  $('#sm_canon_inject_budget_value').text(s.canon_inject_budget);
+
+  $('#sm_canon_template')
+    .val(s.canon_template)
+    .on('input', function () {
+      getSettings().canon_template = $(this).val();
+      saveSettingsDebounced();
+    });
+
+  $(`input[name="sm_canon_position"][value="${s.canon_position}"]`).prop('checked', true);
+  $('input[name="sm_canon_position"]').on('change', function () {
+    getSettings().canon_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_canon_depth')
+    .val(s.canon_depth)
+    .on('input', function () {
+      getSettings().canon_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_canon_role')
+    .val(s.canon_role)
+    .on('change', function () {
+      getSettings().canon_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  // Allow manual edits to the canon textarea to take effect immediately.
+  $('#sm_canon_display').on('input', function () {
+    const characterName = getSelectedCharacterName();
+    if (!characterName) return;
+    const val = $(this).val().trim();
+    if (val) {
+      saveCanon(characterName, val);
+      injectCanon(characterName);
+    } else {
+      clearCanon(characterName);
+    }
+    updateTokenDisplay();
+  });
+
   $('#sm_summarize_now').on('click', async function () {
     if (isCatchUpRunning()) return;
     if (compactionRunning) return;
@@ -2814,9 +2891,9 @@ function bindSettingsUI() {
       toastr.warning('No character loaded.', 'Smart Memory');
       return;
     }
-    if (loadArcSummaries().length < 2) {
+    if (loadArcSummaries().length === 0) {
       toastr.warning(
-        'Canon requires at least 2 resolved arc summaries. Resolve more story arcs first.',
+        'Canon requires at least one resolved arc summary. Resolve a story arc first.',
         'Smart Memory',
       );
       return;
@@ -2827,10 +2904,7 @@ function bindSettingsUI() {
       const text = await generateCanon(characterName);
       if (text) {
         injectCanon(characterName);
-        updateShortTermUI(text);
-        $('#sm_canon_status').text(
-          `Canon updated: ${estimateTokens(text)} tokens, sourced from ${loadArcSummaries().length} arc summaries.`,
-        );
+        updateCanonUI(characterName);
         updateTokenDisplay();
         setStatusMessage('Canon summary updated.');
       } else {
@@ -3016,6 +3090,7 @@ function bindSettingsUI() {
     clearCanon(characterName);
     saveSettingsDebounced();
     updateLongTermUI(characterName);
+    updateCanonUI(characterName);
     injectMemories(null, true).catch(console.error);
     setStatusMessage('Memories cleared.');
   });
@@ -3766,6 +3841,7 @@ function bindSettingsUI() {
     updateSessionUI();
     updateScenesUI();
     updateArcsUI();
+    updateCanonUI(characterName);
     updateProfilesUI(null);
     updateTokenDisplay();
     sceneMessageBuffer = [];

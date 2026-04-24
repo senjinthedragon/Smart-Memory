@@ -43,7 +43,7 @@ When your conversation grows long enough to approach your AI's context limit, Sm
 
 After the first summary exists, only new messages are processed and folded in - the summary grows with your story rather than being rewritten from scratch every time. The summary is also aware of what is stored in long-term and session memory, so it focuses on narrative flow rather than restating facts already captured elsewhere.
 
-Once at least 2 story arcs have been resolved, you can generate a **canon document** - a single prose narrative synthesized from those arc summaries and high-importance long-term facts. Think of it as a "story bible" for the character: not a list of extracted facts, but a composed history written by the model from everything it has learned. When canon exists, it replaces the rolling compaction summary in the injection slot - the AI gets the narrative document instead of the summary. Canon is stored at the character level (like long-term memories, not per-chat), so it carries forward to new chats with the same character. It is cleared by **Fresh Start** and by the **Clear** button in the Long-term Memory section.
+The rolling summary is separate from canon - both can be active at the same time, each injected via its own slot.
 
 ### Long-term Memory - Persistent Facts
 
@@ -78,6 +78,12 @@ Smart Memory watches for scene transitions - time skips, location changes, those
 ### Story Arcs - Open Threads
 
 Unresolved narrative threads - promises made, character goals, mysteries introduced, tensions left hanging - are tracked and kept in context. When the story resolves one, it gets marked closed and a short narrative summary of that arc is generated for the record. This keeps the AI oriented toward where the story is going, not just reacting to the last message.
+
+### Canon
+
+Once you have at least one resolved arc summary, you can generate a **canon document** - a stable prose narrative synthesized from those arc summaries and high-importance long-term facts. Think of it as a "story bible" for the character: not a list of extracted facts, but a composed history written by the model from everything it has learned.
+
+Canon is injected via its own dedicated slot, independent of the rolling short-term summary. Both can be active at the same time: the summary covers recent events, canon covers the broader history. Canon is stored at the character level (like long-term memories, not per-chat), so it carries forward to new chats with the same character. It is cleared by **Fresh Start** and by the **Clear** button in the Long-term Memory section.
 
 ### Away Recap
 
@@ -127,14 +133,15 @@ Other 8B-class models tested against Smart Memory's prompts consistently produce
 
 Smart Memory's defaults are designed to layer cleanly alongside vector storage. Depth is distance from the user's last message - depth 0 is right before the AI responds, higher numbers are further back.
 
-| Tier               | Position  | Depth | Notes                                           |
-| ------------------ | --------- | ----- | ----------------------------------------------- |
-| Arcs               | In-chat   | 2     | Shares depth with ST chat vectors intentionally |
-| Session            | In-chat   | 3     | Just above ST's default vector depth            |
-| Scenes             | In-chat   | 6     | Further back - past scene context               |
-| Long-term          | In-prompt | -     | Near character card                             |
-| Short-term / Canon | In-prompt | -     | Narrative background                            |
-| Profiles           | In-prompt | -     | State snapshots, near character card            |
+| Tier      | Position  | Depth | Notes                                           |
+| --------- | --------- | ----- | ----------------------------------------------- |
+| Arcs      | In-chat   | 2     | Shares depth with ST chat vectors intentionally |
+| Session   | In-chat   | 3     | Just above ST's default vector depth            |
+| Scenes    | In-chat   | 6     | Further back - past scene context               |
+| Long-term | In-prompt | -     | Near character card                             |
+| Short-term| In-prompt | -     | Rolling narrative summary                       |
+| Canon     | In-prompt | -     | Stable character history, separate slot         |
+| Profiles  | In-prompt | -     | State snapshots, near character card            |
 
 The away recap is shown as a popup to the user, not injected into the prompt.
 
@@ -194,7 +201,15 @@ ollama pull nomic-embed-text
 | Injection template        | `Story so far:\n{{summary}}` | Wrapper text around the summary                                                                                                                                                                                                                                                                                           |
 | Injection position        | In-prompt                    | Where in the prompt the summary appears                                                                                                                                                                                                                                                                                   |
 
-Once at least 2 arc summaries exist, a **Generate Canon** button appears in this section. Clicking it synthesizes a prose narrative from those arc summaries and high-importance long-term facts, stores it at the character level, and immediately injects it in place of the rolling summary. The token count shown in the status bar after generation reflects what is now in the Short-term slot. On Profile B this regenerates automatically after each arc extraction pass.
+### Canon
+
+| Setting            | Default                          | Description                                                                                          |
+| ------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Injection budget   | 800 tokens                       | Canon text is trimmed from the end if it exceeds this limit                                          |
+| Injection template | `Character history:\n{{canon}}`  | Wrapper text around the canon document                                                               |
+| Injection position | In-prompt                        | Where in the prompt canon appears                                                                    |
+
+The **Generate Canon** button synthesizes a prose narrative from resolved arc summaries and high-importance long-term facts, stores it at the character level, and immediately injects it into the canon slot. At least one resolved arc summary is required. On Profile B this regenerates automatically after each arc extraction pass. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button.
 
 ### Long-term Memory
 
@@ -251,7 +266,7 @@ A live token count shows how many tokens the current profiles are using. A **Reg
 | ---------------------- | ----------------- | ------------------------------------------- |
 | Enable arc tracking    | On                | Extract and inject open narrative threads   |
 | Max tracked arcs       | 10                | Oldest arcs dropped when limit is exceeded  |
-| Injection token budget | 400               | Oldest arcs trimmed first when exceeded     |
+| Injection token budget | 700               | Oldest arcs trimmed first when exceeded     |
 | Injection position     | In-chat @ depth 2 | Near current action, alongside chat vectors |
 
 ### Away Recap Settings
@@ -329,7 +344,7 @@ For the full chat backlog, use **Memorize Chat** instead.
 ### Other Per-tier Buttons
 
 - **Summarize Now** - forces a short-term summary right now, ignoring the threshold
-- **Generate Canon** - synthesizes a prose narrative from resolved arc summaries and high-importance facts, replacing the rolling summary in the injection slot. Appears once at least 2 arc summaries exist. On Profile B this runs automatically after each arc extraction pass. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button
+- **Generate Canon** - synthesizes a prose narrative from resolved arc summaries and high-importance facts and injects it into the canon slot. Requires at least one resolved arc summary. On Profile B this runs automatically after each arc extraction pass. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button. The canon textarea in the Canon section is also editable directly
 - **Generate Recap Now** - generates and shows a recap popup on demand
 - **Check Last Response** - runs the continuity check against the last AI response
 - **Regenerate Profiles Now** - regenerates character and world profiles immediately
