@@ -30,6 +30,7 @@
  *   Away recap    "Previously on..." summary when returning after a long break.
  *   Continuity    Manual check: does the last response contradict known facts?
  *   /sm-search    Slash command: semantic search across all tiers, shows results popup.
+ *   Graph view    Force-directed canvas visualization of entities and memories.
  */
 
 import {
@@ -149,6 +150,7 @@ import {
 } from './profiles.js';
 import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
 import { smLog } from './logging.js';
+import { showMemoryGraph } from './graph.js';
 
 // ---- Default settings ---------------------------------------------------
 
@@ -4035,6 +4037,11 @@ function bindSettingsUI() {
     });
 
   updateProfilesUI(loadProfiles(getSelectedCharacterName()));
+
+  // ---- Entity graph -------------------------------------------------------
+  $('#sm_open_graph_btn').on('click', () => {
+    showMemoryGraph(getSelectedCharacterName());
+  });
 
   // ---- Continuity checker ---------------------------------------------
   $('#sm_auto_check')

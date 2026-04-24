@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Memory graph visualization**: a new "View Graph" button in the Entity
+  Registry panel opens a full-screen force-directed canvas graph of the current
+  character's entities and memories. Entity nodes (larger, coloured by type)
+  are linked to their associated memory nodes (smaller, coloured by memory
+  type). Supersession chains are shown as directed orange arrows. Supports
+  pan (drag background), zoom (scroll wheel), node drag, click-to-highlight
+  neighbours, and hover tooltips showing full memory content. Filters for
+  session memories and retired memories can be toggled live without closing
+  the graph.
+
 ### Fixed
 
 - **Entity timeline timestamps showing "unknown"**: all memory entries in the
