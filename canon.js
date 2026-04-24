@@ -20,19 +20,18 @@
 /**
  * Layer 3 canon summary: stable per-character narrative document.
  *
- * Canon is generated from resolved arc summaries and high-importance
- * long-term memories. It covers who the character is, what has happened,
- * and the current state of key relationships. Stored in extension_settings
- * so it persists across sessions. Injected via the smart_memory_short slot
- * when at least two arc summaries exist (replacing the compaction summary).
- * Manual trigger only to keep model calls minimal on local hardware.
+ * Canon is a manually-triggered prose narrative compiled from resolved arc
+ * summaries and high-importance long-term memories. It covers who the character
+ * is, what has happened, and the current state of key relationships. Stored in
+ * extension_settings so it persists across sessions. Injected via its own
+ * dedicated slot (smart_memory_canon) independently of the compaction summary,
+ * so both coexist and neither overwrites the other.
  *
- * loadCanon          - returns the stored canon for a character (or null)
- * saveCanon          - persists the canon to extension_settings
- * clearCanon         - removes the canon for a character
- * generateCanon      - builds and stores a new canon summary
- * injectCanon        - injects canon into the prompt (replaces compaction)
- * shouldUseCanon     - true when enough arc summaries exist to warrant canon
+ * loadCanon     - returns the stored canon for a character (or null)
+ * saveCanon     - persists the canon to extension_settings
+ * clearCanon    - removes the canon for a character and clears its slot
+ * generateCanon - builds and stores a new canon summary
+ * injectCanon   - injects canon into the prompt via its own slot
  */
 
 import {
@@ -43,15 +42,11 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { extension_settings } from '../../../extensions.js';
-import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT } from './constants.js';
+import { estimateTokens, MODULE_NAME, PROMPT_KEY_CANON } from './constants.js';
 import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadArcSummaries } from './arcs.js';
 import { smLog } from './logging.js';
-
-// Minimum number of resolved arc summaries before canon is used instead of
-// the compaction summary. Two arcs represents "past multiple arcs" per the design.
-const CANON_ARC_THRESHOLD = 2;
 
 // ---- Storage ------------------------------------------------------------
 
@@ -87,33 +82,27 @@ export function saveCanon(characterName, text) {
 }
 
 /**
- * Removes the canon summary for a character from extension_settings.
+ * Removes the canon summary for a character from extension_settings and clears
+ * the injection slot so nothing stale remains in the prompt.
  * @param {string} characterName
  */
 export function clearCanon(characterName) {
   if (!characterName) return;
   const char = extension_settings[MODULE_NAME]?.characters?.[characterName];
-  if (!char) return;
-  delete char.canon;
-  saveSettingsDebounced();
+  if (char) {
+    delete char.canon;
+    saveSettingsDebounced();
+  }
+  setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
 }
 
 // ---- Generation ---------------------------------------------------------
 
 /**
- * Returns true when enough arc summaries exist to warrant using canon instead
- * of the compaction summary.
- *
- * @returns {boolean}
- */
-export function shouldUseCanon() {
-  return loadArcSummaries().length >= CANON_ARC_THRESHOLD;
-}
-
-/**
  * Generates a canon summary for the given character from arc summaries and
- * high-importance long-term memories, then persists and injects it.
+ * high-importance long-term memories, then persists and returns the text.
  *
+ * Returns null (with a log message) when no arc summaries exist yet.
  * Manual trigger only on local hardware. Profile B may call this automatically
  * after each arc closes, but that is handled by the caller.
  *
@@ -157,44 +146,39 @@ export async function generateCanon(characterName) {
 // ---- Injection ----------------------------------------------------------
 
 /**
- * Injects the canon summary into the prompt via the smart_memory_short slot,
- * replacing the compaction summary when canon is active.
- *
- * Does nothing if no canon exists or shouldUseCanon() returns false.
- * Returns true if canon was injected, false otherwise (so the caller knows
- * whether to fall back to compaction injection).
+ * Injects the canon summary into the prompt via its own dedicated slot
+ * (smart_memory_canon), independent of the compaction summary slot.
+ * Clears the slot if no canon exists or canon is not stored for this character.
  *
  * @param {string} characterName
- * @returns {boolean} True if canon was injected.
  */
 export function injectCanon(characterName) {
   const settings = extension_settings[MODULE_NAME];
-  if (!settings.compaction_enabled) return false;
 
   const canon = loadCanon(characterName);
-  if (!canon || !shouldUseCanon()) return false;
+  if (!canon) {
+    setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+    return;
+  }
 
-  // Trim to the compaction token budget.
-  const budget = settings.compaction_inject_budget ?? 600;
+  // Trim to the canon token budget.
+  const budget = settings.canon_inject_budget ?? 800;
   let text = canon.text;
   while (estimateTokens(text) > budget && text.length > 100) {
-    // Trim from the end, one sentence at a time.
     const lastPeriod = text.lastIndexOf('.', text.length - 2);
     if (lastPeriod < 0) break;
     text = text.slice(0, lastPeriod + 1).trim();
   }
 
-  const template = settings.compaction_template ?? 'Story so far:\n{{summary}}';
-  const content = template.replace('{{summary}}', text);
+  const template = settings.canon_template ?? 'Character history:\n{{canon}}';
+  const content = template.replace('{{canon}}', text);
 
   setExtensionPrompt(
-    PROMPT_KEY_SHORT,
+    PROMPT_KEY_CANON,
     content,
-    settings.compaction_position ?? extension_prompt_types.IN_PROMPT,
-    settings.compaction_depth ?? 0,
+    settings.canon_position ?? extension_prompt_types.IN_PROMPT,
+    settings.canon_depth ?? 0,
     false,
-    settings.compaction_role ?? extension_prompt_roles.SYSTEM,
+    settings.canon_role ?? extension_prompt_roles.SYSTEM,
   );
-
-  return true;
 }

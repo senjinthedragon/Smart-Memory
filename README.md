@@ -7,9 +7,9 @@ Give your AI a memory. Smart Memory is a SillyTavern extension that quietly work
 
 It runs automatically. You don't have to do anything special to use it. Just chat, and it takes care of the rest.
 
-Both 1:1 chats and group chats are supported. In group chats, each character gets their own long-term memory store and receives their own memory context before they generate.
+Both 1:1 chats and group chats are supported. In group chats, each character gets their own independent memory store and receives their own memory context before they generate. A character selector in the settings panel lets you switch between group members to view and manage each character's memories, profiles, and entity registry independently.
 
-*This is an independent extension for SillyTavern and is not affiliated with the SillyTavern development team.*
+_This is an independent extension for SillyTavern and is not affiliated with the SillyTavern development team._
 
 ![Smart Memory settings panel](https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/main/assets/smart-memory.webp)
 
@@ -43,7 +43,7 @@ When your conversation grows long enough to approach your AI's context limit, Sm
 
 After the first summary exists, only new messages are processed and folded in - the summary grows with your story rather than being rewritten from scratch every time. The summary is also aware of what is stored in long-term and session memory, so it focuses on narrative flow rather than restating facts already captured elsewhere.
 
-Once enough story arcs have been resolved, the summary slot is replaced by a **canon document** - a stable per-character narrative generated from arc summaries and high-importance facts. Canon persists across sessions and gives the AI a richer foundation than a rolling summary alone.
+The rolling summary is separate from canon - both can be active at the same time, each injected via its own slot.
 
 ### Long-term Memory - Persistent Facts
 
@@ -69,6 +69,8 @@ After each extraction pass, Smart Memory generates compact state snapshots from 
 
 Profiles are regenerated after each extraction pass and on chat load if stale. On Profile B, an optional message-count schedule can keep them fresh between extraction passes. A manual regenerate button is available in the settings panel.
 
+In group chats, each character has their own independent profile. Switching the character selector updates the profiles panel to show that character's snapshot, and each character's profile is injected into context when they are about to respond.
+
 ### Scene Detection and History
 
 Smart Memory watches for scene transitions - time skips, location changes, those little `---` dividers authors use between scenes. When one is detected, a short summary of the completed scene is saved. The last few scene summaries are kept in context so the AI always knows where the story has been, not just where it is.
@@ -76,6 +78,12 @@ Smart Memory watches for scene transitions - time skips, location changes, those
 ### Story Arcs - Open Threads
 
 Unresolved narrative threads - promises made, character goals, mysteries introduced, tensions left hanging - are tracked and kept in context. When the story resolves one, it gets marked closed and a short narrative summary of that arc is generated for the record. This keeps the AI oriented toward where the story is going, not just reacting to the last message.
+
+### Canon
+
+Once you have at least one resolved arc summary, you can generate a **canon document** - a stable prose narrative synthesized from those arc summaries and high-importance long-term facts. Think of it as a "story bible" for the character: not a list of extracted facts, but a composed history written by the model from everything it has learned.
+
+Canon is injected via its own dedicated slot, independent of the rolling short-term summary. Both can be active at the same time: the summary covers recent events, canon covers the broader history. Canon is stored at the character level (like long-term memories, not per-chat), so it carries forward to new chats with the same character. It is cleared by **Fresh Start** and by the **Clear** button in the Long-term Memory section.
 
 ### Away Recap
 
@@ -99,15 +107,15 @@ A small bar in the settings panel shows how many tokens each memory tier is curr
 
 ## Recommended Setup
 
-Smart Memory is designed to work *alongside* SillyTavern's built-in vector storage, not replace it. Think of them as complementary layers:
+Smart Memory is designed to work _alongside_ SillyTavern's built-in vector storage, not replace it. Think of them as complementary layers:
 
-| Layer | What it does |
-| --- | --- |
-| **Message Limit** extension | Hard cap on raw messages in context - your VRAM budget |
-| **Vector storage** | Retrieves specific details on demand when they are relevant |
-| **Smart Memory - session** | Always-present curated details from the current chat |
+| Layer                         | What it does                                                     |
+| ----------------------------- | ---------------------------------------------------------------- |
+| **Message Limit** extension   | Hard cap on raw messages in context - your VRAM budget           |
+| **Vector storage**            | Retrieves specific details on demand when they are relevant      |
+| **Smart Memory - session**    | Always-present curated details from the current chat             |
 | **Smart Memory - short-term** | Always-present narrative summary of everything before the window |
-| **Smart Memory - long-term** | Always-present character facts from all previous sessions |
+| **Smart Memory - long-term**  | Always-present character facts from all previous sessions        |
 
 If you are on limited VRAM (8GB or less), keep the Message Limit extension enabled and consider lowering **Max session memories** to around 15 to keep prompt size comfortable.
 
@@ -125,14 +133,15 @@ Other 8B-class models tested against Smart Memory's prompts consistently produce
 
 Smart Memory's defaults are designed to layer cleanly alongside vector storage. Depth is distance from the user's last message - depth 0 is right before the AI responds, higher numbers are further back.
 
-| Tier | Position | Depth | Notes |
-| --- | --- | --- | --- |
-| Arcs | In-chat | 2 | Shares depth with ST chat vectors intentionally |
-| Session | In-chat | 3 | Just above ST's default vector depth |
-| Scenes | In-chat | 6 | Further back - past scene context |
-| Long-term | In-prompt | - | Near character card |
-| Short-term / Canon | In-prompt | - | Narrative background |
-| Profiles | In-prompt | - | State snapshots, near character card |
+| Tier      | Position  | Depth | Notes                                           |
+| --------- | --------- | ----- | ----------------------------------------------- |
+| Arcs      | In-chat   | 2     | Shares depth with ST chat vectors intentionally |
+| Session   | In-chat   | 3     | Just above ST's default vector depth            |
+| Scenes    | In-chat   | 6     | Further back - past scene context               |
+| Long-term | In-prompt | -     | Near character card                             |
+| Short-term| In-prompt | -     | Rolling narrative summary                       |
+| Canon     | In-prompt | -     | Stable character history, separate slot         |
+| Profiles  | In-prompt | -     | State snapshots, near character card            |
 
 The away recap is shown as a popup to the user, not injected into the prompt.
 
@@ -148,9 +157,9 @@ All settings are saved automatically per profile.
 
 Smart Memory can automatically adapt its behavior based on your setup.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Hardware profile | Auto | Auto-detects from your memory source. Ollama or WebLLM selects Profile A (minimal model calls, heuristic-based signals). Main API or OpenAI Compatible selects Profile B (richer extraction, all retrieval signals active, auto-canon). Override with "Profile A" or "Profile B" if the auto-detection does not match your setup |
+| Setting          | Default | Description                                                                                                                                                                                                                                                                                                                      |
+| ---------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hardware profile | Auto    | Auto-detects from your memory source. Ollama or WebLLM selects Profile A (minimal model calls, heuristic-based signals). Main API or OpenAI Compatible selects Profile B (richer extraction, all retrieval signals active, auto-canon). Override with "Profile A" or "Profile B" if the auto-detection does not match your setup |
 
 ### Memory LLM
 
@@ -168,12 +177,12 @@ The embedding model is tiny and can run on CPU - it does not compete with your m
 
 When an embedding model is not available, the system falls back to word-overlap comparison automatically.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Use semantic embeddings | On | Compare memories by meaning rather than word overlap |
-| Ollama URL | *(blank, uses localhost:11434)* | Only change if your embedding model is on a different port |
-| Embedding model | `nomic-embed-text` | Ollama model tag for embedding generation |
-| Keep model in memory | Off | Keeps the embedding model loaded in Ollama between calls rather than unloading after each use - faster for repeated deduplication passes |
+| Setting                 | Default                         | Description                                                                                                                              |
+| ----------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Use semantic embeddings | On                              | Compare memories by meaning rather than word overlap                                                                                     |
+| Ollama URL              | _(blank, uses localhost:11434)_ | Only change if your embedding model is on a different port                                                                               |
+| Embedding model         | `nomic-embed-text`              | Ollama model tag for embedding generation                                                                                                |
+| Keep model in memory    | Off                             | Keeps the embedding model loaded in Ollama between calls rather than unloading after each use - faster for repeated deduplication passes |
 
 **Requirements:** The embedding model must be installed in Ollama before enabling this. If you already use SillyTavern's built-in Vector Storage extension with Ollama, you likely have `nomic-embed-text` installed already. If not:
 
@@ -183,88 +192,96 @@ ollama pull nomic-embed-text
 
 ### Short-term Memory
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Enable auto-summarization | On | Summarize automatically at threshold |
-| Context threshold | 80% | Summarize when context reaches this % of the model's limit |
-| Summary response length | 2000 tokens | Length budget for the summary - also acts as the injection cap |
-| Hide summarized messages | Off | After each compaction, automatically hide all messages that have been folded into the summary. They remain in the chat file but are visually collapsed and excluded from the context window - the injected summary already covers their content. Toggling this on an existing chat applies or restores hiding immediately |
-| Injection template | `Story so far:\n{{summary}}` | Wrapper text around the summary |
-| Injection position | In-prompt | Where in the prompt the summary appears |
+| Setting                   | Default                      | Description                                                                                                                                                                                                                                                                                                               |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable auto-summarization | On                           | Summarize automatically at threshold                                                                                                                                                                                                                                                                                      |
+| Context threshold         | 80%                          | Summarize when context reaches this % of the model's limit                                                                                                                                                                                                                                                                |
+| Summary response length   | 2000 tokens                  | Length budget for the summary - also acts as the injection cap                                                                                                                                                                                                                                                            |
+| Hide summarized messages  | Off                          | After each compaction, automatically hide all messages that have been folded into the summary. They remain in the chat file but are visually collapsed and excluded from the context window - the injected summary already covers their content. Toggling this on an existing chat applies or restores hiding immediately |
+| Injection template        | `Story so far:\n{{summary}}` | Wrapper text around the summary                                                                                                                                                                                                                                                                                           |
+| Injection position        | In-prompt                    | Where in the prompt the summary appears                                                                                                                                                                                                                                                                                   |
 
-Once at least 2 arc summaries exist, a **Generate Canon** button appears in this section. Clicking it generates a stable narrative document from resolved arcs and high-importance facts, which then replaces the rolling summary in the injection slot and persists across sessions. On Profile B this regenerates automatically after each arc extraction pass.
+### Canon
+
+| Setting            | Default                          | Description                                                                                          |
+| ------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Injection budget   | 800 tokens                       | Canon text is trimmed from the end if it exceeds this limit                                          |
+| Injection template | `Character history:\n{{canon}}`  | Wrapper text around the canon document                                                               |
+| Injection position | In-prompt                        | Where in the prompt canon appears                                                                    |
+
+The **Generate Canon** button synthesizes a prose narrative from resolved arc summaries and high-importance long-term facts, stores it at the character level, and immediately injects it into the canon slot. At least one resolved arc summary is required. On Profile B this regenerates automatically after each arc extraction pass. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button.
 
 ### Long-term Memory
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Enable long-term memory | On | Extract and inject persistent character facts |
-| Auto-consolidate | On | Periodically merge near-duplicate entries |
-| Exclude this chat from long-term memory | Off | Suppresses long-term extraction and injection for this specific chat only - stored memories for other chats are not affected |
-| Extract every N messages | 3 | How often automatic extraction runs |
-| Max memories per character | 25 | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
-| Injection token budget | 500 | Least important memories are trimmed first when the budget is exceeded - based on importance, expiration, recency, and how often a memory has been recalled |
-| Injection template | `Memories from previous conversations:\n{{memories}}` | Wrapper text |
-| Injection position | In-prompt | Where in the prompt memories appear |
+| Setting                                 | Default                                               | Description                                                                                                                                                                                             |
+| --------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable long-term memory                 | On                                                    | Extract and inject persistent character facts                                                                                                                                                           |
+| Auto-consolidate                        | On                                                    | Periodically merge near-duplicate entries                                                                                                                                                               |
+| Exclude this chat from long-term memory | Off                                                   | Suppresses long-term extraction and injection for this specific chat only - stored memories for other chats are not affected                                                                            |
+| Extract every N messages                | 3                                                     | How often automatic extraction runs                                                                                                                                                                     |
+| Max memories per character              | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
+| Injection token budget                  | 500                                                   | Least important memories are trimmed first when the budget is exceeded - based on importance, expiration, recency, and how often a memory has been recalled                                             |
+| Injection template                      | `Memories from previous conversations:\n{{memories}}` | Wrapper text                                                                                                                                                                                            |
+| Injection position                      | In-prompt                                             | Where in the prompt memories appear                                                                                                                                                                     |
 
 The long-term list shows a **retired** badge on superseded entries. A "Show retired memories" toggle reveals them. Each retired entry has a "superseded by" link to the replacement. Memories with unresolved contradictions show a yellow warning indicator.
 
 ### Session Memory
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Enable session memory | On | Extract and inject within-session details |
-| Extract every N messages | 3 | How often automatic extraction runs |
-| Max session memories | 30 | Consider lowering to ~15 on limited VRAM |
-| Injection token budget | 400 | Least important memories trimmed first when exceeded - based on importance, expiration, and recency |
-| Injection template | `Details from this session:\n{{session}}` | Wrapper text |
-| Injection position | In-chat @ depth 3 | Sits just above ST's default vector depth |
+| Setting                  | Default                                   | Description                                                                                         |
+| ------------------------ | ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Enable session memory    | On                                        | Extract and inject within-session details                                                           |
+| Extract every N messages | 3                                         | How often automatic extraction runs                                                                 |
+| Max session memories     | 30                                        | Consider lowering to ~15 on limited VRAM                                                            |
+| Injection token budget   | 400                                       | Least important memories trimmed first when exceeded - based on importance, expiration, and recency |
+| Injection template       | `Details from this session:\n{{session}}` | Wrapper text                                                                                        |
+| Injection position       | In-chat @ depth 3                         | Sits just above ST's default vector depth                                                           |
 
 ### Character and World Profiles
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Enable profiles | On | Generate and inject state snapshots after each extraction pass |
-| Stale threshold | 30 minutes | Regenerate on chat load if profiles are older than this |
-| Also regenerate every | Off (0) | Profile B only. Regenerate every N messages even if extraction did not run. 0 = extraction-pass only |
-| Response length | 600 tokens | Budget for the profile generation model call |
-| Injection token budget | 400 | Trim profiles content if it exceeds this many tokens |
-| Injection position | In-prompt | Where in the prompt profiles appear |
+| Setting                | Default    | Description                                                                                          |
+| ---------------------- | ---------- | ---------------------------------------------------------------------------------------------------- |
+| Enable profiles        | On         | Generate and inject state snapshots after each extraction pass                                       |
+| Stale threshold        | 30 minutes | Regenerate on chat load if profiles are older than this                                              |
+| Also regenerate every  | Off (0)    | Profile B only. Regenerate every N messages even if extraction did not run. 0 = extraction-pass only |
+| Response length        | 600 tokens | Budget for the profile generation model call                                                         |
+| Injection token budget | 400        | Trim profiles content if it exceeds this many tokens                                                 |
+| Injection position     | In-prompt  | Where in the prompt profiles appear                                                                  |
 
 A live token count shows how many tokens the current profiles are using. A **Regenerate Profiles Now** button forces immediate regeneration. The current profiles are shown read-only below the controls.
 
 ### Scene Detection
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Enable scene detection | On | Detect breaks and store scene history |
-| AI detection | Off | More accurate but costs an extra model call per message |
-| Keep last N scenes | 5 | How many scene summaries to retain |
-| Injection token budget | 300 | Oldest scenes dropped first when exceeded |
-| Injection position | In-chat @ depth 6 | Further back in context |
+| Setting                | Default           | Description                                             |
+| ---------------------- | ----------------- | ------------------------------------------------------- |
+| Enable scene detection | On                | Detect breaks and store scene history                   |
+| AI detection           | Off               | More accurate but costs an extra model call per message |
+| Keep last N scenes     | 5                 | How many scene summaries to retain                      |
+| Injection token budget | 300               | Oldest scenes dropped first when exceeded               |
+| Injection position     | In-chat @ depth 6 | Further back in context                                 |
 
 ### Story Arcs
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Enable arc tracking | On | Extract and inject open narrative threads |
-| Max tracked arcs | 10 | Oldest arcs dropped when limit is exceeded |
-| Injection token budget | 400 | Oldest arcs trimmed first when exceeded |
-| Injection position | In-chat @ depth 2 | Near current action, alongside chat vectors |
+| Setting                | Default           | Description                                 |
+| ---------------------- | ----------------- | ------------------------------------------- |
+| Enable arc tracking    | On                | Extract and inject open narrative threads   |
+| Max tracked arcs       | 10                | Oldest arcs dropped when limit is exceeded  |
+| Injection token budget | 700               | Oldest arcs trimmed first when exceeded     |
+| Injection position     | In-chat @ depth 2 | Near current action, alongside chat vectors |
 
 ### Away Recap Settings
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Enable recap | On | Show a recap popup when returning after a gap |
-| Threshold | 4 hours | Minimum time away before a recap is generated |
+| Setting      | Default | Description                                   |
+| ------------ | ------- | --------------------------------------------- |
+| Enable recap | On      | Show a recap popup when returning after a gap |
+| Threshold    | 4 hours | Minimum time away before a recap is generated |
 
 ### Continuity Checker
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Auto-check after each response | On | Profile B only. Automatically run the continuity check after every AI response. Disable to reduce model calls while staying on Profile B |
-| Auto-repair contradictions | Off | Profile B only. When contradictions are found, generate a brief corrective note and inject it into the next response. Cleared automatically after that response. Costs one extra model call per check |
+| Setting                        | Default | Description                                                                                                                                                                                           |
+| ------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auto-check after each response | On      | Profile B only. Automatically run the continuity check after every AI response. Disable to reduce model calls while staying on Profile B                                                              |
+| Auto-repair contradictions     | Off     | Profile B only. When contradictions are found, generate a brief corrective note and inject it into the next response. Cleared automatically after that response. Costs one extra model call per check |
 
 ---
 
@@ -291,9 +308,11 @@ All manual operations are in the **Configuration** section at the top of the pan
 
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
 
+In group chats, Memorize Chat processes all active group members - not just the one currently selected in the character selector. Each member gets their own extraction pass with a filtered message window (their own messages plus user messages), their own consolidation pass, and their own profiles generated at the end.
+
 A **Cancel** button appears during processing. Cancelling stops the loop cleanly between chunks - partial results are saved.
 
-If memories already exist for the character, a confirmation prompt will appear before processing begins - running Memorize Chat repeatedly on the same chat can introduce near-duplicate entries on top of existing ones. Use **Forget This Chat** first if you want a clean re-run.
+If memories already exist for one or more characters, a confirmation prompt will appear before processing begins - running Memorize Chat repeatedly on the same chat can introduce near-duplicate entries on top of existing ones. Use **Forget This Chat** first if you want a clean re-run.
 
 Only accepted messages are processed - swiped alternatives are ignored.
 
@@ -305,7 +324,7 @@ Clears all Smart Memory context for the current chat - summary, session memories
 
 ### Fresh Start
 
-Clears everything for a clean slate - long-term memories and entity registry for the current character plus all chat-scoped tiers (summary, session memories, scene history, arcs, profiles). Does not suppress future memory generation; the AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
+Clears everything for a clean slate - long-term memories, canon, and entity registry for the current character plus all chat-scoped tiers (summary, session memories, scene history, arcs, profiles). Does not suppress future memory generation; the AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
 
 To prevent a specific chat from contributing to long-term memory at all, use the **Exclude this chat from long-term memory** checkbox in the Long-term Memory section instead.
 
@@ -313,19 +332,19 @@ To prevent a specific chat from contributing to long-term memory at all, use the
 
 Each memory tier has its own **Extract Now** or **Extract** button that processes a recent window of messages - not the full chat. Useful for pulling in the latest exchanges outside the automatic schedule.
 
-| Button | Window |
-| --- | --- |
-| Long-term Extract Now | Last 20 messages |
-| Session Extract Now | Last 40 messages |
-| Extract Arcs Now | Last 100 messages |
-| Extract Scene | Scene buffer or last 40 messages |
+| Button                | Window                           |
+| --------------------- | -------------------------------- |
+| Long-term Extract Now | Last 20 messages                 |
+| Session Extract Now   | Last 40 messages                 |
+| Extract Arcs Now      | Last 100 messages                |
+| Extract Scene         | Scene buffer or last 40 messages |
 
 For the full chat backlog, use **Memorize Chat** instead.
 
 ### Other Per-tier Buttons
 
 - **Summarize Now** - forces a short-term summary right now, ignoring the threshold
-- **Generate Canon** - generates a canon document from resolved arc summaries (appears once at least 2 arc summaries exist; on Profile B this runs automatically)
+- **Generate Canon** - synthesizes a prose narrative from resolved arc summaries and high-importance facts and injects it into the canon slot. Requires at least one resolved arc summary. On Profile B this runs automatically after each arc extraction pass. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button. The canon textarea in the Canon section is also editable directly
 - **Generate Recap Now** - generates and shows a recap popup on demand
 - **Check Last Response** - runs the continuity check against the last AI response
 - **Regenerate Profiles Now** - regenerates character and world profiles immediately
@@ -349,12 +368,12 @@ Manual edits take effect immediately and are injected into the prompt on the nex
 
 ## Slash Commands
 
-| Command | Description |
-| --- | --- |
-| `/sm-check` | Check the last AI response for contradictions against established facts |
-| `/sm-summarize` | Force a short-term summary generation now |
-| `/sm-extract` | Run long-term, session, and arc extraction against the current chat now |
-| `/sm-recap` | Generate and show a "Previously on..." recap popup now |
+| Command              | Description                                                                                                                                                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/sm-check`          | Check the last AI response for contradictions against established facts                                                                                                                                                                                                                             |
+| `/sm-summarize`      | Force a short-term summary generation now                                                                                                                                                                                                                                                           |
+| `/sm-extract`        | Run long-term, session, and arc extraction against the current chat now                                                                                                                                                                                                                             |
+| `/sm-recap`          | Generate and show a "Previously on..." recap popup now                                                                                                                                                                                                                                              |
 | `/sm-search <query>` | Search all memories by semantic similarity and show a results popup. Optional `k=N` sets the result count (default 10, max 50); `min=N` sets a minimum similarity threshold to filter weak matches (default 0.5, range 0-1). Falls back to keyword overlap when the embedding model is unavailable. |
 
 ---
@@ -397,9 +416,9 @@ When two stored memories cannot both be true and neither clearly replaces the ot
 
 ### Developer
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Verbose logging | Off | Print extraction, consolidation, migration, and scene detection progress to the browser console. Errors are always logged regardless of this setting. |
+| Setting         | Default | Description                                                                                                                                           |
+| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Verbose logging | Off     | Print extraction, consolidation, migration, and scene detection progress to the browser console. Errors are always logged regardless of this setting. |
 
 ---
 

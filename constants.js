@@ -43,6 +43,8 @@ export const PROMPT_KEY_ARCS = 'smart_memory_arcs';
 export const PROMPT_KEY_REPAIR = 'smart_memory_repair';
 // Stateful character/world profiles regenerated from graph state.
 export const PROMPT_KEY_PROFILES = 'smart_memory_profiles';
+// Stable per-character narrative document compiled from resolved arc summaries.
+export const PROMPT_KEY_CANON = 'smart_memory_canon';
 
 /** Valid type tags for long-term memory entries. */
 export const MEMORY_TYPES = ['fact', 'relationship', 'preference', 'event'];
