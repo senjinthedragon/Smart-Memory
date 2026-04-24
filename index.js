@@ -376,7 +376,12 @@ let selectedGroupCharacter = null;
  * @returns {string|null}
  */
 function getSelectedCharacterName() {
-  if (getContext().groupId && selectedGroupCharacter) return selectedGroupCharacter;
+  if (getContext().groupId) {
+    // selectedGroupCharacter is briefly null during chat transitions (reset at
+    // the start of onChatChangedImpl, set again after updateGroupCharSelector).
+    // Fall back to the DOM selector value so buttons still work during that window.
+    return selectedGroupCharacter || $('#sm_group_char_select').val() || null;
+  }
   return getCurrentCharacterName();
 }
 
