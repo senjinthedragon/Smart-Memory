@@ -68,7 +68,9 @@ function gatherEstablishedFacts(characterName) {
   // The character card is the canonical source of truth - check it first.
   // Characters may contradict their card (wrong gender, species, etc.) in ways
   // that no extracted memory would catch, especially in a fresh chat.
-  const char = context.characters?.[context.characterId];
+  // Look up by name so group chat checks use the responder's card, not the
+  // ST-active character (context.characterId) which may be a different member.
+  const char = context.characters?.find((c) => c.name === characterName);
   if (char) {
     const cardParts = [];
     if (char.description) cardParts.push(char.description);
