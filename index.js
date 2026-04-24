@@ -1833,10 +1833,12 @@ function updateSessionUI() {
       : '';
 
     const importanceDots = '●'.repeat(mem.importance ?? 1);
+    const expiration = mem.expiration ?? 'session';
     const $item = $(`
             <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${mem.id || ''}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_importance sm_importance_${mem.importance ?? 1}" title="Importance ${mem.importance ?? 1}/3">${importanceDots}</span>
+                <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
                 ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
                 <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
@@ -2398,10 +2400,12 @@ function renderMemoriesList(memories, characterName) {
       : '';
 
     const importanceDots = '●'.repeat(mem.importance ?? 1);
+    const expiration = mem.expiration ?? 'permanent';
     const $item = $(`
             <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${mem.id || ''}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_importance sm_importance_${mem.importance ?? 1}" title="Importance ${mem.importance ?? 1}/3">${importanceDots}</span>
+                <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
                 ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
                 <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>

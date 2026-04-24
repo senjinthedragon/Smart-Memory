@@ -309,6 +309,31 @@
   color: #f0c060;
 }
 
+#smart_memory_settings .sm_memory_expiration {
+  flex-shrink: 0;
+  font-size: 0.7em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+#smart_memory_settings .sm_expiration_scene {
+  color: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#smart_memory_settings .sm_expiration_session {
+  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+#smart_memory_settings .sm_expiration_permanent {
+  color: #a0d4a0;
+  border: 1px solid rgba(160, 212, 160, 0.3);
+}
+
 #smart_memory_settings .sm_type_fact {
   background: #4a6fa5;
 }
