@@ -146,10 +146,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Layer 3: a new `canon.js` module generates a stable per-character narrative
     document (who they are, what has happened, current state) from resolved arc
     summaries and high-importance long-term memories. Canon is stored in
-    `extension_settings` and persists across sessions. Once at least 2 arc
-    summaries exist, canon replaces the compaction summary in the short-term
-    injection slot. A "Generate Canon" button appears in the short-term panel.
-    Manual trigger only on local hardware.
+    `extension_settings` and persists across sessions. It injects via its own
+    dedicated slot (`smart_memory_canon`) so it coexists with the short-term
+    summary rather than replacing it. A dedicated Canon section in the settings
+    panel provides an editable textarea, injection budget, template, and position
+    controls. Requires at least one resolved arc summary. Manual trigger only on
+    local hardware.
 
 - **Model-classified entity types**: the extraction prompt now asks the model to
   classify each extracted entity as `character`, `place`, `object`, `faction`, or
@@ -168,8 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (0.85 / 0.91 semantic, 0.68 / 0.78 Jaccard) so nuanced memories from powerful
   models are less likely to be incorrectly rejected, and a lower same-topic threshold
   (0.52 / 0.38) to catch more supersession candidates. Profile B also auto-regenerates
-  the canon summary after each arc extraction pass when at least two arc summaries
-  exist - no manual button needed.
+  the canon summary after each arc extraction pass when at least one arc summary
+  exists - no manual button needed.
 - **Profile settings controls**: the Character and World Profiles section in the
   settings panel now includes a live token count showing how many tokens the current
   profiles are injecting, a budget slider, and injection position/depth/role controls.
