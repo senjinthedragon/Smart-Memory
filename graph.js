@@ -385,7 +385,7 @@ function render() {
     }
   }
 
-  // ---- Nodes ----
+  // ---- Node circles (first pass) ----
   for (const node of nodes) {
     const dimmed = selected && !highlightIds.has(node.id);
     const isSelected = selected && node.id === selected.id;
@@ -417,20 +417,23 @@ function render() {
       ctx.setLineDash([]);
     }
 
-    // Entity label: drawn below the node so full names are always visible.
-    if (node.nodeType === 'entity') {
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      const labelY = node.y + node.radius + 4;
-      // Shadow for legibility over edges and dark backgrounds.
-      ctx.shadowColor = 'rgba(0,0,0,0.85)';
-      ctx.shadowBlur = 3;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(node.label, node.x, labelY);
-      ctx.shadowBlur = 0;
-    }
+    ctx.restore();
+  }
 
+  // ---- Entity labels (second pass, always on top of all circles) ----
+  for (const node of nodes) {
+    if (node.nodeType !== 'entity') continue;
+    const dimmed = selected && !highlightIds.has(node.id);
+    ctx.save();
+    ctx.globalAlpha = dimmed ? 0.15 : 1.0;
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowBlur = 3;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(node.label, node.x, node.y + node.radius + 4);
+    ctx.shadowBlur = 0;
     ctx.restore();
   }
 
