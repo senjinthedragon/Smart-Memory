@@ -2827,6 +2827,7 @@ function bindSettingsUI() {
       const text = await generateCanon(characterName);
       if (text) {
         injectCanon(characterName);
+        updateShortTermUI(text);
         $('#sm_canon_status').text(
           `Canon updated: ${estimateTokens(text)} tokens, sourced from ${loadArcSummaries().length} arc summaries.`,
         );
