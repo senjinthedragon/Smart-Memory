@@ -292,17 +292,21 @@ function tick() {
   const n = nodes.length;
 
   // Repulsion between all pairs (O(n²) - fine for n <= ~150).
+  // Effective distance is floored at the sum of both radii + padding so the
+  // repulsion force always separates circles regardless of their sizes.
+  const NODE_GAP = 14; // minimum gap between node edges in world units
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       const a = nodes[i];
       const b = nodes[j];
       const dx = a.x - b.x;
       const dy = a.y - b.y;
-      const dist2 = dx * dx + dy * dy;
-      if (dist2 < 1) continue;
-      const force = (REPULSION_K * alpha) / dist2;
-      const fx = (dx / Math.sqrt(dist2)) * force;
-      const fy = (dy / Math.sqrt(dist2)) * force;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const minDist = a.radius + b.radius + NODE_GAP;
+      const effectiveDist = Math.max(dist, minDist * 0.5); // soft floor
+      const force = (REPULSION_K * alpha) / (effectiveDist * effectiveDist);
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
       a.vx += fx;
       a.vy += fy;
       b.vx -= fx;
@@ -338,6 +342,32 @@ function tick() {
     node.vy *= DAMPING;
     node.x += node.vx;
     node.y += node.vy;
+  }
+
+  // Hard collision resolution: push overlapping nodes apart so circles never
+  // intersect regardless of how strongly the springs pull them together.
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const a = nodes[i];
+      const b = nodes[j];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const minDist = a.radius + b.radius + NODE_GAP;
+      if (dist < minDist) {
+        const push = (minDist - dist) / 2;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        if (!a.fixed) {
+          a.x += ux * push;
+          a.y += uy * push;
+        }
+        if (!b.fixed) {
+          b.x -= ux * push;
+          b.y -= uy * push;
+        }
+      }
+    }
   }
 
   gs.alpha *= ALPHA_DECAY;
