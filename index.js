@@ -112,6 +112,9 @@ import {
   deleteArc,
   clearArcSummaries,
   loadArcSummaries,
+  mergePersistentArcs,
+  promoteArc,
+  demoteArc,
 } from './arcs.js';
 import {
   checkContinuity,
@@ -727,7 +730,7 @@ async function onCharacterMessageRendered() {
           // the model's context on long chats. Existing arcs are passed to the
           // prompt so resolution still works even outside this window.
           const arcWindow = getStableExtractionWindow(context.chat, 100);
-          const count = await extractArcs(arcWindow).catch((err) => {
+          const count = await extractArcs(arcWindow, characterName).catch((err) => {
             console.error('[SmartMemory] Arc extraction error:', err);
             return 0;
           });
@@ -974,6 +977,8 @@ async function onChatChangedImpl() {
 
   await injectSessionMemories();
   injectSceneHistory();
+  // Merge character-level persistent arcs into this chat before injecting.
+  await mergePersistentArcs(characterName);
   injectArcs();
   injectProfiles(characterName);
   loadAndInjectRepair();
@@ -1977,14 +1982,22 @@ function updateArcsUI() {
   const $list = $('#sm_arcs_list');
   $list.empty();
 
+  // Only solo chats support persistent arcs - group chats have no single character.
+  const charName = getContext().groupId ? null : getCurrentCharacterName();
+
   if (arcs.length === 0) {
     $list.append('<div class="sm_no_char">No open story threads.</div>');
   }
 
   arcs.forEach((arc, idx) => {
+    const isPersistent = !!arc.persistent;
+    const pinTitle = isPersistent
+      ? 'Unpin - keep only in this chat'
+      : 'Pin - carry this thread into future chats';
     const $item = $(`
-            <div class="sm_arc_item" data-index="${idx}">
+            <div class="sm_arc_item${isPersistent ? ' sm_arc_persistent' : ''}" data-index="${idx}">
                 <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
+                ${charName ? `<button class="sm_pin_arc menu_button${isPersistent ? ' sm_pin_active' : ''}" data-index="${idx}" title="${pinTitle}"><i class="fa-solid fa-thumbtack"></i></button>` : ''}
                 <button class="sm_edit_arc menu_button" data-index="${idx}" title="Edit this arc">
                     <i class="fa-solid fa-pencil"></i>
                 </button>
@@ -1994,6 +2007,19 @@ function updateArcsUI() {
             </div>
         `);
     $list.append($item);
+  });
+
+  $list.find('.sm_pin_arc').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const arc = loadArcs()[idx];
+    if (!arc) return;
+    if (arc.persistent) {
+      await demoteArc(idx, charName);
+    } else {
+      await promoteArc(idx, charName);
+    }
+    injectArcs();
+    updateArcsUI();
   });
 
   $list.find('.sm_edit_arc').on('click', async function () {
@@ -2008,6 +2034,7 @@ function updateArcsUI() {
     $textarea.trigger('focus');
 
     $(this).hide();
+    $item.find('.sm_pin_arc').hide();
     $item.find('.sm_delete_arc').hide();
     const $save = $('<button class="sm_save_arc menu_button" title="Save">Save</button>');
     const $cancel = $('<button class="sm_cancel_arc menu_button" title="Cancel">Cancel</button>');
@@ -2029,7 +2056,7 @@ function updateArcsUI() {
 
   $list.find('.sm_delete_arc').on('click', async function () {
     const idx = parseInt($(this).data('index'), 10);
-    await deleteArc(idx);
+    await deleteArc(idx, charName);
     injectArcs();
     updateArcsUI();
   });

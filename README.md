@@ -79,6 +79,8 @@ Smart Memory watches for scene transitions - time skips, location changes, those
 
 Unresolved narrative threads - promises made, character goals, mysteries introduced, tensions left hanging - are tracked and kept in context. When the story resolves one, it gets marked closed and a short narrative summary of that arc is generated for the record. This keeps the AI oriented toward where the story is going, not just reacting to the last message.
 
+Story arcs are normally chat-local - they start fresh with each new chat. If you are running a story across multiple chats with the same character (new chats as chapters rather than fresh starts), you can **pin an arc** using the thumbtack button next to it. Pinned arcs are stored at the character level and automatically appear in every new chat with that character. Unpinning returns the arc to chat-local scope; resolving a pinned arc removes it from future chats automatically.
+
 ### Canon
 
 Once you have at least one resolved arc summary, you can generate a **canon document** - a stable prose narrative synthesized from those arc summaries and high-importance long-term facts. Think of it as a "story bible" for the character: not a list of extracted facts, but a composed history written by the model from everything it has learned.
@@ -352,10 +354,11 @@ For the full chat backlog, use **Memorize Chat** instead.
 
 ### Editing and Adding Memories Manually
 
-Every entry in the long-term memory, session memory, and story arc lists has two action buttons:
+Every entry in the long-term memory, session memory, and story arc lists has action buttons:
 
 - **Pencil (edit)** - replaces the entry text with an inline textarea. Edit the content and click **Save**, or click **Cancel** to discard changes. Not shown on retired memories.
 - **Trash / Checkmark (delete/resolve)** - removes the entry immediately. For story arcs the button is a checkmark to indicate resolving the thread rather than discarding it.
+- **Pin (story arcs only)** - marks the arc as persistent so it carries into future chats with the same character. The pin icon turns gold and the arc gets a gold left border when pinned. Click again to unpin.
 
 Below each list an **Add** form lets you insert a new entry manually:
 

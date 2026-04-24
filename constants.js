@@ -66,7 +66,7 @@ export const META_KEY = 'smartMemory';
  * - Version 0 is the implicit state for any container that has no stored version
  *   (i.e. all data written by v1.3.0 or earlier, before this system existed).
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Rough token estimate for a string. Uses the standard ~4 chars-per-token

@@ -25,20 +25,25 @@
  * stays oriented toward where the story is going, not just the last message.
  * Arcs can be marked resolved by the model or manually deleted by the user.
  *
- * loadArcs          - returns the stored arc array for the current chat
- * saveArcs          - persists the arc array to chatMetadata
- * deleteArc         - removes a single arc by index
- * clearArcs         - empties all arcs for the current chat
- * extractArcs       - runs extraction against the conversation, deduplicates, and updates the arc list
- * injectArcs        - pushes active arcs into the prompt via setExtensionPrompt
- * loadArcSummaries  - returns the stored arc summary array for the current chat
- * clearArcSummaries - empties all arc summaries for the current chat
+ * loadArcs               - returns the stored arc array for the current chat
+ * saveArcs               - persists the arc array to chatMetadata
+ * deleteArc              - removes a single arc by index
+ * clearArcs              - empties all arcs for the current chat
+ * extractArcs            - runs extraction against the conversation, deduplicates, and updates the arc list
+ * injectArcs             - pushes active arcs into the prompt via setExtensionPrompt
+ * loadArcSummaries       - returns the stored arc summary array for the current chat
+ * clearArcSummaries      - empties all arc summaries for the current chat
+ * loadPersistentArcs     - returns the character-level persistent arc array
+ * mergePersistentArcs    - merges character-level persistent arcs into chatMetadata on chat open
+ * promoteArc             - marks a chat arc as persistent and saves it to character level
+ * demoteArc              - removes the persistent flag from an arc and cleans character level
  */
 
 import {
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
+  saveSettingsDebounced,
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
@@ -106,11 +111,24 @@ export async function saveArcs(arcs) {
 
 /**
  * Removes a single arc by its index in the arc array.
- * Called when the user manually resolves an arc via the UI.
+ * If the arc is persistent and characterName is provided, also removes it
+ * from character-level storage so it no longer appears in future chats.
  * @param {number} index
+ * @param {string|null} [characterName]
  */
-export async function deleteArc(index) {
+export async function deleteArc(index, characterName = null) {
   const arcs = loadArcs();
+  const arc = arcs[index];
+  if (!arc) return;
+
+  if (arc.persistent && characterName) {
+    const persistent = loadPersistentArcs(characterName);
+    const filtered = persistent.filter((p) => arcJaccard(p.content, arc.content) < 0.4);
+    if (filtered.length !== persistent.length) {
+      savePersistentArcs(characterName, filtered);
+    }
+  }
+
   arcs.splice(index, 1);
   await saveArcs(arcs);
 }
@@ -162,6 +180,104 @@ export async function clearArcSummaries() {
   }
 }
 
+// ---- Persistent arcs (cross-chat) ----------------------------------------
+
+/**
+ * Returns the persistent arc array for the given character.
+ * Persistent arcs are stored at the character level so they survive
+ * across chats and are merged into new chats on load.
+ * @param {string} characterName
+ * @returns {Array<{content: string, ts: number, persistent: true}>}
+ */
+export function loadPersistentArcs(characterName) {
+  if (!characterName) return [];
+  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.persistent_arcs ?? [];
+}
+
+/**
+ * Overwrites the persistent arc array for the given character and persists it.
+ * @param {string} characterName
+ * @param {Array<{content: string, ts: number, persistent: true}>} arcs
+ */
+function savePersistentArcs(characterName, arcs) {
+  if (!characterName) return;
+  if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
+  if (!extension_settings[MODULE_NAME].characters[characterName])
+    extension_settings[MODULE_NAME].characters[characterName] = {};
+  extension_settings[MODULE_NAME].characters[characterName].persistent_arcs = arcs;
+  saveSettingsDebounced();
+}
+
+/**
+ * Merges character-level persistent arcs into the current chat's arc list.
+ * Called once on chat load so that injection and extraction see persistent
+ * arcs as part of the normal arc list without any special-casing elsewhere.
+ * Arcs already present in the chat (persistent or otherwise) are skipped.
+ * @param {string} characterName
+ */
+export async function mergePersistentArcs(characterName) {
+  if (!characterName) return;
+  const persistent = loadPersistentArcs(characterName);
+  if (persistent.length === 0) return;
+
+  const existing = loadArcs();
+  const toAdd = persistent.filter(
+    (p) => !existing.some((e) => arcJaccard(p.content, e.content) >= 0.4),
+  );
+  if (toAdd.length === 0) return;
+
+  const merged = [...existing, ...toAdd.map((a) => ({ ...a, persistent: true }))];
+  await saveArcs(merged);
+}
+
+/**
+ * Marks an arc as persistent: saves it to the character level so it carries
+ * into future chats, and updates the persistent flag in the current chat.
+ * @param {number} index - Index in the current chat arc array.
+ * @param {string} characterName
+ */
+export async function promoteArc(index, characterName) {
+  if (!characterName) return;
+  const arcs = loadArcs();
+  if (!arcs[index]) return;
+  arcs[index].persistent = true;
+  await saveArcs(arcs);
+
+  const persistent = loadPersistentArcs(characterName);
+  const already = persistent.some((p) => arcJaccard(p.content, arcs[index].content) >= 0.4);
+  if (!already) {
+    persistent.push({
+      content: arcs[index].content,
+      ts: arcs[index].ts ?? Date.now(),
+      persistent: true,
+    });
+    savePersistentArcs(characterName, persistent);
+  }
+}
+
+/**
+ * Removes the persistent flag from an arc and cleans it from character-level
+ * storage. The arc stays in the current chat as a normal non-persistent arc.
+ * @param {number} index - Index in the current chat arc array.
+ * @param {string} characterName
+ */
+export async function demoteArc(index, characterName) {
+  if (!characterName) return;
+  const arcs = loadArcs();
+  if (!arcs[index]) return;
+  const content = arcs[index].content;
+  delete arcs[index].persistent;
+  await saveArcs(arcs);
+
+  const persistent = loadPersistentArcs(characterName);
+  const filtered = persistent.filter((p) => arcJaccard(p.content, content) < 0.4);
+  if (filtered.length !== persistent.length) {
+    savePersistentArcs(characterName, filtered);
+  }
+}
+
+// ---- Extraction ---------------------------------------------------------
+
 /**
  * Generates a paragraph summary for a resolved arc. Collects scene summaries
  * and memory ids that were linked to scenes during the arc for context, and
@@ -210,9 +326,10 @@ async function generateArcSummary(arcContent) {
  * arcs the model flags as closed, and persists the updated arc list.
  * Returns the count of new arcs added.
  * @param {Array} messages - Full context.chat array.
+ * @param {string|null} [characterName] - Active character, used to clean persistent arcs when resolved.
  * @returns {Promise<number>} Count of new arcs added (0 on failure or nothing found).
  */
-export async function extractArcs(messages) {
+export async function extractArcs(messages, characterName = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.arcs_enabled) return 0;
 
@@ -266,6 +383,21 @@ export async function extractArcs(messages) {
         }
       }
       await saveArcSummaries(arcSummaries);
+    }
+
+    // For persistent arcs that were resolved, also clean them from character-level
+    // storage so they don't resurface in the next chat.
+    if (characterName && resolve.length > 0) {
+      const persistentToRemove = resolve.map((i) => existing[i]).filter((a) => a?.persistent);
+      if (persistentToRemove.length > 0) {
+        let charPersistent = loadPersistentArcs(characterName);
+        for (const resolved of persistentToRemove) {
+          charPersistent = charPersistent.filter(
+            (p) => arcJaccard(p.content, resolved.content) < 0.4,
+          );
+        }
+        savePersistentArcs(characterName, charPersistent);
+      }
     }
 
     // Filter out resolved arcs.

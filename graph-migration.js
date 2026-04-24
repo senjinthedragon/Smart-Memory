@@ -689,6 +689,20 @@ function migrateChat_v3(chatMeta) {
   return chatMeta;
 }
 
+/**
+ * CHARACTER migration: version 3 -> 4
+ *
+ * Adds persistent_arcs array to character data. Persistent arcs are story
+ * threads the user has pinned to carry forward into future chats with this
+ * character.
+ *
+ * @param {Object} charData - Character data object.
+ * @returns {Object} Updated character data with schema_version NOT yet set.
+ */
+function migrateCharacter_v4(charData) {
+  return { ...charData, persistent_arcs: charData.persistent_arcs ?? [] };
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn | { fn, deletePaths }> - add new entries here when
 // SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
@@ -697,6 +711,7 @@ function migrateChat_v3(chatMeta) {
 const CHARACTER_MIGRATIONS = new Map([
   [1, migrateCharacter_v1],
   [2, migrateCharacter_v2],
+  [4, migrateCharacter_v4],
 ]);
 
 const CHAT_MIGRATIONS = new Map([

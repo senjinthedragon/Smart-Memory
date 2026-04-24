@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Persistent story arcs**: a pin button on each arc in the Story Threads
+  panel lets you mark an arc as persistent. Persistent arcs are stored at the
+  character level and automatically appear in every new chat with that
+  character, so long-running plot threads survive chapter breaks without
+  requiring you to re-enter them. Unpinning an arc returns it to chat-local
+  scope. Resolving a pinned arc (manually or via extraction) removes it from
+  future chats automatically. Persistent arcs are visually distinguished by a
+  gold left border and a highlighted pin icon. This feature is solo-chat only
+  (arcs in group chats are chat-local).
+
 - **Memory graph visualization**: a new "View Graph" button in the Entity
   Registry panel opens a full-screen force-directed canvas graph of the current
   character's entities and memories. Entity nodes (larger, coloured by type)

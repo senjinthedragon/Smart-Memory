@@ -607,10 +607,34 @@
   font-size: 0.875em;
 }
 
+#smart_memory_settings .sm_arc_item.sm_arc_persistent {
+  border-left-color: #f0c060;
+}
+
 #smart_memory_settings .sm_arc_text {
   flex: 1;
   line-height: 1.4;
   word-break: break-word;
+}
+
+#smart_memory_settings .sm_pin_arc {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  color: rgba(255, 255, 255, 0.35);
+  opacity: 0.7;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
+}
+
+#smart_memory_settings .sm_pin_arc:hover {
+  opacity: 1;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+#smart_memory_settings .sm_pin_arc.sm_pin_active {
+  color: #f0c060;
+  opacity: 1;
 }
 
 /* ── Scene history list ──────────────────────────────────────────────────── */
