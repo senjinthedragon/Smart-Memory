@@ -843,6 +843,11 @@ async function onCharacterMessageRendered() {
 // into one deferred run ensures the context is stable before we act on it.
 let chatChangedTimer = null;
 
+// Incremented each time onChatChangedImpl starts. Async callbacks (recap) capture
+// this value and bail out if it has changed by the time they resolve - prevents
+// a slow recap from a previous chat appearing over a different chat.
+let chatLoadId = 0;
+
 function onChatChanged() {
   clearTimeout(chatChangedTimer);
   chatChangedTimer = setTimeout(() => onChatChangedImpl().catch(console.error), 100);
@@ -854,6 +859,12 @@ function onChatChanged() {
  * an away recap if the user has been gone longer than the configured threshold.
  */
 async function onChatChangedImpl() {
+  const thisLoadId = ++chatLoadId;
+
+  // Dismiss any recap overlay from the previous chat immediately - it is modal
+  // and blocks input, so leaving it up over the new chat is confusing.
+  $('#sm_recap_overlay').remove();
+
   messagesSinceLastExtraction = 0;
   messagesSinceLastProfileRegen = 0;
   compactionRunning = false;
@@ -893,6 +904,7 @@ async function onChatChangedImpl() {
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
+    loadAndInjectRepair();
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
@@ -908,6 +920,7 @@ async function onChatChangedImpl() {
         setStatusMessage('Generating recap...');
         generateRecap()
           .then((recap) => {
+            if (thisLoadId !== chatLoadId) return;
             if (recap) displayRecap(recap, hoursAway);
             setStatusMessage('');
           })
@@ -994,6 +1007,7 @@ async function onChatChangedImpl() {
       setStatusMessage('Generating recap...');
       generateRecap()
         .then((recap) => {
+          if (thisLoadId !== chatLoadId) return;
           if (recap) {
             // Pass hoursAway explicitly - updateLastActive() runs after this
             // async block starts, so getAwayHours() inside displayRecap would

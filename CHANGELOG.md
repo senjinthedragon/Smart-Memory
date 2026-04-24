@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recap overlay persisting across chat switches**: switching to a different
+  chat while the "Previously on..." modal was still open left it blocking the
+  input area until the next AI response dismissed it. The overlay is now
+  removed immediately when a chat switch begins.
+- **Recap from wrong chat appearing after rapid switch**: if the user switched
+  chats before a slow recap generation finished, the completed recap could
+  appear over the new chat. A load-identity check now discards the result if
+  the chat changed while generation was in progress.
+- **Continuity repair not replayed in group chats**: a pending repair note
+  stored in chatMetadata was never re-injected when returning to a group chat,
+  leaving the repair slot empty until the next manual continuity check. The
+  group chat load path now calls `loadAndInjectRepair` alongside the other
+  restore steps.
 - **Migration v3 crash on pre-1.5.0 chats with profiles**: the schema migration
   that restructures profiles from a flat object to a per-character map threw an
   assertion error when the old flat key was deleted, causing Smart Memory to
