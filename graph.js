@@ -52,8 +52,9 @@ const MEMORY_COLORS = {
 };
 
 const ENTITY_RADIUS = 22;
-// Memory node radii by importance level (1/2/3) - distinct enough to read at a glance.
-const MEMORY_RADII = [6, 9, 13];
+// Memory node radii by importance level (1/2/3).
+// Wide ratio so tiers read clearly on large screens.
+const MEMORY_RADII = [7, 13, 21];
 
 // ---- Force simulation constants ---------------------------------------------
 
@@ -129,6 +130,12 @@ export function showMemoryGraph(characterName) {
   };
 
   bindEvents(canvas, $overlay, characterName);
+
+  // Run the simulation briefly to get an initial settled layout, then
+  // auto-fit the camera so the graph fills the canvas on any screen size.
+  for (let i = 0; i < 120; i++) tick();
+  fitCameraToNodes();
+
   scheduleFrame();
 }
 
@@ -744,6 +751,13 @@ function bindEvents(canvas, $overlay, characterName) {
     initPositions(gs.nodes, gs.edges);
     gs.camera = { x: 0, y: 0, scale: 1 };
     gs.alpha = 1.0;
+    // Re-fit after the simulation has had a moment to settle.
+    setTimeout(() => {
+      if (gs) {
+        for (let i = 0; i < 120; i++) tick();
+        fitCameraToNodes();
+      }
+    }, 50);
   });
 
   $overlay.find('#sm_graph_show_session').on('change', function () {
@@ -783,6 +797,42 @@ function rebuildGraph(characterName) {
 }
 
 // ---- Lifecycle helpers ------------------------------------------------------
+
+/**
+ * Sets the camera scale and pan so all nodes fit within the canvas with padding.
+ * Called once after the initial layout pre-run so the graph is never tiny or
+ * clipped regardless of screen size.
+ */
+function fitCameraToNodes() {
+  const { nodes, canvas } = gs;
+  if (nodes.length === 0) return;
+
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x - n.radius);
+    minY = Math.min(minY, n.y - n.radius);
+    maxX = Math.max(maxX, n.x + n.radius);
+    maxY = Math.max(maxY, n.y + n.radius);
+  }
+
+  const pad = 60;
+  const contentW = maxX - minX + pad * 2;
+  const contentH = maxY - minY + pad * 2;
+  const scale = Math.min(
+    canvas.width / contentW,
+    canvas.height / contentH,
+    2, // don't over-zoom for very sparse graphs
+  );
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  gs.camera.scale = scale;
+  gs.camera.x = -cx * scale;
+  gs.camera.y = -cy * scale;
+}
 
 /**
  * Closes and fully tears down the graph overlay.
