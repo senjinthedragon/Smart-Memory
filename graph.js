@@ -417,20 +417,18 @@ function render() {
       ctx.setLineDash([]);
     }
 
-    // Entity label.
+    // Entity label: drawn below the node so full names are always visible.
     if (node.nodeType === 'entity') {
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `bold ${Math.max(9, Math.min(12, node.radius * 0.55))}px sans-serif`;
+      ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      // Truncate to fit inside the circle.
-      const maxW = node.radius * 1.6;
-      let label = node.label;
-      while (ctx.measureText(label).width > maxW && label.length > 1) {
-        label = label.slice(0, -1);
-      }
-      if (label !== node.label) label += '';
-      ctx.fillText(label, node.x, node.y);
+      ctx.textBaseline = 'top';
+      const labelY = node.y + node.radius + 4;
+      // Shadow for legibility over edges and dark backgrounds.
+      ctx.shadowColor = 'rgba(0,0,0,0.85)';
+      ctx.shadowBlur = 3;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(node.label, node.x, labelY);
+      ctx.shadowBlur = 0;
     }
 
     ctx.restore();
