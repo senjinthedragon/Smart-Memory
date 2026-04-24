@@ -23,9 +23,9 @@
  * showMemoryGraph - opens the full-screen graph overlay for a given character
  */
 
-import { loadCharacterMemories, loadCharacterEntityRegistry } from './longterm.js';
+import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
-import { loadSessionEntityRegistry } from './graph-migration.js';
+import { loadCharacterEntityRegistry, loadSessionEntityRegistry } from './graph-migration.js';
 
 // ---- Visual constants -------------------------------------------------------
 
