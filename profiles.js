@@ -26,14 +26,17 @@
  * messages. Profile generation is a single sequential model call that produces
  * all three sections at once to minimise round-trips on local hardware.
  *
- * Stored in chatMetadata.smartMemory.profiles as:
- *   { character_state, world_state, relationship_matrix, generated_at }
+ * Stored in chatMetadata.smartMemory.profiles as a per-character map:
+ *   { [characterName]: { character_state, world_state, relationship_matrix, generated_at } }
  *
- * loadProfiles         - returns stored profiles from chatMetadata (null if none)
- * saveProfiles         - persists profiles to chatMetadata
- * areProfilesStale     - true if profiles are older than the configured threshold
+ * In group chats each member has their own entry so switching the character
+ * selector in the settings panel shows the correct character's profile.
+ *
+ * loadProfiles         - returns stored profiles for a character from chatMetadata (null if none)
+ * saveProfiles         - persists profiles for a character to chatMetadata
+ * areProfilesStale     - true if a character's profiles are older than the configured threshold
  * generateProfiles     - calls the model and saves the result; returns the profiles
- * injectProfiles       - pushes stored profiles into the prompt via setExtensionPrompt
+ * injectProfiles       - pushes the specified character's profiles into the prompt
  * clearProfiles        - removes stored profiles and clears the injection slot
  */
 
@@ -59,34 +62,40 @@ const DEFAULT_STALE_THRESHOLD_MS = 30 * 60 * 1000;
 // ---- Storage ------------------------------------------------------------
 
 /**
- * Returns stored profiles from chatMetadata, or null if none exist yet.
+ * Returns stored profiles for the given character from chatMetadata, or null if none exist yet.
+ * @param {string} characterName
  * @returns {{character_state: string, world_state: string, relationship_matrix: string, generated_at: number}|null}
  */
-export function loadProfiles() {
+export function loadProfiles(characterName) {
+  if (!characterName) return null;
   const context = getContext();
-  return context.chatMetadata?.[META_KEY]?.profiles ?? null;
+  return context.chatMetadata?.[META_KEY]?.profiles?.[characterName] ?? null;
 }
 
 /**
- * Persists profiles to chatMetadata.
+ * Persists profiles for the given character to chatMetadata.
  * @param {{character_state: string, world_state: string, relationship_matrix: string, generated_at: number}} profiles
+ * @param {string} characterName
  */
-export async function saveProfiles(profiles) {
+export async function saveProfiles(profiles, characterName) {
+  if (!characterName) return;
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-  context.chatMetadata[META_KEY].profiles = profiles;
+  if (!context.chatMetadata[META_KEY].profiles) context.chatMetadata[META_KEY].profiles = {};
+  context.chatMetadata[META_KEY].profiles[characterName] = profiles;
   await context.saveMetadata();
 }
 
 /**
- * Returns true if stored profiles are older than the configured threshold
- * or do not exist yet. Used to decide whether to regenerate on chat load.
+ * Returns true if stored profiles for the given character are older than the configured
+ * threshold or do not exist yet. Used to decide whether to regenerate on chat load.
  * @param {number} [thresholdMs] - Staleness threshold in milliseconds.
+ * @param {string} [characterName]
  * @returns {boolean}
  */
-export function areProfilesStale(thresholdMs = DEFAULT_STALE_THRESHOLD_MS) {
-  const profiles = loadProfiles();
+export function areProfilesStale(thresholdMs = DEFAULT_STALE_THRESHOLD_MS, characterName) {
+  const profiles = loadProfiles(characterName);
   if (!profiles) return true;
   return Date.now() - (profiles.generated_at ?? 0) > thresholdMs;
 }
@@ -150,7 +159,7 @@ export async function generateProfiles(characterName) {
     }
 
     const profiles = { ...parsed, generated_at: Date.now() };
-    await saveProfiles(profiles);
+    await saveProfiles(profiles, characterName);
     return profiles;
   } catch (err) {
     console.error('[SmartMemory] Profile generation failed:', err);
@@ -207,10 +216,11 @@ function formatProfiles(profiles, budget) {
 }
 
 /**
- * Injects stored profiles into the prompt via setExtensionPrompt.
- * Clears the slot if profiles are disabled, not yet generated, or empty.
+ * Injects the given character's stored profiles into the prompt via setExtensionPrompt.
+ * Clears the slot if profiles are disabled, the character is unknown, or nothing is stored.
+ * @param {string} [characterName]
  */
-export function injectProfiles() {
+export function injectProfiles(characterName) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.profiles_enabled) {
@@ -218,7 +228,7 @@ export function injectProfiles() {
     return;
   }
 
-  const profiles = loadProfiles();
+  const profiles = loadProfiles(characterName);
   if (!profiles) {
     setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
     return;
@@ -247,11 +257,18 @@ export function injectProfiles() {
 
 /**
  * Clears stored profiles from chatMetadata and removes the injection slot.
+ * If characterName is provided, only that character's entry is removed.
+ * If omitted, all profiles for the chat are removed.
+ * @param {string} [characterName]
  */
-export async function clearProfiles() {
+export async function clearProfiles(characterName) {
   const context = getContext();
   if (context.chatMetadata?.[META_KEY]?.profiles) {
-    delete context.chatMetadata[META_KEY].profiles;
+    if (characterName) {
+      delete context.chatMetadata[META_KEY].profiles[characterName];
+    } else {
+      delete context.chatMetadata[META_KEY].profiles;
+    }
     await context.saveMetadata();
   }
   setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);

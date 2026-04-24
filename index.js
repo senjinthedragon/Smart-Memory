@@ -71,6 +71,7 @@ import {
 } from '../../../slash-commands/SlashCommandArgument.js';
 
 import { shouldCompact, runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
+import { hideChatMessageRange } from '../../../chats.js';
 import {
   extractAndStoreMemories,
   consolidateMemories,
@@ -229,8 +230,12 @@ const defaultSettings = {
   recap_threshold_hours: 4,
   recap_response_length: 300,
 
+  // Short-term / compaction
+  compaction_hide_summarized: false,
+
   // Continuity
   continuity_response_length: 300,
+  continuity_auto_check: true,
   continuity_auto_repair: false,
 
   // Semantic embedding deduplication
@@ -283,11 +288,10 @@ let continuityCheckRunning = false;
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
 
-// Tracks the last group ID for which the group chat warning was shown.
-// Stored as the actual groupId rather than a plain boolean so switching
-// between two different group chats shows the toast once per group, while
-// switching back to a group that was already warned stays silent.
-let lastWarnedGroupId = null;
+// Tracks which character names have responded in the current group chat round.
+// Populated by onCharacterMessageRendered when context.groupId is set, cleared
+// by onGroupWrapperStarted at the top of each new round.
+let respondedThisRound = new Set();
 
 // Last observed chat length, used to distinguish new messages from swipes.
 // CHARACTER_MESSAGE_RENDERED fires on both; swipes do not grow the chat array.
@@ -353,6 +357,23 @@ function getCurrentCharacterName() {
   return context.name2 || context.characterName || null;
 }
 
+// Tracks which group member the settings panel is currently showing.
+// Only meaningful when context.groupId is set. Null means "no selection yet"
+// which falls back to context.name2 in getSelectedCharacterName.
+let selectedGroupCharacter = null;
+
+/**
+ * Returns the character name the settings panel should operate on.
+ * In group chats this is the explicitly-selected group member; in 1:1 chats
+ * it falls through to the standard active-character lookup.
+ *
+ * @returns {string|null}
+ */
+function getSelectedCharacterName() {
+  if (getContext().groupId && selectedGroupCharacter) return selectedGroupCharacter;
+  return getCurrentCharacterName();
+}
+
 /**
  * Clears all active injection slots. Called when the master toggle is turned
  * off so that no Smart Memory content lingers in the current prompt.
@@ -410,20 +431,6 @@ async function onCharacterMessageRendered() {
   const context = getContext();
   if (!context.chat || context.chat.length === 0) return;
 
-  // Group chats are not yet supported - character name resolution is unreliable
-  // in that context and memories could be attributed to the wrong character.
-  if (context.groupId) {
-    if (lastWarnedGroupId !== context.groupId) {
-      lastWarnedGroupId = context.groupId;
-      toastr.warning(
-        'Smart Memory is not active in group chats. 1:1 chats only for now.',
-        'Smart Memory',
-        { timeOut: 6000, positionClass: 'toast-bottom-right' },
-      );
-    }
-    return;
-  }
-
   // Swipe detection: CHARACTER_MESSAGE_RENDERED fires on swipes too, but a swipe
   // replaces the last message in-place - the chat array does not grow. Only
   // process when the chat actually advanced (new message added by a real turn).
@@ -433,6 +440,28 @@ async function onCharacterMessageRendered() {
   if (isSwipe) {
     // Still update lastActive so the recap threshold stays accurate during
     // a long swipe session where the user is clearly present.
+    updateLastActive();
+    return;
+  }
+
+  // In group chats, all round-level work (extraction, compaction, scene detection,
+  // continuity) runs in onGroupWrapperFinished. Here we just track participation
+  // and feed new messages into the scene buffer so WRAPPER_FINISHED has the full
+  // round's context. Injection is handled by onGroupMemberDrafted before each
+  // character generates, so there is nothing further to do here.
+  if (context.groupId) {
+    const name = getCurrentCharacterName();
+    if (name) respondedThisRound.add(name);
+
+    // Accumulate messages so scene break detection in WRAPPER_FINISHED sees
+    // everything that happened this round.
+    const newGroupMessages = context.chat.slice(sceneBufferLastIndex + 1);
+    if (newGroupMessages.length > 0) {
+      sceneMessageBuffer.push(...newGroupMessages);
+      sceneBufferLastIndex = context.chat.length - 1;
+    }
+
+    $('#sm_recap_overlay').remove();
     updateLastActive();
     return;
   }
@@ -501,6 +530,9 @@ async function onCharacterMessageRendered() {
           updateShortTermUI(summary);
           updateTokenDisplay();
           setStatusMessage('Summary updated.');
+          if (settings.compaction_hide_summarized) {
+            await applySummarizedHiding(true);
+          }
         } else {
           setStatusMessage('');
         }
@@ -692,7 +724,7 @@ async function onCharacterMessageRendered() {
           await generateProfiles(characterName)
             .then((profiles) => {
               if (profiles) {
-                injectProfiles();
+                injectProfiles(characterName);
                 updateProfilesUI(profiles);
               }
             })
@@ -752,7 +784,7 @@ async function onCharacterMessageRendered() {
     generateProfiles(characterName)
       .then((profiles) => {
         if (profiles) {
-          injectProfiles();
+          injectProfiles(characterName);
           updateProfilesUI(profiles);
         }
       })
@@ -768,7 +800,7 @@ async function onCharacterMessageRendered() {
   // responds. The badge in the settings header updates when the check finishes.
   // On Profile A (local hardware) this stays manual-only - too expensive for
   // every turn on an RTX 2080.
-  if (getHardwareProfile() === 'b' && !continuityCheckRunning) {
+  if (getHardwareProfile() === 'b' && settings.continuity_auto_check && !continuityCheckRunning) {
     continuityCheckRunning = true;
     checkContinuity(characterName)
       .then(async (contradictions) => {
@@ -790,12 +822,22 @@ async function onCharacterMessageRendered() {
   updateLastActive();
 }
 
+// Debounce timer for onChatChanged. ST fires both CHAT_LOADED and CHAT_CHANGED
+// on a fresh load, sometimes before context.groupId is set. Collapsing them
+// into one deferred run ensures the context is stable before we act on it.
+let chatChangedTimer = null;
+
+function onChatChanged() {
+  clearTimeout(chatChangedTimer);
+  chatChangedTimer = setTimeout(() => onChatChangedImpl().catch(console.error), 100);
+}
+
 /**
- * Fires when a chat is loaded or switched.
+ * Fires when a chat is loaded or switched (debounced via onChatChanged).
  * Resets all module-level state, restores stored injections, and generates
  * an away recap if the user has been gone longer than the configured threshold.
  */
-async function onChatChanged() {
+async function onChatChangedImpl() {
   messagesSinceLastExtraction = 0;
   messagesSinceLastProfileRegen = 0;
   compactionRunning = false;
@@ -803,7 +845,8 @@ async function onChatChanged() {
   continuityCheckRunning = false;
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
-  lastWarnedGroupId = null;
+  respondedThisRound = new Set();
+  selectedGroupCharacter = null;
   setContinuityBadge(null);
   lastKnownChatLength = 0;
   clearEmbeddingCache();
@@ -815,11 +858,55 @@ async function onChatChanged() {
   const settings = getSettings();
   if (!settings.enabled) return;
 
-  // Clear any lingering injections and skip restore for group chats.
+  // Group chats: clear stale slots first (they may hold content from the
+  // previous session's last responder), then inject fresh. onGroupMemberDrafted
+  // will overwrite the character-specific slots before each Generate().
   if (getContext().groupId) {
     clearAllInjections();
+    const summary = loadAndInjectSummary();
+    updateShortTermUI(summary);
+    injectSceneHistory();
+    injectArcs();
+    updateScenesUI();
+    updateArcsUI();
+
+    // Show the group character selector and pre-populate panels and token
+    // display for whichever member is selected (first member by default).
+    updateGroupCharSelector();
+    await injectMemories(selectedGroupCharacter, isFreshStart());
+    await injectSessionMemories();
+    injectCanon(selectedGroupCharacter);
+    injectProfiles(selectedGroupCharacter);
+    updateLongTermUI(selectedGroupCharacter);
+    updateSessionUI();
+    updateFreshStartUI(isFreshStart());
+    updateProfilesUI(loadProfiles(selectedGroupCharacter));
+    updateEntityPanel(selectedGroupCharacter);
+
+    updateTokenDisplay();
+
+    if (settings.recap_enabled) {
+      const hoursAway = getAwayHours();
+      if (hoursAway > 0) {
+        setStatusMessage('Generating recap...');
+        generateRecap()
+          .then((recap) => {
+            if (recap) displayRecap(recap, hoursAway);
+            setStatusMessage('');
+          })
+          .catch((err) => {
+            console.error('[SmartMemory] Auto-recap failed:', err);
+            setStatusMessage('');
+          });
+      }
+    }
+
+    updateLastActive();
     return;
   }
+
+  // 1:1 chat - hide the group selector so it doesn't bleed between chat types.
+  $('#sm_group_char_row').hide();
 
   const characterName = getCurrentCharacterName();
 
@@ -855,7 +942,7 @@ async function onChatChanged() {
   await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
-  injectProfiles();
+  injectProfiles(characterName);
   loadAndInjectRepair();
 
   updateLongTermUI(characterName);
@@ -863,7 +950,7 @@ async function onChatChanged() {
   updateSessionUI();
   updateScenesUI();
   updateArcsUI();
-  updateProfilesUI(loadProfiles());
+  updateProfilesUI(loadProfiles(characterName));
   updateTokenDisplay();
 
   // Regenerate profiles in the background if they are stale. Non-blocking -
@@ -871,11 +958,11 @@ async function onChatChanged() {
   // user sees coherent context immediately and the refresh is invisible.
   if (settings.profiles_enabled && characterName && !freshStart) {
     const thresholdMs = (settings.profiles_stale_threshold_minutes ?? 30) * 60 * 1000;
-    if (areProfilesStale(thresholdMs)) {
+    if (areProfilesStale(thresholdMs, characterName)) {
       generateProfiles(characterName)
         .then((profiles) => {
           if (profiles) {
-            injectProfiles();
+            injectProfiles(characterName);
             updateProfilesUI(profiles);
           }
         })
@@ -907,6 +994,448 @@ async function onChatChanged() {
     }
   }
 
+  updateLastActive();
+}
+
+// ---- Group chat helpers -------------------------------------------------
+
+/**
+ * Populates the group character selector dropdown with the current group's
+ * members, shows the selector row, and sets selectedGroupCharacter to
+ * whichever member is currently selected (or the first member if none is).
+ * Should be called from onChatChanged when context.groupId is set.
+ */
+function updateGroupCharSelector() {
+  const context = getContext();
+  const group = context.groups?.find((g) => g.id === context.groupId);
+  if (!group) return;
+
+  const members = (group.members ?? [])
+    .map((avatarId) => context.characters.find((c) => c.avatar === avatarId)?.name)
+    .filter(Boolean);
+
+  if (members.length === 0) return;
+
+  const $select = $('#sm_group_char_select');
+  $select.empty();
+  for (const name of members) {
+    $select.append($('<option>', { value: name, text: name }));
+  }
+
+  // Preserve the current selection if the character is still in the group;
+  // otherwise default to the first member.
+  if (selectedGroupCharacter && members.includes(selectedGroupCharacter)) {
+    $select.val(selectedGroupCharacter);
+  } else {
+    selectedGroupCharacter = members[0];
+    $select.val(selectedGroupCharacter);
+  }
+
+  $('#sm_group_char_row').show();
+}
+
+// ---- Group chat handlers ------------------------------------------------
+
+/**
+ * Fires at the start of each group chat round (GROUP_WRAPPER_STARTED).
+ * Clears the per-round participation set so the new round starts clean.
+ *
+ * @param {{ type?: string }} [event] - ST event payload; type='quiet' for background generates.
+ */
+function onGroupWrapperStarted({ type } = {}) {
+  // Quiet generates (e.g. the Expressions extension classifying emotion after each round)
+  // are not real user turns. Clearing the set here would erase the responders from the
+  // preceding real round before onGroupWrapperFinished can loop over them.
+  if (type === 'quiet') return;
+  respondedThisRound = new Set();
+}
+
+/**
+ * Fires before each group member generates their response (GROUP_MEMBER_DRAFTED).
+ * Swaps all injection slots to the character about to respond so Generate()
+ * sees the correct context rather than the previous character's memories.
+ *
+ * @param {number} chId - ST character array index of the character being drafted.
+ */
+async function onGroupMemberDrafted(chId) {
+  const settings = getSettings();
+  if (!settings.enabled) return;
+
+  const context = getContext();
+  if (!context.chat) return;
+
+  const characterName = context.characters[chId]?.name;
+  if (!characterName) return;
+
+  // Migrate per-character data on first access in this session. Fast no-op
+  // once already at the current schema version.
+  ensureCharacterMigrated(characterName);
+
+  // Seed the character entity so it appears in the entity panel and benefits
+  // from overlap scoring from the first message.
+  const ltReg = loadCharacterEntityRegistry(characterName);
+  const before = ltReg.length;
+  seedCharacterEntity(characterName, ltReg);
+  if (ltReg.length > before) {
+    saveCharacterEntityRegistry(characterName, ltReg);
+    saveSettingsDebounced();
+  }
+
+  const freshStart = isFreshStart();
+
+  // Restore all injected context for this character. The short-term summary
+  // is chat-wide and was injected at load, but canon overwrites the slot when
+  // active, so we re-apply it here per character.
+  const summary = loadAndInjectSummary();
+  injectCanon(characterName);
+  updateShortTermUI(summary);
+
+  await injectMemories(characterName, freshStart);
+  await injectSessionMemories();
+  injectSceneHistory();
+  injectArcs();
+  injectProfiles(characterName);
+  loadAndInjectRepair();
+
+  // The token display is NOT updated here. Injecting this character's slots
+  // is correct for the model, but updating the display here would overwrite
+  // the selected character's token bars with the generating character's data.
+  // onGroupWrapperFinished restores the selected character's slots and
+  // updates the display once the entire round is done.
+}
+
+/**
+ * Fires after all characters in a group round have responded
+ * (GROUP_WRAPPER_FINISHED). Runs compaction, scene break detection, and
+ * batched extraction once per round rather than once per character response.
+ * Profile B continuity also fires once here instead of per-character.
+ *
+ * @param {{ type?: string }} [event] - ST event payload; type='quiet' for background generates.
+ */
+async function onGroupWrapperFinished({ type } = {}) {
+  // Quiet generates (e.g. the Expressions extension) are not real user turns.
+  // Skipping them keeps the extraction counter and respondedThisRound in sync with
+  // actual story progress rather than firing on every post-round expression classify.
+  if (type === 'quiet') return;
+  if (is_send_press) return;
+  const settings = getSettings();
+  if (!settings.enabled) return;
+  const context = getContext();
+  if (!context.chat || context.chat.length === 0) return;
+
+  // Build scene check text from the end of the completed round.
+  const lastMsg = context.chat
+    .slice()
+    .reverse()
+    .find((m) => !m.is_user && !m.is_system && m.mes);
+  const lastMsgText = lastMsg?.mes ?? '';
+  const lastUserMsg = context.chat
+    .slice()
+    .reverse()
+    .find((m) => m.is_user && !m.is_system && m.mes);
+  const lastUserMsgText = lastUserMsg?.mes ?? '';
+  const aiMessages = context.chat.filter((m) => !m.is_user && !m.is_system && m.mes);
+  const prevAiMsgText = aiMessages.length >= 2 ? aiMessages[aiMessages.length - 2].mes : '';
+
+  // Step 1: compaction - once per round rather than per character response.
+  if (settings.compaction_enabled && !compactionRunning) {
+    compactionRunning = true;
+    try {
+      const needed = await shouldCompact();
+      if (needed) {
+        setStatusMessage('Updating story summary...');
+        const source = extension_settings[MODULE_NAME]?.source ?? memory_sources.main;
+        let compactionToast = null;
+        if (source !== memory_sources.main) {
+          compactionToast = toastr.info('Updating story summary...', 'Smart Memory', {
+            timeOut: 0,
+            extendedTimeOut: 0,
+            positionClass: 'toast-bottom-right',
+          });
+        }
+        const summary = await runCompaction();
+        if (compactionToast) toastr.clear(compactionToast);
+        if (summary) {
+          injectSummary(summary);
+          updateShortTermUI(summary);
+          updateTokenDisplay();
+          setStatusMessage('Summary updated.');
+          if (settings.compaction_hide_summarized) {
+            await applySummarizedHiding(true);
+          }
+        } else {
+          setStatusMessage('');
+        }
+      }
+    } catch (err) {
+      console.error('[SmartMemory] Compaction error:', err);
+    } finally {
+      compactionRunning = false;
+    }
+  }
+
+  // Step 2: scene break detection - once for the round using accumulated buffer.
+  const sceneCheckText = [lastUserMsgText, lastMsgText].filter(Boolean).join('\n');
+  if (settings.scene_enabled && sceneCheckText) {
+    try {
+      const wasBreak = await processSceneBreak(sceneCheckText, sceneMessageBuffer, prevAiMsgText);
+      if (wasBreak) {
+        injectSceneHistory();
+        updateScenesUI();
+        updateTokenDisplay();
+        sceneMessageBuffer = [];
+        sceneBufferLastIndex = -1;
+        setStatusMessage('Scene break detected.');
+      }
+    } catch (err) {
+      console.error('[SmartMemory] Scene detection error:', err);
+    }
+  }
+
+  // Step 3: batched extraction - counter increments once per round, not per
+  // character response, so extractEvery=3 means every 3 user turns as intended.
+  if (!extractionRunning) {
+    messagesSinceLastExtraction++;
+    messagesSinceLastProfileRegen++;
+
+    const extractEvery = Math.min(
+      settings.session_extract_every ?? 3,
+      settings.longterm_extract_every ?? 3,
+    );
+
+    if (messagesSinceLastExtraction >= extractEvery) {
+      extractionRunning = true;
+
+      const sessionWindow = getStableExtractionWindow(context.chat, 40);
+      // Scale the raw window by character count so that after per-character
+      // filtering each character still gets roughly 20 messages of context.
+      const longtermRawSize = 20 * Math.max(1, respondedThisRound.size);
+      const longtermWindow = getStableExtractionWindow(context.chat, longtermRawSize);
+
+      if (longtermWindow.length === 0 && sessionWindow.length === 0) {
+        extractionRunning = false;
+      } else {
+        messagesSinceLastExtraction = 0;
+        setStatusMessage('Extracting memories...');
+
+        const originalBudgets = {
+          longterm_inject_budget: settings.longterm_inject_budget,
+          session_inject_budget: settings.session_inject_budget,
+          scene_inject_budget: settings.scene_inject_budget,
+          arcs_inject_budget: settings.arcs_inject_budget,
+          profiles_inject_budget: settings.profiles_inject_budget,
+        };
+
+        try {
+          let total = 0;
+
+          const lastAiMessage = context.chat?.at(-1)?.mes ?? '';
+          const turnType = classifyTurn(lastAiMessage);
+          const budgets = adaptiveBudgets(settings, turnType);
+          settings.longterm_inject_budget = budgets.longterm;
+          settings.session_inject_budget = budgets.session;
+          settings.scene_inject_budget = budgets.scenes;
+          settings.arcs_inject_budget = budgets.arcs;
+          settings.profiles_inject_budget = budgets.profiles;
+
+          // Session extraction is chat-wide - all characters share one session store.
+          if (settings.session_enabled && sessionWindow.length > 0) {
+            const priorSessionIds = new Set(
+              loadSessionMemories()
+                .map((m) => m.id)
+                .filter(Boolean),
+            );
+
+            const count = await extractSessionMemories(sessionWindow).catch((err) => {
+              console.error('[SmartMemory] Session extraction error:', err);
+              return 0;
+            });
+            if (!consolidationRunning) {
+              consolidationRunning = true;
+              await consolidateSessionMemories().catch((err) => {
+                console.error('[SmartMemory] Session consolidation error:', err);
+              });
+              consolidationRunning = false;
+            }
+            await injectSessionMemories(true);
+            updateSessionUI();
+            total += count;
+
+            if (settings.scene_enabled && count > 0) {
+              const newIds = loadSessionMemories()
+                .map((m) => m.id)
+                .filter((id) => id && !priorSessionIds.has(id));
+              if (newIds.length > 0) {
+                await linkMemoriesToLastScene(newIds).catch((err) =>
+                  console.error('[SmartMemory] Scene memory linking failed:', err),
+                );
+              }
+            }
+          }
+
+          // Long-term extraction and profiles run per character since each
+          // character has their own store. Sequential per CLAUDE.md constraint.
+          for (const characterName of respondedThisRound) {
+            // Filter to this character's messages plus user messages so the
+            // model only sees context directly relevant to the character being
+            // extracted. User messages are included because they address all
+            // characters and provide shared narrative context.
+            const characterLongtermWindow = longtermWindow.filter(
+              (m) => m.is_user || m.name === characterName,
+            );
+
+            if (settings.longterm_enabled && characterLongtermWindow.length > 0) {
+              const count = await extractAndStoreMemories(
+                characterName,
+                characterLongtermWindow,
+              ).catch((err) => {
+                console.error('[SmartMemory] Long-term extraction error:', err);
+                return 0;
+              });
+              if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
+                consolidationRunning = true;
+                const removed = await consolidateMemories(characterName).catch((err) => {
+                  console.error('[SmartMemory] Consolidation error:', err);
+                  return 0;
+                });
+                consolidationRunning = false;
+                if (removed > 0) {
+                  setStatusMessage(`Consolidated ${removed} redundant memories.`);
+                  toastr.info(
+                    `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
+                    'Smart Memory',
+                    { timeOut: 3000, positionClass: 'toast-bottom-right' },
+                  );
+                }
+              }
+              total += count;
+            }
+
+            if (settings.profiles_enabled && characterName) {
+              await generateProfiles(characterName)
+                .then((profiles) => {
+                  if (profiles) {
+                    // Only update the UI panel if this is the character currently
+                    // shown in the selector - other characters' profiles are stored
+                    // but the display follows the selector.
+                    if (characterName === selectedGroupCharacter) updateProfilesUI(profiles);
+                  }
+                })
+                .catch((err) => console.error('[SmartMemory] Profile generation error:', err));
+              messagesSinceLastProfileRegen = 0;
+            }
+
+            // Profile B only: auto-regenerate canon after arc extraction when
+            // enough resolved arc summaries are available.
+            if (
+              settings.arcs_enabled &&
+              getHardwareProfile() === 'b' &&
+              loadArcSummaries().length >= 2
+            ) {
+              await generateCanon(characterName).catch((err) =>
+                console.error('[SmartMemory] Auto-canon error:', err),
+              );
+            }
+          }
+
+          // Arc extraction is chat-wide - once per round after all characters.
+          if (settings.arcs_enabled) {
+            const arcWindow = getStableExtractionWindow(context.chat, 100);
+            const count = await extractArcs(arcWindow).catch((err) => {
+              console.error('[SmartMemory] Arc extraction error:', err);
+              return 0;
+            });
+            injectArcs();
+            updateArcsUI();
+            total += count;
+          }
+
+          // Refresh entity panel with the last character who responded.
+          const lastResponder = [...respondedThisRound].at(-1);
+          if (lastResponder) updateEntityPanel(lastResponder);
+
+          // Refresh the settings panel for whichever character the selector
+          // is showing so new memories appear without the user having to
+          // manually switch selection.
+          updateLongTermUI(selectedGroupCharacter);
+          updateSessionUI();
+
+          setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
+        } catch (err) {
+          console.error('[SmartMemory] Extraction error:', err);
+          setStatusMessage('');
+        } finally {
+          Object.assign(settings, originalBudgets);
+          saveSettingsDebounced();
+          extractionRunning = false;
+        }
+      }
+    }
+  }
+
+  // Step 4 (Profile B only): scheduled profile regen between extraction passes.
+  // Run for each character who responded this round.
+  if (
+    settings.profiles_enabled &&
+    (settings.profiles_regen_every ?? 0) > 0 &&
+    getHardwareProfile() === 'b' &&
+    messagesSinceLastProfileRegen >= settings.profiles_regen_every
+  ) {
+    messagesSinceLastProfileRegen = 0;
+    for (const characterName of respondedThisRound) {
+      generateProfiles(characterName)
+        .then((profiles) => {
+          if (profiles) {
+            injectProfiles(characterName);
+            if (characterName === selectedGroupCharacter) updateProfilesUI(profiles);
+          }
+        })
+        .catch((err) => console.error('[SmartMemory] Scheduled profile regeneration error:', err));
+    }
+  }
+
+  // Step 5: clear any pending continuity repair carried over from last round.
+  clearRepair();
+
+  // Step 6 (Profile B only): silent continuity check - once per round using
+  // the last character who responded. Running per-character would multiply
+  // model calls by character count for the same round of messages.
+  const lastResponder = [...respondedThisRound].at(-1);
+  if (
+    getHardwareProfile() === 'b' &&
+    settings.continuity_auto_check &&
+    lastResponder &&
+    !continuityCheckRunning
+  ) {
+    continuityCheckRunning = true;
+    checkContinuity(lastResponder)
+      .then(async (contradictions) => {
+        setContinuityBadge(contradictions.length);
+        if (contradictions.length > 0 && getSettings().continuity_auto_repair) {
+          const note = await generateRepair(contradictions, lastResponder);
+          injectRepair(note);
+        }
+      })
+      .catch((err) => {
+        console.error('[SmartMemory] Auto-continuity check failed:', err);
+      })
+      .finally(() => {
+        continuityCheckRunning = false;
+      });
+  }
+
+  // Step 7: restore injection slots to the selected character. onGroupMemberDrafted
+  // swaps slots to each generating character in turn; after the round ends the
+  // last responder's data is still in the slots. Re-inject for the selector choice
+  // so the token display reflects what the panel is showing, not who generated last.
+  if (selectedGroupCharacter) {
+    await injectMemories(selectedGroupCharacter, isFreshStart());
+    injectCanon(selectedGroupCharacter);
+    injectProfiles(selectedGroupCharacter);
+    updateTokenDisplay();
+  }
+
+  // Step 8: update lastActive.
   updateLastActive();
 }
 
@@ -1106,6 +1635,21 @@ function initTooltips() {
 /** Syncs the short-term summary textarea with the current summary text. */
 function updateShortTermUI(summary) {
   $('#sm_current_summary').val(summary || '');
+}
+
+/**
+ * Hides or restores all messages covered by the current compaction summary.
+ * Uses ST's hideChatMessageRange which sets is_system on each message - hiding
+ * them from the visible chat AND excluding them from the LLM context window.
+ * The injected summary already covers their content, so excluding them is correct.
+ * @param {boolean} hide - true to hide summarized messages, false to restore them
+ */
+async function applySummarizedHiding(hide) {
+  const context = getContext();
+  const summaryEnd = context.chatMetadata?.[META_KEY]?.summaryEnd ?? 0;
+  if (summaryEnd <= 0) return;
+  // hideChatMessageRange third param is `unhide`, so invert our hide flag.
+  await hideChatMessageRange(0, summaryEnd - 1, !hide);
 }
 
 /** Re-renders the long-term memories list and entity panel for the given character. */
@@ -2015,6 +2559,23 @@ function bindSettingsUI() {
       }
     });
 
+  // ---- Group chat character selector ----------------------------------
+  $('#sm_group_char_select').on('change', async function () {
+    selectedGroupCharacter = $(this).val() || null;
+    updateLongTermUI(selectedGroupCharacter);
+    updateSessionUI();
+    updateFreshStartUI(isFreshStart());
+    updateProfilesUI(loadProfiles(selectedGroupCharacter));
+    // Re-inject the character-specific slots so updateTokenDisplay reads
+    // the selected character's content rather than whoever responded last.
+    // onGroupMemberDrafted will overwrite these again before the next Generate().
+    await injectMemories(selectedGroupCharacter, isFreshStart());
+    await injectSessionMemories();
+    injectCanon(selectedGroupCharacter);
+    injectProfiles(selectedGroupCharacter);
+    updateTokenDisplay();
+  });
+
   // ---- LLM source -----------------------------------------------------
 
   /**
@@ -2135,15 +2696,29 @@ function bindSettingsUI() {
     $('#sm_hardware_profile_label').text(PROFILE_LABELS[active] ?? '');
   }
 
+  /**
+   * Dims and disables settings that only apply to Profile B when Profile A is
+   * active, so users are not confused by controls that silently do nothing.
+   */
+  function syncProfileGating() {
+    const isB = getHardwareProfile() === 'b';
+    $('#smart_memory_settings .sm-profile-b-only').each(function () {
+      $(this).toggleClass('sm-gated', !isB);
+      $(this).find('input, select, button').prop('disabled', !isB);
+    });
+  }
+
   $('#sm_hardware_profile')
     .val(s.hardware_profile ?? 'auto')
     .on('change', function () {
       getSettings().hardware_profile = $(this).val();
       saveSettingsDebounced();
       updateProfileLabel();
+      syncProfileGating();
     });
 
   updateProfileLabel();
+  syncProfileGating();
 
   // ---- Short-term (compaction) ----------------------------------------
   $('#sm_compaction_enabled')
@@ -2172,6 +2747,15 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
   $('#sm_compaction_response_length_value').text(s.compaction_response_length);
+
+  $('#sm_hide_summarized')
+    .prop('checked', s.compaction_hide_summarized)
+    .on('change', async function () {
+      const hide = $(this).prop('checked');
+      getSettings().compaction_hide_summarized = hide;
+      saveSettingsDebounced();
+      await applySummarizedHiding(hide);
+    });
 
   $('#sm_compaction_template')
     .val(s.compaction_template)
@@ -2225,7 +2809,7 @@ function bindSettingsUI() {
 
   $('#sm_generate_canon').on('click', async function () {
     if (isCatchUpRunning()) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) {
       toastr.warning('No character loaded.', 'Smart Memory');
       return;
@@ -2277,7 +2861,7 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().longterm_enabled = $(this).prop('checked');
       saveSettingsDebounced();
-      injectMemories(getCurrentCharacterName(), isFreshStart()).catch(console.error);
+      injectMemories(getSelectedCharacterName(), isFreshStart()).catch(console.error);
     });
 
   $('#sm_longterm_consolidate')
@@ -2391,13 +2975,13 @@ function bindSettingsUI() {
   $('#sm_fresh_start').on('change', async function () {
     const val = $(this).prop('checked');
     await setFreshStart(val);
-    await injectMemories(getCurrentCharacterName(), val);
+    await injectMemories(getSelectedCharacterName(), val);
   });
 
   $('#sm_extract_now').on('click', async function () {
     if (isCatchUpRunning()) return;
     if (extractionRunning || consolidationRunning) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) return;
     extractionRunning = true;
     $(this).prop('disabled', true);
@@ -2424,7 +3008,7 @@ function bindSettingsUI() {
 
   $('#sm_clear_memories').on('click', function () {
     if (isCatchUpRunning()) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) return;
     if (!confirm(`Clear all memories for "${characterName}"?`)) return;
     clearCharacterMemories(characterName);
@@ -2774,19 +3358,34 @@ function bindSettingsUI() {
       toastr.warning('An extraction is already running.', 'Smart Memory', { timeOut: 3000 });
       return;
     }
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) {
       toastr.warning('No character is active.', 'Smart Memory', { timeOut: 3000 });
       return;
     }
 
-    // Warn if memories already exist - running catch-up again on the same chat
-    // can introduce near-duplicate entries that displace lower-importance ones.
-    const existingMemories = loadCharacterMemories(characterName);
-    if (existingMemories.length > 0) {
+    // In group chats, build the full list of active member names so long-term
+    // extraction runs for every character, not just the one in the selector.
+    // Solo chats collapse to a single-element array using the active character.
+    const catchUpContext = getContext();
+    const catchUpCharacterNames = (() => {
+      if (!catchUpContext.groupId) return [characterName];
+      const group = catchUpContext.groups?.find((g) => g.id === catchUpContext.groupId);
+      if (!group) return [characterName];
+      return group.members
+        .filter((avatar) => !(group.disabled_members ?? []).includes(avatar))
+        .map((avatar) => catchUpContext.characters.find((c) => c.avatar === avatar)?.name)
+        .filter(Boolean);
+    })();
+
+    // Warn if memories already exist for any character in the list.
+    const existingMemories = catchUpCharacterNames.some(
+      (name) => loadCharacterMemories(name).length > 0,
+    );
+    if (existingMemories) {
       if (
         !confirm(
-          'Memories already exist for this character. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
+          'Memories already exist for one or more characters. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
         )
       )
         return;
@@ -2849,20 +3448,28 @@ function bindSettingsUI() {
           `Catching up... (${i}/${total} messages, ${Math.round((i / total) * 100)}%)`,
         );
 
-        if (settings.longterm_enabled && characterName) {
-          setStatusMessage(`Catching up... (${i}/${total} messages - extracting long-term)`);
-          await extractAndStoreMemories(characterName, chunk).catch((err) => {
-            console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
-          });
-          // Consolidate after each chunk so near-duplicates are collapsed before
-          // the next chunk can add more similar entries. Without this, a full chat
-          // with many thematically similar exchanges floods the unprocessed queue
-          // with variants that all slip under the per-entry Jaccard threshold.
-          if (settings.longterm_consolidate) {
-            setStatusMessage(`Catching up... (${i}/${total} messages - consolidating long-term)`);
-            await consolidateMemories(characterName).catch((err) => {
-              console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
+        if (settings.longterm_enabled) {
+          for (const name of catchUpCharacterNames) {
+            // Filter chunk to this character's messages + user messages, matching
+            // the Phase 2 per-character window filtering used in automatic extraction.
+            const nameChunk = catchUpContext.groupId
+              ? chunk.filter((m) => m.is_user || m.name === name)
+              : chunk;
+            if (nameChunk.length === 0) continue;
+            setStatusMessage(
+              `Catching up... (${i}/${total} messages - extracting long-term for ${name})`,
+            );
+            await extractAndStoreMemories(name, nameChunk).catch((err) => {
+              console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
             });
+            // Consolidate after each chunk so near-duplicates are collapsed before
+            // the next chunk can add more similar entries.
+            if (settings.longterm_consolidate) {
+              setStatusMessage(`Catching up... (${i}/${total} messages - consolidating ${name})`);
+              await consolidateMemories(name).catch((err) => {
+                console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
+              });
+            }
           }
         }
         if (settings.session_enabled) {
@@ -2954,11 +3561,13 @@ function bindSettingsUI() {
         // Final consolidation pass for any entries that didn't accumulate enough
         // to hit the per-chunk threshold (e.g. a type that only got 1-2 new entries
         // across the whole chat). Forces consolidation regardless of threshold.
-        if (settings.longterm_enabled && settings.longterm_consolidate && characterName) {
-          setStatusMessage('Consolidating long-term memories...');
-          await consolidateMemories(characterName, true).catch((err) => {
-            console.error('[SmartMemory] Catch-up final consolidation failed:', err);
-          });
+        if (settings.longterm_enabled && settings.longterm_consolidate) {
+          for (const name of catchUpCharacterNames) {
+            setStatusMessage(`Consolidating long-term memories for ${name}...`);
+            await consolidateMemories(name, true).catch((err) => {
+              console.error('[SmartMemory] Catch-up final consolidation failed:', err);
+            });
+          }
           updateTokenDisplay();
         }
         if (settings.session_enabled) {
@@ -2989,15 +3598,24 @@ function bindSettingsUI() {
 
       // Generate character & world profiles once at the end of a completed run.
       // Skipped on cancel - partial data may produce low-quality profiles.
-      if (!catchUpCancelled && settings.profiles_enabled && characterName) {
-        setStatusMessage('Generating character & world profiles...');
-        const profiles = await generateProfiles(characterName).catch((err) => {
-          console.error('[SmartMemory] Catch-up profile generation failed:', err);
-          return null;
-        });
-        if (profiles) {
-          injectProfiles();
-          updateProfilesUI(profiles);
+      if (!catchUpCancelled && settings.profiles_enabled) {
+        for (const name of catchUpCharacterNames) {
+          setStatusMessage(`Generating character & world profiles for ${name}...`);
+          const profiles = await generateProfiles(name).catch((err) => {
+            console.error('[SmartMemory] Catch-up profile generation failed:', err);
+            return null;
+          });
+          // Update UI with the selected character's profiles - other characters'
+          // profiles are stored but only the active character is displayed.
+          if (profiles && name === characterName) {
+            injectProfiles(name);
+            updateProfilesUI(profiles);
+          }
+        }
+        // If the selected character wasn't in the group (edge case), inject
+        // whatever profiles exist for them anyway.
+        if (!catchUpCharacterNames.includes(characterName)) {
+          injectProfiles(characterName);
         }
       }
 
@@ -3007,11 +3625,12 @@ function bindSettingsUI() {
       injectSessionMemories();
       injectSceneHistory();
       injectArcs();
-      injectProfiles();
+      injectProfiles(characterName);
       updateLongTermUI(characterName);
       updateSessionUI();
       updateScenesUI();
       updateArcsUI();
+      updateProfilesUI(loadProfiles(characterName));
       updateEntityPanel(characterName);
       updateTokenDisplay();
       saveSettingsDebounced();
@@ -3057,7 +3676,7 @@ function bindSettingsUI() {
     )
       return;
 
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     const context = getContext();
     if (!context.chatMetadata) context.chatMetadata = {};
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
@@ -3080,7 +3699,7 @@ function bindSettingsUI() {
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
-    injectProfiles();
+    injectProfiles(characterName);
 
     updateShortTermUI(null);
     updateSessionUI();
@@ -3097,7 +3716,7 @@ function bindSettingsUI() {
   // ---- Fresh Start ----------------------------------------------------
   $('#sm_fresh_start_button').on('click', async function () {
     if (isCatchUpRunning()) return;
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
       !confirm(
@@ -3126,7 +3745,7 @@ function bindSettingsUI() {
     await clearSceneHistory();
     await clearArcs();
     await clearArcSummaries();
-    await clearProfiles();
+    await clearProfiles(characterName);
     // Dismiss any open recap modal.
     $('#sm_recap_overlay').remove();
 
@@ -3138,7 +3757,7 @@ function bindSettingsUI() {
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
-    injectProfiles();
+    injectProfiles(characterName);
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);
@@ -3198,7 +3817,7 @@ function bindSettingsUI() {
         setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
         updateTokenDisplay();
       } else {
-        injectProfiles();
+        injectProfiles(getSelectedCharacterName());
       }
     });
 
@@ -3227,7 +3846,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_profiles_regenerate').on('click', async function () {
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     if (!characterName) {
       toastr.warning('No active character - profiles need a character.', 'Smart Memory', {
         timeOut: 3000,
@@ -3240,7 +3859,7 @@ function bindSettingsUI() {
     try {
       const profiles = await generateProfiles(characterName);
       if (profiles) {
-        injectProfiles();
+        injectProfiles(characterName);
         updateProfilesUI(profiles);
         setStatusMessage('Profiles updated.');
       } else {
@@ -3262,7 +3881,7 @@ function bindSettingsUI() {
       getSettings().profiles_inject_budget = val;
       $profilesBudgetVal.text(val + ' tokens');
       saveSettingsDebounced();
-      injectProfiles();
+      injectProfiles(getSelectedCharacterName());
     });
   $profilesBudgetVal.text((s.profiles_inject_budget ?? 400) + ' tokens');
 
@@ -3271,7 +3890,7 @@ function bindSettingsUI() {
   $('input[name="sm_profiles_position"]').on('change', function () {
     getSettings().profiles_position = parseInt($(this).val(), 10);
     saveSettingsDebounced();
-    injectProfiles();
+    injectProfiles(getSelectedCharacterName());
   });
 
   $('#sm_profiles_depth')
@@ -3279,7 +3898,7 @@ function bindSettingsUI() {
     .on('input', function () {
       getSettings().profiles_depth = parseInt($(this).val(), 10);
       saveSettingsDebounced();
-      injectProfiles();
+      injectProfiles(getSelectedCharacterName());
     });
 
   $('#sm_profiles_role')
@@ -3287,12 +3906,19 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().profiles_role = parseInt($(this).val(), 10);
       saveSettingsDebounced();
-      injectProfiles();
+      injectProfiles(getSelectedCharacterName());
     });
 
-  updateProfilesUI(loadProfiles());
+  updateProfilesUI(loadProfiles(getSelectedCharacterName()));
 
   // ---- Continuity checker ---------------------------------------------
+  $('#sm_auto_check')
+    .prop('checked', s.continuity_auto_check)
+    .on('change', function () {
+      getSettings().continuity_auto_check = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
   $('#sm_auto_repair')
     .prop('checked', s.continuity_auto_repair)
     .on('change', function () {
@@ -3309,7 +3935,7 @@ function bindSettingsUI() {
     });
 
   $('#sm_check_continuity').on('click', async function () {
-    const characterName = getCurrentCharacterName();
+    const characterName = getSelectedCharacterName();
     $(this).prop('disabled', true);
     setStatusMessage('Checking continuity...');
     $('#sm_continuity_result').hide().empty();
@@ -3382,6 +4008,9 @@ jQuery(async function () {
   eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
   eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
+  eventSource.on(event_types.GROUP_WRAPPER_STARTED, onGroupWrapperStarted);
+  eventSource.on(event_types.GROUP_MEMBER_DRAFTED, onGroupMemberDrafted);
+  eventSource.on(event_types.GROUP_WRAPPER_FINISHED, onGroupWrapperFinished);
 
   // When the user swipes, immediately abort any in-flight Ollama or
   // OpenAI-compat memory generation. Without this, the swipe generation request

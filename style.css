@@ -1153,3 +1153,11 @@
   margin-top: 18px;
   text-align: right;
 }
+
+/* Profile-gated controls: dimmed and non-interactive when the active profile
+   does not support the feature. The disabled state is toggled by syncProfileGating(). */
+#smart_memory_settings .sm-profile-b-only.sm-gated {
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+}

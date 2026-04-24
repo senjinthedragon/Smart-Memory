@@ -677,6 +677,18 @@ function migrateChat_v2(chatMeta) {
   return { ...chatMeta, sessionMemories };
 }
 
+// v3: profiles are now stored per-character as profiles[characterName].
+// Old flat profiles objects (identifiable by having character_state directly)
+// are a regenerable cache - drop them so they regenerate in the new structure.
+function migrateChat_v3(chatMeta) {
+  if (chatMeta.profiles && typeof chatMeta.profiles.character_state === 'string') {
+    const updated = { ...chatMeta };
+    delete updated.profiles;
+    return updated;
+  }
+  return chatMeta;
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn> - add new entries here when SCHEMA_VERSION is bumped.
 
@@ -688,6 +700,7 @@ const CHARACTER_MIGRATIONS = new Map([
 const CHAT_MIGRATIONS = new Map([
   [1, migrateChat_v1],
   [2, migrateChat_v2],
+  [3, migrateChat_v3],
 ]);
 
 // ---- Migration runner -------------------------------------------------------
