@@ -177,41 +177,27 @@ export async function generateProfiles(characterName) {
  * @returns {string}
  */
 function formatProfiles(profiles, budget) {
-  const parts = [];
+  // Build sections in priority order: character_state is least important
+  // (drop first to preserve relationship context), relationship_matrix last.
+  const sections = [
+    { key: 'character_state', label: 'Character state:' },
+    { key: 'world_state', label: 'World state:' },
+    { key: 'relationship_matrix', label: 'Relationships:' },
+  ];
 
-  if (profiles.character_state) {
-    parts.push(`Character state:\n${profiles.character_state}`);
-  }
-  if (profiles.world_state) {
-    parts.push(`World state:\n${profiles.world_state}`);
-  }
-  if (profiles.relationship_matrix) {
-    parts.push(`Relationships:\n${profiles.relationship_matrix}`);
-  }
+  // Start with all non-empty sections as a mutable array of text blocks.
+  // Trimming rebuilds from the array rather than text-replacing, so repeated
+  // phrasings across sections cannot cause partial removal.
+  const activeParts = sections
+    .filter(({ key }) => profiles[key])
+    .map(({ key, label }) => `${label}\n${profiles[key]}`);
 
-  let text = parts.join('\n\n');
-
-  // Trim to budget by removing the least-important section (relationship_matrix
-  // last, character_state first to preserve scene/relationship context).
-  const sections = ['character_state', 'world_state', 'relationship_matrix'];
-  let trimIdx = 0;
-  while (estimateTokens(text) > budget && trimIdx < sections.length) {
-    const toRemove = sections[trimIdx++];
-    const removed = profiles[toRemove];
-    if (!removed) continue;
-    const label =
-      toRemove === 'character_state'
-        ? 'Character state:'
-        : toRemove === 'world_state'
-          ? 'World state:'
-          : 'Relationships:';
-    text = text
-      .replace(`${label}\n${removed}`, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+  // Drop sections from the front (least important first) until under budget.
+  while (estimateTokens(activeParts.join('\n\n')) > budget && activeParts.length > 1) {
+    activeParts.shift();
   }
 
-  return text;
+  return activeParts.join('\n\n');
 }
 
 /**

@@ -288,10 +288,14 @@ export function parseContradictions(text) {
     .find((l) => l.length > 0);
   if (firstLine && ALL_CLEAR_PATTERNS.some((p) => p.test(firstLine))) return [];
 
-  return text
-    .split('\n')
-    .map((line) => line.replace(/^[-•*\d.]+\s*/, '').trim())
-    .filter((line) => line.length > 0);
+  return (
+    text
+      .split('\n')
+      .map((line) => line.replace(/^[-•*\d.]+\s*/, '').trim())
+      // Lines ending with ':' are section headers ("Here are the issues I found:"),
+      // not contradictions. Filtering them prevents inflating the badge count.
+      .filter((line) => line.length > 0 && !line.endsWith(':'))
+  );
 }
 
 // ---- Summary formatting -------------------------------------------------

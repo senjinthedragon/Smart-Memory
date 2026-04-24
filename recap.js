@@ -39,13 +39,14 @@ import { RECAP_PROMPT } from './prompts.js';
  * Uses a non-debounced save so the timestamp reaches disk immediately - if
  * the user switches chats before a debounced save fires, the stale timestamp
  * on disk would cause a spurious recap the next time they return.
+ * Returns the save promise so async callers can await it at critical sites.
  */
-export function updateLastActive() {
+export async function updateLastActive() {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].lastActive = Date.now();
-  context.saveMetadata?.();
+  await context.saveMetadata?.();
 }
 
 /**

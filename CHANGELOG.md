@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Arc summaries stored without source backlinks**: resolved arcs were saved
+  with empty `source_scene_ids` and `source_memory_ids` arrays even though
+  the scene timestamps and memory ids were already computed for the prompt
+  context. These fields are now populated so future traceability features
+  have correct backlinks to the scenes and memories the arc drew from.
+- **Canon token-budget trim ignored when no sentence boundary found**: the
+  trim loop broke immediately on canon text with no period (e.g. bullet-only
+  output), silently returning over-budget content. A proportional character-
+  count fallback now applies when no period is found.
+- **Profiles trim loop could leave partial sections**: the budget trim in
+  profile injection used string replacement, which could leave a partial
+  section in place if the same text appeared more than once. Trimming now
+  rebuilds the text from a filtered sections array.
+- **Profile schema not migrated before group chat reads on load**: the
+  selected character's data container was read (for injection and UI) before
+  any migration ran in the group chat load path. The selected character is
+  now migrated immediately after the group selector is populated, consistent
+  with the solo path.
+- **Migration guard did not detect in-place mutations on nested objects**: the
+  non-destructive assertion used a shallow reference snapshot, so a step that
+  mutated a nested array in place would pass undetected. A `structuredClone`
+  deep snapshot is now taken before each step.
+- **AI scene break detection silently swallowed errors**: a model failure was
+  indistinguishable from a clean "not a scene break" result with no log entry.
+  Errors are now logged before returning false.
+- **Continuity repair save promises not observed**: `injectRepair` and
+  `clearRepair` called `saveMetadata()` without handling the returned promise.
+  Unhandled rejections are now caught and logged.
 - **Recap overlay persisting across chat switches**: switching to a different
   chat while the "Previously on..." modal was still open left it blocking the
   input area until the next AI response dismissed it. The overlay is now

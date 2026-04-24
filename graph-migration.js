@@ -770,10 +770,17 @@ function applyMigrations(container, steps) {
     if (entry) {
       const stepFn = typeof entry === 'function' ? entry : entry.fn;
       const allowDelete = new Set(typeof entry === 'function' ? [] : (entry.deletePaths ?? []));
-      const before = current;
+      // Deep-clone before the step so assertNonDestructive can detect in-place
+      // mutations on nested objects, not just shallow key deletions.
+      const before = structuredClone(current);
       current = stepFn(current);
       assertNonDestructive(before, current, version + 1, '', allowDelete);
       smLog(`[SmartMemory] Applied migration step v${version + 1}.`);
+    } else {
+      // A missing step is expected when one registry has no change for this
+      // version (e.g. CHAT_MIGRATIONS has v3 but CHARACTER_MIGRATIONS does not).
+      // Log so it is visible in debug but do not throw.
+      smLog(`[SmartMemory] No migration step for v${version + 1} in this registry - skipping.`);
     }
     version++;
   }

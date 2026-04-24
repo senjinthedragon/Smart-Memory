@@ -83,7 +83,8 @@ async function detectSceneBreakAI(messageText, previousMessageText) {
     const prompt = buildSceneDetectPrompt(messageText, previousMessageText);
     const response = await generateMemoryExtract(prompt, { responseLength: 5 });
     return response?.trim().toUpperCase().startsWith('YES') ?? false;
-  } catch {
+  } catch (err) {
+    console.error('[SmartMemory] AI scene break detection failed:', err);
     return false;
   }
 }
@@ -188,6 +189,9 @@ export async function processSceneBreak(lastMessageText, recentMessages, previou
   // Skip if the new summary is too similar to the most recent stored scene.
   // Prevents duplicate entries when the heuristic fires multiple times on
   // the same narrative event.
+  // 0.5 is intentionally higher than the arc dedup threshold (0.4) - scene
+  // summaries are shorter and more concrete so the same threshold would be
+  // too permissive for near-identical phrasings.
   const SCENE_DEDUP_THRESHOLD = 0.5;
   const lastScene = history[history.length - 1];
   if (lastScene && sceneJaccard(summary, lastScene.summary) >= SCENE_DEDUP_THRESHOLD) {

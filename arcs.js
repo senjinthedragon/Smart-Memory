@@ -163,16 +163,16 @@ export async function clearArcSummaries() {
 }
 
 /**
- * Generates a paragraph summary for a resolved arc and stores it in the
- * arc summaries list. Collects scene summaries and memory ids that were
- * linked to scenes during the arc for context.
+ * Generates a paragraph summary for a resolved arc. Collects scene summaries
+ * and memory ids that were linked to scenes during the arc for context, and
+ * returns them alongside the summary so the caller can store backlinks.
  *
  * Fires once per resolved arc when extraction flags arcs as closed.
  * On Profile A the call is bundled into the same extraction window to
  * avoid adding a standalone model call.
  *
  * @param {string} arcContent - The resolved arc's content string.
- * @returns {Promise<string|null>} The generated summary, or null on failure.
+ * @returns {Promise<{summary: string, sourceSceneTs: number[], sourceMemoryIds: string[]}|null>}
  */
 async function generateArcSummary(arcContent) {
   const settings = extension_settings[MODULE_NAME];
@@ -195,7 +195,12 @@ async function generateArcSummary(arcContent) {
     responseLength: settings.arc_summary_response_length ?? 300,
   });
 
-  return response?.trim() || null;
+  if (!response?.trim()) return null;
+  return {
+    summary: response.trim(),
+    sourceSceneTs: sceneHistory.map((s) => s.ts),
+    sourceMemoryIds: [...allMemoryIds],
+  };
 }
 
 // ---- Extraction ---------------------------------------------------------
@@ -236,18 +241,21 @@ export async function extractArcs(messages) {
     // Generate arc summaries for each resolved arc before removing them.
     // Sequential calls - Ollama serializes anyway and parallel calls risk OOM.
     if (resolve.length > 0) {
+      // `existing` is captured before this loop. A concurrent arc-delete via the
+      // UI during the model call could make existing[idx] stale, but the window
+      // is narrow enough in practice that we accept it here rather than re-fetching.
       const arcSummaries = loadArcSummaries();
       for (const idx of resolve) {
         const resolved = existing[idx];
         if (!resolved) continue;
         try {
-          const summary = await generateArcSummary(resolved.content);
-          if (summary) {
+          const result = await generateArcSummary(resolved.content);
+          if (result) {
             arcSummaries.push({
-              summary,
+              summary: result.summary,
               arc: resolved.content,
-              source_scene_ids: [],
-              source_memory_ids: [],
+              source_scene_ids: result.sourceSceneTs,
+              source_memory_ids: result.sourceMemoryIds,
               ts: Date.now(),
             });
             smLog(`[SmartMemory] Arc summary generated for: "${resolved.content.slice(0, 60)}"`);
@@ -267,6 +275,9 @@ export async function extractArcs(messages) {
     afterResolve = deduplicateArcs(afterResolve);
 
     // Drop new arcs that are semantically redundant with what remains.
+    // 0.4 is intentionally lower than the scene dedup threshold (0.5) - arc
+    // content is longer narrative text where Jaccard overlap is naturally
+    // sparser, so a lower bar is needed to catch genuine paraphrases.
     const ARC_DEDUP_THRESHOLD = 0.4;
     const dedupedAdd = add.filter(
       (newArc, idx) =>

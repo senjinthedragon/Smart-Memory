@@ -172,7 +172,7 @@ export function injectRepair(repairNote) {
   const context = getContext();
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY][REPAIR_KEY] = repairNote;
-  context.saveMetadata();
+  context.saveMetadata()?.catch(console.error);
 
   setExtensionPrompt(
     PROMPT_KEY_REPAIR,
@@ -192,7 +192,7 @@ export function clearRepair() {
   const context = getContext();
   if (context.chatMetadata?.[META_KEY]) {
     delete context.chatMetadata[META_KEY][REPAIR_KEY];
-    context.saveMetadata();
+    context.saveMetadata()?.catch(console.error);
   }
   setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
 }

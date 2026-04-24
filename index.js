@@ -900,6 +900,10 @@ async function onChatChangedImpl() {
     // Show the group character selector and pre-populate panels and token
     // display for whichever member is selected (first member by default).
     updateGroupCharSelector();
+    // Migrate the selected character's data container before any reads so that
+    // confidence/decay fields and other v2+ additions are present. Other members
+    // are migrated lazily on their first onGroupMemberDrafted.
+    if (selectedGroupCharacter) ensureCharacterMigrated(selectedGroupCharacter);
     await injectMemories(selectedGroupCharacter, isFreshStart());
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
@@ -931,7 +935,7 @@ async function onChatChangedImpl() {
       }
     }
 
-    updateLastActive();
+    await updateLastActive();
     return;
   }
 
@@ -1023,7 +1027,7 @@ async function onChatChangedImpl() {
     }
   }
 
-  updateLastActive();
+  await updateLastActive();
 }
 
 // ---- Group chat helpers -------------------------------------------------
@@ -1037,13 +1041,19 @@ async function onChatChangedImpl() {
 function updateGroupCharSelector() {
   const context = getContext();
   const group = context.groups?.find((g) => g.id === context.groupId);
-  if (!group) return;
+  if (!group) {
+    smLog('[SmartMemory] updateGroupCharSelector: group not found for groupId', context.groupId);
+    return;
+  }
 
   const members = (group.members ?? [])
     .map((avatarId) => context.characters.find((c) => c.avatar === avatarId)?.name)
     .filter(Boolean);
 
-  if (members.length === 0) return;
+  if (members.length === 0) {
+    smLog('[SmartMemory] updateGroupCharSelector: no resolvable members in group', group.id);
+    return;
+  }
 
   const $select = $('#sm_group_char_select');
   $select.empty();
@@ -1409,6 +1419,9 @@ async function onGroupWrapperFinished({ type } = {}) {
 
   // Step 4 (Profile B only): scheduled profile regen between extraction passes.
   // Run for each character who responded this round.
+  // Note: step 3 resets messagesSinceLastProfileRegen to 0 whenever profiles
+  // are regenerated during extraction, so this block only fires on rounds
+  // where extraction did not run (i.e. between extraction-frequency intervals).
   if (
     settings.profiles_enabled &&
     (settings.profiles_regen_every ?? 0) > 0 &&
@@ -1470,7 +1483,7 @@ async function onGroupWrapperFinished({ type } = {}) {
   }
 
   // Step 8: update lastActive.
-  updateLastActive();
+  await updateLastActive();
 }
 
 // ---- UI helpers ---------------------------------------------------------

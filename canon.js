@@ -166,7 +166,12 @@ export function injectCanon(characterName) {
   let text = canon.text;
   while (estimateTokens(text) > budget && text.length > 100) {
     const lastPeriod = text.lastIndexOf('.', text.length - 2);
-    if (lastPeriod < 0) break;
+    if (lastPeriod < 0) {
+      // No sentence boundary found (e.g. bullet-only canon) - hard-truncate
+      // proportionally so the budget is still respected.
+      text = text.slice(0, Math.round(text.length * (budget / estimateTokens(text)))).trim();
+      break;
+    }
     text = text.slice(0, lastPeriod + 1).trim();
   }
 
