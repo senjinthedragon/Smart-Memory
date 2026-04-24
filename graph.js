@@ -612,6 +612,7 @@ function nodeAtWorld(wx, wy) {
  */
 function bindEvents(canvas, $overlay, characterName) {
   // ---- Mouse move: hover + drag + pan ----
+  // Bound on document so drag and pan continue when the cursor leaves the canvas.
   const onMouseMove = (e) => {
     if (!gs) return;
     const world = mouseToWorld(e);
@@ -635,7 +636,14 @@ function bindEvents(canvas, $overlay, characterName) {
       return;
     }
 
-    const node = nodeAtWorld(world.x, world.y);
+    // Hover detection: only when cursor is actually over the canvas.
+    const rect = canvas.getBoundingClientRect();
+    const overCanvas =
+      e.clientX >= rect.left &&
+      e.clientX <= rect.right &&
+      e.clientY >= rect.top &&
+      e.clientY <= rect.bottom;
+    const node = overCanvas ? nodeAtWorld(world.x, world.y) : null;
     if (node !== gs.hovered) {
       gs.hovered = node;
       canvas.style.cursor = node ? 'pointer' : 'grab';
@@ -666,22 +674,25 @@ function bindEvents(canvas, $overlay, characterName) {
   };
 
   // ---- Mouse up: end drag or pan, handle click ----
+  // Bound on document so releasing outside the canvas still clears drag/pan state.
   const onMouseUp = (e) => {
     if (!gs) return;
     if (gs.dragging) {
       const node = gs.dragging;
       node.fixed = false;
       gs.dragging = null;
+      gs._endedDrag = true; // suppress the overlay click-outside handler this cycle
       canvas.style.cursor = 'pointer';
       return;
     }
     if (gs.panning) {
       gs.panning = false;
+      gs._endedDrag = true;
       canvas.style.cursor = 'grab';
       return;
     }
-    // Click: select/deselect.
-    if (e.button === 0) {
+    // Click: select/deselect - only when released over the canvas.
+    if (e.button === 0 && e.target === canvas) {
       const world = mouseToWorld(e);
       const node = nodeAtWorld(world.x, world.y);
       gs.selected = node === gs.selected ? null : node;
@@ -708,17 +719,17 @@ function bindEvents(canvas, $overlay, characterName) {
     if (e.key === 'Escape') closeGraph();
   };
 
-  canvas.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mouseup', onMouseUp);
+  document.addEventListener('mouseup', onMouseUp);
   canvas.addEventListener('wheel', onWheel, { passive: false });
   document.addEventListener('keydown', onKeyDown);
 
   // Store for cleanup.
   gs._cleanup = () => {
-    canvas.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mousemove', onMouseMove);
     canvas.removeEventListener('mousedown', onMouseDown);
-    canvas.removeEventListener('mouseup', onMouseUp);
+    document.removeEventListener('mouseup', onMouseUp);
     canvas.removeEventListener('wheel', onWheel);
     document.removeEventListener('keydown', onKeyDown);
   };
@@ -745,8 +756,12 @@ function bindEvents(canvas, $overlay, characterName) {
     rebuildGraph(characterName);
   });
 
-  // Click outside the card to close.
+  // Click outside the card to close - but not if a drag just ended.
   $overlay.on('click', (e) => {
+    if (gs?._endedDrag) {
+      gs._endedDrag = false;
+      return;
+    }
     if (e.target === $overlay[0]) closeGraph();
   });
 }
