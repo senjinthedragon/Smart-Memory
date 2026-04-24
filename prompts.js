@@ -185,15 +185,17 @@ ${longtermSection}${existingSection}RECENT EXCHANGES:\n${chatHistory}
 Extract NEW details worth remembering within this session. Focus on session-specific context: scene details, emotional beats, specific objects/names/places, and how things developed THIS session. Do not re-extract facts already in long-term memory.
 
 SKIP these - they do not belong in session memory:
-- Transient physical details that only matter for this exact moment (stained clothes, spilled food, current body positions)
+- Transient physical state that won't outlast this moment (stained clothes, spilled food, current body positions)
 - Generic atmosphere descriptions without story significance
 - Anything already captured in long-term memory above
 
+DO capture persistent physical anchors even if they feel minor - wounds sustained, physical features described for the first time, notable features of a named location, significant objects referenced by name. These ground the continuity checker.
+
 Types:
-- scene       - current or recently completed scene details (location, atmosphere, time)
+- scene       - current or recently completed scene details (location, atmosphere, time, spatial layout)
 - revelation  - something revealed or discovered in this exchange
 - development - how the relationship or situation changed
-- detail      - specific facts, names, objects, or details mentioned (e.g. "The whiskey is Dragon's Fire brand")
+- detail      - specific facts, names, objects, or physical details mentioned (e.g. "The whiskey is Dragon's Fire brand", "The inn has a locked cellar door", "She has green eyes")
 
 SCORING CRITERIA:
 - 1: Atmospheric or minor flavor detail
@@ -587,6 +589,7 @@ Your task: Extract NEW facts worth remembering in future sessions with this char
 
 Prioritization rules (strict):
 - Prioritize durable memories about the ACTIVE CHARACTER and their bond with the user.
+- Physical traits are durable facts - appearance, scars, injuries, distinctive features, notable possessions. Capture these at importance 2-3. They are the anchors a continuity checker depends on.
 - If temporary side characters appear, store only major lasting impact (e.g. a new ally/rival), not blow-by-blow dialogue.
 - Avoid over-capturing a single short-lived topic; keep long-term memory diverse and stable across many sessions.
 
@@ -611,6 +614,7 @@ If the memory involves specific NAMED entities (proper nouns with a specific nam
 
 Output ONLY one memory per line using this exact format (nothing else):
 [fact:2:permanent] The character's name is Elara and she works as a blacksmith.
+[fact:2:permanent:entity=Elara/character] Elara has a burn scar on her right forearm from an accident at the forge.
 [relationship:3:permanent:entity=Elara/character] We have developed a close friendship after helping each other escape the dungeon.
 [event:2:permanent:entity=Elara/character,Kael/character] Elara and Kael fought side by side at the bridge.
 [preference:2:session] The user enjoys slow-burn romance and witty banter.

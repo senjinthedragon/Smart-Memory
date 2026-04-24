@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memories). Timestamps now fall back to the `ts` field (Unix ms, set on
   every memory at creation) formatted as a locale date/time string.
 
+### Changed
+
+- **Extraction prompts now explicitly prioritize physical anchors**: both the
+  long-term and session extraction prompts have been updated to treat physical
+  traits (appearance, scars, injuries, distinctive features, location layout,
+  notable objects) as first-class captures rather than skipping them as
+  transient. The long-term prompt adds physical traits to the prioritization
+  block with a note that they anchor the continuity checker. The session prompt
+  narrows its skip rule to genuinely transient state (wet sleeve, spilled food)
+  and adds a positive `DO capture` directive for persistent physical anchors.
+
 ## [1.5.1] - 2026-04-24
 
 ### Fixed
