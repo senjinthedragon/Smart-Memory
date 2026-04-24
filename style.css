@@ -291,6 +291,24 @@
   color: #fff;
 }
 
+#smart_memory_settings .sm_memory_importance {
+  flex-shrink: 0;
+  font-size: 0.65em;
+  letter-spacing: 1px;
+}
+
+#smart_memory_settings .sm_importance_1 {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+#smart_memory_settings .sm_importance_2 {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+#smart_memory_settings .sm_importance_3 {
+  color: #f0c060;
+}
+
 #smart_memory_settings .sm_type_fact {
   background: #4a6fa5;
 }
