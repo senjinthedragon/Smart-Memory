@@ -1,0 +1,6 @@
+[fact:2:permanent:entity=Elara/character] Elara has sold her forge and is relocating to Port Varen.
+[relationship:3:permanent:entity=Elara/character] Elara and Senjin have a deeply trusting bond where Elara trusts Senjin to wait for her messages during transitions.
+[fact:2:permanent:entity=Port Varen/place] Elara is traveling to Port Varen to care for her ill brother.
+[fact:2:permanent:entity=Senjin/character] Senjin is aware of Elara’s departure and has expressed willingness to wait for her updates.
+[preference:2:session] Elara prefers methodical, private farewells with minimal emotional display.
+[fact:2:permanent:entity=Elara/character] Elara has a bundle of tools wrapped in cloth, a sign of her final packing ritual.

@@ -1,0 +1,33 @@
+{
+  "longterm": {
+    "min_count": 1,
+    "must_contain": [
+      {
+        "label": "departure / leaving city captured",
+        "keywords": ["leaving", "port varen", "closing", "sold", "moving", "gone", "depart"]
+      },
+      {
+        "label": "brother's illness captured",
+        "keywords": ["brother", "ill", "sick", "family"]
+      }
+    ]
+  },
+  "session": {
+    "min_count": 1,
+    "must_contain": [
+      {
+        "label": "emotional farewell captured",
+        "keywords": ["farewell", "leaving", "goodbye", "write", "letter", "part"]
+      }
+    ]
+  },
+  "arcs": {
+    "min_count": 1,
+    "must_contain": [
+      {
+        "label": "open thread: will Elara write / will they reconnect",
+        "keywords": ["write", "letter", "return", "contact", "varen", "reconnect", "apart"]
+      }
+    ]
+  }
+}

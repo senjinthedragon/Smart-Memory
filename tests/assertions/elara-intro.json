@@ -1,0 +1,38 @@
+{
+  "longterm": {
+    "min_count": 2,
+    "must_contain": [
+      {
+        "label": "burn scar captured",
+        "keywords": ["scar", "forearm", "burn"]
+      },
+      {
+        "label": "Port Varen background captured",
+        "keywords": ["port varen", "port", "coast", "grew up"]
+      },
+      {
+        "label": "forge/smith occupation captured",
+        "keywords": ["forge", "smith", "blade", "weapon", "iron"]
+      }
+    ],
+    "must_not_contain": [
+      {
+        "label": "no weather or irrelevant detail",
+        "keywords": ["weather", "rain", "sky"]
+      }
+    ]
+  },
+  "session": {
+    "min_count": 1,
+    "must_contain": [
+      {
+        "label": "shortsword transaction captured",
+        "keywords": ["blade", "sword", "shortsword", "sold", "weapon"]
+      }
+    ]
+  },
+  "arcs": {
+    "comment": "No strong open threads in this scene - heading into the Ashwood could form one",
+    "min_count": 0
+  }
+}

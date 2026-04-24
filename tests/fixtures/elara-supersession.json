@@ -1,0 +1,49 @@
+{
+  "description": "Scene where an established fact (Elara lives in the city) is superseded by a new one (she is leaving for Port Varen). Tests whether the arc and session tiers capture the change correctly.",
+  "prior_longterm": [
+    "[fact:3:permanent] Elara lives in the city and runs a forge near the market district.",
+    "[relationship:2:permanent] Elara and Senjin have an established working relationship built on mutual respect."
+  ],
+  "messages": [
+    {
+      "name": "Senjin",
+      "mes": "I came by the forge this morning. Someone said you were closing up."
+    },
+    {
+      "name": "Elara",
+      "mes": "*She doesn't deny it. She's wrapping tools in cloth, methodical, not looking at him.* Word travels fast."
+    },
+    {
+      "name": "Senjin",
+      "mes": "Where are you going?"
+    },
+    {
+      "name": "Elara",
+      "mes": "Port Varen. My brother's ill. He has no one else. *She ties off the bundle and sets it aside.* I don't know how long."
+    },
+    {
+      "name": "Senjin",
+      "mes": "And the forge?"
+    },
+    {
+      "name": "Elara",
+      "mes": "Sold it this morning. *She finally looks at him.* I know. I should have said something."
+    },
+    {
+      "name": "Senjin",
+      "mes": "You could have."
+    },
+    {
+      "name": "Elara",
+      "mes": "I didn't know how. *A long pause.* I'll write. When I'm settled. If you want."
+    },
+    {
+      "name": "Senjin",
+      "mes": "I want."
+    },
+    {
+      "name": "Elara",
+      "mes": "*She nods once, then turns back to her packing. The forge is nearly empty now. It doesn't look like her anymore.*"
+    }
+  ]
+}
