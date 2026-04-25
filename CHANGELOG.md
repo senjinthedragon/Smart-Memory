@@ -85,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Compaction summary reproducing injected memory context**: the compaction
+  model would sometimes copy canon, profiles, or other injected memory content
+  verbatim into the summary output, causing duplicate blocks in the prompt.
+  Both the full compaction prompt and the update prompt now explicitly instruct
+  the model to summarize only the actual roleplay exchanges and ignore any
+  injected memory context already stored at other tiers.
+
 - **Entity timeline timestamps showing "unknown"**: all memory entries in the
   entity timeline displayed "unknown" instead of a date because the `when`
   label only checked `valid_from` (message index, set only on superseding
