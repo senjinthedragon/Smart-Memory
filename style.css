@@ -196,45 +196,61 @@
   transition: width 0.35s ease;
 }
 
-/* ── Token usage legend ──────────────────────────────────────────────────── */
+/* ── Per-character group memory rows ─────────────────────────────────────── */
 
-#smart_memory_settings .sm-token-legend {
+#smart_memory_settings .sm-token-group-rows {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin: 4px 0 6px;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(128, 128, 128, 0.2);
 }
 
-#smart_memory_settings .sm-token-legend-row {
+#smart_memory_settings .sm-token-group-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.85em;
+  font-size: 0.82em;
+  opacity: 0.6;
 }
 
-#smart_memory_settings .sm-token-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+#smart_memory_settings .sm-token-group-row.sm-token-active {
+  opacity: 1;
+}
+
+#smart_memory_settings .sm-token-group-name {
+  min-width: 5em;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
-#smart_memory_settings .sm-token-tier-name {
-  flex: 1;
-  opacity: 0.8;
-}
-
-#smart_memory_settings .sm-token-count {
+#smart_memory_settings .sm-token-group-row.sm-token-active .sm-token-group-name {
   font-weight: 600;
-  min-width: 4em;
-  text-align: right;
 }
 
-#smart_memory_settings .sm-token-pct-col {
-  opacity: 0.5;
-  min-width: 3.5em;
+#smart_memory_settings .sm-token-mini-bar-wrap {
+  flex: 1;
+  height: 7px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.15);
+  overflow: hidden;
+}
+
+#smart_memory_settings .sm-token-mini-bar {
+  display: flex;
+  height: 100%;
+}
+
+#smart_memory_settings .sm-token-group-count {
+  min-width: 4.5em;
   text-align: right;
-  font-size: 0.9em;
+  flex-shrink: 0;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 #smart_memory_settings .sm-token-total {

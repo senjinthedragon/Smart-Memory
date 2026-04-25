@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Group chat memory comparison in token display**: the token usage bar now
+  shows a compact per-character row for every group member beneath the main
+  bar. Each row shows that character's stored personal memory footprint
+  (long-term, canon, and profiles) as a mini colour-coded bar with a token
+  count. Shared tiers (session, scenes, arcs, short-term) are the same for
+  all members and stay in the main bar only. The active character is
+  highlighted; inactive members are dimmed. The text legend that previously
+  appeared below the main bar has been removed - tier breakdowns are now on
+  hover tooltips on each bar segment.
+
 - **Extraction frequency dropdown**: simple mode gains an Extraction frequency
   selector (Low / Medium / High, mapping to every 5 / 3 / 1 messages) placed
   below the hardware profile. The individual per-tier extract-every sliders

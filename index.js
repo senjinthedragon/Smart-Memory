@@ -1569,6 +1569,57 @@ async function onGroupWrapperFinished({ type } = {}) {
 // ---- UI helpers ---------------------------------------------------------
 
 /**
+ * Returns the ordered list of character names in the current group chat,
+ * or null when not in a group chat.
+ * @returns {string[]|null}
+ */
+function getGroupMembers() {
+  const context = getContext();
+  if (!context.groupId) return null;
+  const group = context.groups?.find((g) => g.id === context.groupId);
+  if (!group) return null;
+  return (group.members ?? [])
+    .map((avatarId) => context.characters.find((c) => c.avatar === avatarId)?.name)
+    .filter(Boolean);
+}
+
+/**
+ * Estimates the stored token footprint of a character's personal memory tiers:
+ * long-term memories, canon, and profiles. Does not include shared tiers
+ * (session, scenes, arcs, short-term) which are identical for all group members.
+ *
+ * Reads from stored data rather than injected content, so values reflect the
+ * full memory footprint before budget trimming.
+ *
+ * @param {string} charName
+ * @returns {{ longterm: number, canon: number, profiles: number, total: number }}
+ */
+function estimateCharPersonalTokens(charName) {
+  const memories = loadCharacterMemories(charName).filter((m) => !m.superseded_by);
+  const longtermTokens =
+    memories.length > 0 ? estimateTokens(memories.map((m) => `- ${m.content}`).join('\n')) : 0;
+
+  const canon = loadCanon(charName);
+  const canonTokens = canon ? estimateTokens(canon) : 0;
+
+  const profiles = loadProfiles(charName);
+  const profileTokens = profiles
+    ? estimateTokens(
+        [profiles.character_state, profiles.world_state, profiles.relationship_matrix]
+          .filter(Boolean)
+          .join('\n'),
+      )
+    : 0;
+
+  return {
+    longterm: longtermTokens,
+    canon: canonTokens,
+    profiles: profileTokens,
+    total: longtermTokens + canonTokens + profileTokens,
+  };
+}
+
+/**
  * Metadata for each injection tier used by the token usage display.
  * Order determines the visual stacking order in the bar chart.
  */
@@ -1582,9 +1633,20 @@ const TOKEN_TIERS = [
   { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: '#5a9ea0' },
 ];
 
+// Personal tiers shown in per-character group rows. Shared tiers (session,
+// scenes, arcs, short-term) are omitted - they are identical across all group
+// members and already represented in the top bar.
+const PERSONAL_TIERS = [
+  { key: 'longterm', label: 'Long-term', color: '#4a6fa5' },
+  { key: 'canon', label: 'Canon', color: '#a05870' },
+  { key: 'profiles', label: 'Profiles', color: '#5a9ea0' },
+];
+
 /**
  * Reads the currently injected content for each tier from extension_prompts
- * and updates the token usage bar chart and breakdown legend.
+ * and updates the token usage bar chart and totals line. In group chats,
+ * also renders a compact per-character row for each group member showing their
+ * stored personal memory footprint (long-term, canon, profiles).
  *
  * Called after any injection or chat change so the display stays current.
  * Uses the estimateTokens heuristic (~4 chars/token) - fast, synchronous,
@@ -1592,15 +1654,10 @@ const TOKEN_TIERS = [
  */
 function updateTokenDisplay() {
   const bar = document.getElementById('sm_token_bar');
-  const legend = document.getElementById('sm_token_legend');
-  const usedEl = document.getElementById('sm_token_used');
-  const maxEl = document.getElementById('sm_token_max');
-  const pctEl = document.getElementById('sm_token_pct');
+  if (!bar) return;
 
-  // Panel may not be rendered yet on first call.
-  if (!bar || !legend) return;
+  // ---- Top bar: actual injected content for the active character ----------
 
-  // Measure each tier from what is actually injected right now.
   const tiers = TOKEN_TIERS.map((t) => ({
     ...t,
     tokens: estimateTokens(extension_prompts[t.key]?.value ?? ''),
@@ -1609,37 +1666,90 @@ function updateTokenDisplay() {
   const total = tiers.reduce((sum, t) => sum + t.tokens, 0);
   const maxContext = getContext().maxContext || 0;
 
-  // Rebuild bar segments - each segment's width is its share of total SM tokens.
+  // Each segment's width is its share of total SM tokens. The title tooltip
+  // carries the detail breakdown that the old legend used to show inline.
   bar.innerHTML = '';
   for (const tier of tiers) {
     const widthPct = total > 0 ? ((tier.tokens / total) * 100).toFixed(1) : 0;
+    const sharePct = total > 0 ? ((tier.tokens / total) * 100).toFixed(0) : 0;
     const seg = document.createElement('div');
     seg.className = 'sm-token-segment';
     seg.style.width = `${widthPct}%`;
     seg.style.background = tier.color;
-    seg.title = `${tier.label}: ~${tier.tokens.toLocaleString()} tokens`;
+    seg.title = `${tier.label}: ~${tier.tokens.toLocaleString()} tokens (${sharePct}%)`;
     bar.appendChild(seg);
   }
 
-  // Rebuild legend rows.
-  legend.innerHTML = '';
-  for (const tier of tiers) {
-    const sharePct = total > 0 ? ((tier.tokens / total) * 100).toFixed(0) : 0;
-    const row = document.createElement('div');
-    row.className = 'sm-token-legend-row';
-    row.innerHTML =
-      `<span class="sm-token-dot" style="background:${tier.color}"></span>` +
-      `<span class="sm-token-tier-name">${tier.label}</span>` +
-      `<span class="sm-token-count">~${tier.tokens.toLocaleString()}</span>` +
-      `<span class="sm-token-pct-col">${sharePct}%</span>`;
-    legend.appendChild(row);
-  }
-
-  // Update totals line.
   const contextPct = maxContext && total ? ((total / maxContext) * 100).toFixed(1) : '0';
+  const usedEl = document.getElementById('sm_token_used');
+  const maxEl = document.getElementById('sm_token_max');
+  const pctEl = document.getElementById('sm_token_pct');
   if (usedEl) usedEl.textContent = `~${total.toLocaleString()}`;
   if (maxEl) maxEl.textContent = maxContext ? maxContext.toLocaleString() : '?';
   if (pctEl) pctEl.textContent = contextPct;
+
+  // ---- Per-character rows (group chats only) ------------------------------
+
+  const groupRowsEl = document.getElementById('sm_token_group_rows');
+  if (!groupRowsEl) return;
+
+  const members = getGroupMembers();
+  if (!members || members.length === 0) {
+    groupRowsEl.style.display = 'none';
+    return;
+  }
+
+  groupRowsEl.style.display = '';
+  groupRowsEl.innerHTML = '';
+
+  const activeChar = getSelectedCharacterName();
+
+  for (const member of members) {
+    const personal = estimateCharPersonalTokens(member);
+    const isActive = member === activeChar;
+
+    const row = document.createElement('div');
+    row.className = 'sm-token-group-row' + (isActive ? ' sm-token-active' : '');
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'sm-token-group-name';
+    nameEl.textContent = member;
+    row.appendChild(nameEl);
+
+    const barWrap = document.createElement('div');
+    barWrap.className = 'sm-token-mini-bar-wrap';
+    const miniBar = document.createElement('div');
+    miniBar.className = 'sm-token-mini-bar';
+
+    if (personal.total > 0) {
+      for (const tier of PERSONAL_TIERS) {
+        const tierTokens = personal[tier.key];
+        if (tierTokens === 0) continue;
+        const widthPct = ((tierTokens / personal.total) * 100).toFixed(1);
+        const seg = document.createElement('div');
+        seg.className = 'sm-token-segment';
+        seg.style.width = `${widthPct}%`;
+        seg.style.background = tier.color;
+        seg.title = `${tier.label}: ~${tierTokens.toLocaleString()} tokens (stored)`;
+        miniBar.appendChild(seg);
+      }
+    }
+
+    barWrap.appendChild(miniBar);
+    row.appendChild(barWrap);
+
+    const countEl = document.createElement('span');
+    countEl.className = 'sm-token-group-count';
+    if (personal.total > 0) {
+      countEl.textContent = `~${personal.total.toLocaleString()}`;
+      countEl.title = 'Stored memory size before budget trimming';
+    } else {
+      countEl.textContent = 'no data';
+    }
+    row.appendChild(countEl);
+
+    groupRowsEl.appendChild(row);
+  }
 }
 
 /** Updates the status bar text shown at the top of the settings panel. */
