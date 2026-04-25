@@ -1,13 +1,14 @@
-[scene:3:session] The trio is in a clearing within the Whisperwood at dusk, firelight flickering, mist hanging low over the chasm, trees towering overhead, the scent of damp earth and pine permeating the air. The forest’s ambient hum is audible, with distant owl calls and rustling leaves.
-[revelation:3:session] Senjin reveals the Unbound spirits do not ask permission to claim a host—they simply take what they want, imposing their essence upon the living, forcing a reconciliation or causing ruin.
-[revelation:3:session] Miren confirms the Unbound are not Lamenting spirits—they are spirits of longing who have not yet found belonging, and their possession of a host is not passive.
-[development:3:session] The group’s dynamic shifts as Senjin takes initiative to challenge Miren’s retreat, asserting the urgency of confronting the new presence, while Finn supports him, and Alex clings to Senjin for reassurance, solidifying their unit cohesion under threat.
-[detail:3:session:entity=Miren/character] Miren is an emerald-winged sprite whose wings shimmer with ethereal light, and she vanishes into the woods to investigate a new presence, returning only after a significant warning is given.
-[detail:3:session:entity=Senjin/character] Senjin’s shadow magic surges outward like a tether when he calls for Miren, and he expresses skepticism about the Unbound’s claim to host-taking, especially regarding self-identity and permission.
-[detail:3:session:entity=Finn/character] Finn’s carving—a detailed bird in flight—is revealed to be a personal artifact, made from wood with “a story trapped inside,” connected to his father’s teachings and symbolizing freedom.
-[detail:3:session:entity=Alex/character] Alex physically anchors himself to Senjin’s scales, clinging for support and comfort during the tense moment, demonstrating loyalty and trust in the face of potential danger.
-[detail:3:session:entity=The Unbound] The Unbound are now identified as spirits that claim hosts without permission, imprinted upon the living to create new forms, sometimes causing ruin if the host and spirit cannot reconcile.
-[detail:3:session:entity=The Presence] An unknown, non-Lamenting presence was detected by Miren, causing her to flee into the woods, raising the stakes and introducing a new, potentially dangerous entity.
-[detail:3:session:entity=The chasm] The group is stranded over a chasm with no bridge, forcing Finn to suggest a solution using a vine for crossing, establishing him as the problem-solver.
-[detail:3:session] Finn refers to a "new moon" and "trees whispering secrets on the wind" as conditions under which the forest reveals its true names to the living.
-[detail:3:session:entity=The Whisper
+[scene:3:session] The trio are in a clearing within the Whisperwood at dusk, campfire extinguished, under a canopy of trees with mist drifting between them. A chasm lies ahead, its bridge destroyed. The forest is quiet except for distant animal sounds and the faint hum of magic.
+[development:3:session] Senjin shifts from skepticism to cautious curiosity regarding the Unbound spirits. He is no longer solely focused on protecting himself from unseen threats, but is now seeking to understand the nature of the Unbound and their relationship with the forest.
+[revelation:3:session] Miren identifies the Unbound spirits as entities that do not ask permission, taking shelter in living bodies and imprinting their essence upon the lands. Their presence brings ruin if the spirit and host do not reconcile.
+[detail:3:session:entity=Finn/character] Finn is carving a bird in flight from a piece of wood, a hobby passed down from his father, which he describes as releasing the "story" inside the wood.
+[detail:3:session:entity=Senjin/character] Senjin’s shadow magic can be summoned as a tether, and he has purple metallic scales, golden ventral scales, ebony claws and horns.
+[detail:3:session:entity=Miren/character] Miren is an emerald-winged sprite, whose wings shimmer, carrying ethereal emerald light, and who can materialize as a firefly.
+[detail:3:session:entity=Alex/character] Alex, a small pup, clings to Senjin’s neck during moments of tension, feeling comforted by the dragon’s heat.
+[detail:3:session] The group has recently crossed a chasm using a vine, with Finn leading the way.
+[detail:3:session] A presence other than the Lamenting is detected in the woods, sensed by Miren, causing her to flee and leaving the group uncertain of the threat’s nature.
+[detail:3:session] Finn’s carving is described as a small, detailed bird in flight, a symbol of freedom, and it carries emotional meaning for him.
+[revelation:3:session] The forest’s whispers are described by Finn as a “summons, an invitation to the sublime,” suggesting he has a deep spiritual connection to the land.
+[revelation:3:session] Senjin questions whether the Unbound spirits merely “take what they want” or ask permission, showing his distrust of their intent.
+[detail:3:session] The campfire is extinguished, and the only light comes from the starry sky, Miren’s emerald wings, and natural ambient luminescence.
+[detail:3:session] Finn’s mug of hot tea is mentioned, indicating he is currently sipping it as he talks.

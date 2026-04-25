@@ -1,7 +1,17 @@
-[revelation:3:session:entity=Elara/character,Senjin/character] Elara reveals she sold the forge this morning and is traveling to Port Varen to care for her ill brother.
-[development:3:session:entity=Elara/character,Senjin/character] Senjin now knows Elara’s departure is urgent and tied to family duty, not just business.
-[detail:3:session:entity=Port Varen/place] Elara is heading to Port Varen, a named location previously unmentioned in session memory.
-[detail:3:session:entity=forge/object] The forge is no longer in operation; it was sold in the morning, and is now nearly empty.
-[detail:3:session:entity=Elara/character] Elara’s emotional state: she is silent, methodical, and shows regret for not informing Senjin earlier.
-[detail:3:session:entity=Senjin/character] Senjin’s emotional state: he expresses wanting to hear from her, indicating lingering concern or connection.
-[scene:2:session] Scene occurs at forge, near closing time, Elara packing tools while Senjin watches, emotional weight thick.
+[scene:2:session] Forge closing time, morning, daylight fading, tools packed in cloth bundles.
+
+[revelation:3:session:entity=Elara/character] Elara reveals she sold the forge this morning and is leaving for Port Varen to care for her ill brother.
+
+[development:3:session:entity=Elara/character,Senjin/character] Senjin’s expectation that Elara would have communicated her plans is broken, now clarified as her emotional silence stemmed from uncertainty, not indifference.
+
+[detail:2:session:entity=Port Varen/place] Port Varen is named as Elara’s destination; not described further but critical for her future timeline.
+
+[detail:2:session:entity=forge/object] Forge is named as the location being sold; described as “nearly empty,” visually altered by Elara’s actions.
+
+[detail:2:session:entity=Elara/character] Elara’s emotional state is marked as “not knowing how” to communicate, with pause and nod indicating internal conflict.
+
+[detail:2:session:entity=Senjin/character] Senjin explicitly states “I want” to hear from Elara, anchoring his emotional stake in her journey.
+
+[detail:2:session] Time is explicitly set as “this morning” for sale and “morning” for Senjin’s visit, establishing temporal proximity of events.
+
+[detail:2:session] “Word travels fast” is cited as justification for Senjin’s knowledge of her status, revealing network dynamics within the setting.

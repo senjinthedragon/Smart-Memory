@@ -1,4 +1,7 @@
-[arc] Senjin is heading into the Ashwood with a newly acquired blade, but the danger there remains unexplained.
-[arc] Elara mentions Port Varen and her connection to the Ashwood, hinting at personal history and possible unresolved trauma.
-[arc] Elara’s burn scar is linked to a past forge accident, but the full details and consequences remain unknown.
-[arc] Elara left Port Varen for work, implying a choice between safety and opportunity, with potential emotional cost.
+[arc] Elara’s burn scar on her forearm hints at a past trauma tied to her departure from Port Varen.
+[arc] Senjin’s mission into the Ashwood introduces a new threat or danger he faces there.
+[arc] Elara’s mention of “ghosts” and “half the ships never made it” implies unresolved lore about the Ashwood’s dangers.
+[arc] Senjin’s request for a “light, good-reach” blade suggests an upcoming combat or stealth-focused encounter.
+[arc] Elara’s statement “I came here for work. Better money, fewer ghosts” implies a personal sacrifice or hidden cost to her current life.
+[arc] Elara’s reaction to Senjin’s payment offer (“Double doesn’t buy miracles”) establishes economic tension between them.
+[arc] Senjin’s knowledge that Elara “grew up near the Ashwood” hints at a shared history or unspoken connection to the region.

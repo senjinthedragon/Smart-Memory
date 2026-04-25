@@ -1,5 +1,4 @@
-[relationship:3:permanent] Elara has recently sold her forge and is relocating to Port Varen to care for her ill brother.
-[fact:3:permanent:entity=Port Varen/place] Elara is moving to Port Varen due to her brother's illness.
-[preference:2:session] Elara prefers to communicate in quiet, deliberate gestures rather than verbal explanations.
-[fact:2:permanent:entity=Elara/character] Elara’s forge has been emptied and is no longer her active workshop.
-[relationship:2:permanent:entity=Senjin/character] Senjin has an active and trusting connection with Elara, now aware of her relocation.
+[fact:2:permanent] Elara has recently sold her forge and is relocating to Port Varen.
+[relationship:3:permanent] Senjin and Elara’s relationship has shifted from professional to emotionally intimate, with Senjin now committed to awaiting Elara’s return or news.
+[fact:2:permanent:entity=Port Varen/place] Elara is traveling to Port Varen to care for her ill brother.
+[preference:2:session] The user accepts emotional vulnerability and is willing to wait for Elara's communication.

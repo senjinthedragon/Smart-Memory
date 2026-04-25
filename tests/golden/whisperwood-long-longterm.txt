@@ -1,6 +1,8 @@
-[fact:2:permanent:entity=Finn/character] Finn’s amber eyes hold a faraway gaze when he speaks of the forest’s whispers.
-[fact:3:permanent:entity=Senjin/character] Senjin’s shadow magic can surge outward like a tether, and he bristles with purple scales when agitated.
-[fact:2:session:entity=Miren/character] Miren’s emerald wings shimmer when she speaks of the Unbound, casting an ethereal glow.
-[relationship:2:permanent:entity=Senjin/character,Alex/character,Finn/character] The trio’s bond is tested by uncertainty, with Senjin skeptical of forest whispers and Alex eager to listen.
-[preference:2:session] The user favors grounded, emotionally charged moments over poetic abstraction in the forest setting.
-[event:2:permanent:entity=Senjin/character,Finn/character] Finn and Senjin share a tense but respectful dynamic, with Senjin challenging Finn’s mystical interpretations.
+[fact:2:permanent:entity=Finn/character] Finn’s amber eyes glow faintly in the dark, and he carries a mug of hot tea wherever he goes.
+[fact:3:permanent:entity=Finn/character] Finn’s magic is tied to the Whisperwood’s rhythms, not to conscious will — it flows through him like a river.
+[relationship:3:permanent:entity=Senjin/character,Finn/character] Senjin’s shadow magic reacts to Finn’s presence — not as a threat, but as a grounding force.
+[relationship:3:permanent:entity=Alex/character,Finn/character] Alex trusts Finn’s guidance fully, even when it pushes them toward the unknown.
+[preference:3:session] Finn favors quiet moments over campfire banter — he listens more than he speaks.
+[event:2:permanent:entity=Senjin/character,Finn/character,Miren/character] Senjin questioned Miren’s claim about “the Unbound” taking hosts without permission.
+[event:3:permanent:entity=Finn/character,Miren/character] Finn recognized Miren’s insight about the Whisperwood’s whispers as a summons, not deception.
+[fact:2:permanent:entity=Miren/character] Miren’s emerald wings can shimmer with the forest’s moods and emit a soft glow when she speaks.
