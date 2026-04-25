@@ -40,6 +40,7 @@
  *   OLLAMA_URL    Ollama base URL (default: http://localhost:11434)
  *   OLLAMA_MODEL  Model name (default: huihui_ai/qwen3-vl-abliterated:8b-instruct)
  *   RESPONSE_LEN  Max tokens per extraction call (default: 600)
+ *   OLLAMA_THINK  Set to "false" to disable thinking on models that support it (e.g. gemma4)
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -54,6 +55,10 @@ const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const OLLAMA_MODEL =
   process.env.OLLAMA_MODEL ?? 'huihui_ai/qwen3-vl-abliterated:8b-instruct';
 const RESPONSE_LEN = parseInt(process.env.RESPONSE_LEN ?? '600', 10);
+// Pass think:false to disable chain-of-thought on thinking models (e.g. gemma4).
+// Only sent when explicitly set - omitting the field lets the model use its default.
+const OLLAMA_THINK =
+  process.env.OLLAMA_THINK === 'false' ? false : process.env.OLLAMA_THINK === 'true' ? true : undefined;
 
 const LIVE = process.argv.includes('--live');
 const PARSERS_ONLY = process.argv.includes('--parsers');
@@ -198,6 +203,7 @@ async function callOllama(prompt) {
       options: {
         num_predict: RESPONSE_LEN,
         stop: ['<|eot_id|>', '<|im_end|>'],
+        ...(OLLAMA_THINK !== undefined ? { think: OLLAMA_THINK } : {}),
       },
     }),
   });
@@ -419,6 +425,8 @@ function runParserTests() {
 console.log(c.bold('\nSmart Memory Regression Harness'));
 console.log(c.dim(`Mode: ${LIVE ? 'live (Ollama)' : 'replay (golden files)'}`));
 console.log(c.dim(`Model: ${OLLAMA_MODEL}`));
+if (OLLAMA_THINK !== undefined) console.log(c.dim(`Think: ${OLLAMA_THINK}`));
+console.log(c.dim(`Response length: ${RESPONSE_LEN} tokens`));
 console.log(c.dim('─'.repeat(60)));
 
 runParserTests();

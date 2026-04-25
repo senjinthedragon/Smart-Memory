@@ -1,5 +1,6 @@
-[arc] Senjin is heading into the Ashwood, a dangerous region with uncertain outcomes.
-[arc] Elara has a personal connection to the Ashwood and may harbor unresolved trauma or memories related to it.
-[arc] The burn scar on Elara’s arm is tied to a past forge accident, hinting at a previous tragedy or danger.
-[arc] Elara left Port Varen for better work and fewer ghosts, implying unresolved emotional ties or regrets.
-[arc] The shortsword Elara hands Senjin is described as “better than it looks,” suggesting hidden quality or significance.
+[arc] Senjin seeks a blade for the Ashwood, implying imminent danger or mission there.
+[arc] Elara’s arm scar hints at a past traumatic event tied to her forge work.
+[arc] Elara references Port Varen and ships from the Ashwood, suggesting personal history with the region.
+[arc] Elara mentions leaving Port Varen for “better money, fewer ghosts,” implying unresolved emotional cost.
+[arc] Elara’s sleeve-drawing gesture reveals she’s guarding her arm’s history, possibly emotionally or physically.
+[resolved] Elara hands Senjin the blade and confirms it’s “better than it looks,” closing the transactional need.

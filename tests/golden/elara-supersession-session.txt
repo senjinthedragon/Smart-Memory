@@ -1,6 +1,7 @@
+[scene:3:session] Elara is packing tools in her forge, late morning, with the market district visible through the open door.
 [revelation:3:session:entity=Elara/character] Elara reveals she sold the forge this morning and is leaving for Port Varen to care for her ill brother.
-[development:3:session:entity=Elara/character,Senjin/character] Senjin’s relationship with Elara shifts from routine to urgent as he now knows she is leaving and her forge is sold.
-[detail:2:session:entity=Port Varen/place] Elara is departing to Port Varen, a named location mentioned as her brother’s location.
-[detail:3:session:entity=Elara/character] Elara confirms she will write to Senjin once settled, indicating she plans to maintain contact.
-[detail:2:session:entity=forge/object] The forge is nearly empty and no longer looks like Elara’s, indicating it has been stripped of personal character.
-[revelation:3:session:entity=Elara/character] Elara admits she didn’t know how to tell Senjin about the forge sale or her departure, indicating emotional hesitation.
+[development:3:session:entity=Elara/character,Senjin/character] Elara admits she didn't know how to inform Senjin, and he now wants to hear from her when she's settled.
+[detail:3:session:entity=Port Varen/place] Elara is traveling to Port Varen, a city mentioned by name for the first time in context.
+[detail:3:session:entity=forge/place] The forge is now sold and nearly empty, no longer reflecting Elara’s identity or function.
+[revelation:3:session] Elara reveals she will write to Senjin once settled, establishing a future channel of communication.
+[detail:3:session] Tools are being wrapped in cloth, a methodical, deliberate action indicating transition and loss.

@@ -1,5 +1,5 @@
-[fact:3:permanent:entity=Elara/character] Elara has sold her forge and is relocating to Port Varen.
-[relationship:3:permanent:entity=Elara/character] Elara’s departure from the forge marks a significant shift in her relationship with Senjin, now defined by mutual support despite separation.
-[fact:3:permanent:entity=Elara/character] Elara intends to write to Senjin once settled, indicating a commitment to ongoing communication.
-[fact:2:permanent:entity=Port Varen/place] Elara’s destination, Port Varen, is a location tied to familial obligation and potential future interaction.
-[fact:2:session:entity=Elara/character] Elara does not look at Senjin when speaking, suggesting emotional detachment or focus on practicality.
+[relationship:3:permanent:entity=Elara/character,Senjin/character] Senjin and Elara have a deep, trusting bond forged through shared hardship and mutual support.
+[fact:3:permanent:entity=Elara/character] Elara has recently sold her forge and is relocating to Port Varen to care for her ill brother.
+[fact:2:permanent:entity=Elara/character] Elara is emotionally reserved, often prioritizing others’ needs over her own, and communicates through subtle actions.
+[preference:2:session] Senjin prefers direct, honest communication with Elara, valuing her loyalty and emotional honesty.
+[event:2:permanent:entity=Elara/character,Senjin/character] Senjin publicly committed to supporting Elara’s move to Port Varen, indicating his personal investment in her well-being.
