@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Consolidation settings panel**: all consolidation settings are now grouped
+  into a single root-level Consolidation section (visible in advanced mode
+  only - hidden in simple mode, where consolidation runs on with sensible
+  defaults). The section toggle enables or disables consolidation across both
+  long-term and session memory. Session memory now has per-type consolidation
+  thresholds matching the long-term tier (scene, revelation, development,
+  detail), replacing the previous single shared slider.
+
 - **Simple and advanced settings mode**: the settings panel now defaults to a
   simplified view with a single **Memory context budget** slider that controls
   total injection tokens. The budget is distributed across all tiers

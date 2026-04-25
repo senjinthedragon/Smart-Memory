@@ -352,8 +352,44 @@ export async function extractSessionMemories(recentMessages) {
 // ---- Consolidation ------------------------------------------------------
 
 // How many unprocessed entries of a single type must accumulate before
-// consolidation fires for that type.
-const DEFAULT_SESSION_CONSOLIDATION_THRESHOLD = 3;
+// consolidation fires for that type. Used when per-type settings are absent.
+const DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS = {
+  scene: 3,
+  revelation: 3,
+  development: 3,
+  detail: 3,
+};
+
+/**
+ * Returns per-type consolidation thresholds, reading from settings with fallback to defaults.
+ *
+ * @param {object} settings - Extension settings object.
+ * @returns {{ scene: number, revelation: number, development: number, detail: number }}
+ */
+function getSessionConsolidationThresholds(settings) {
+  return {
+    scene: Math.max(
+      2,
+      settings.session_consolidation_threshold_scene ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.scene,
+    ),
+    revelation: Math.max(
+      2,
+      settings.session_consolidation_threshold_revelation ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.revelation,
+    ),
+    development: Math.max(
+      2,
+      settings.session_consolidation_threshold_development ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.development,
+    ),
+    detail: Math.max(
+      2,
+      settings.session_consolidation_threshold_detail ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.detail,
+    ),
+  };
+}
 
 /**
  * Runs a consolidation pass on session memories for the current chat.
@@ -375,10 +411,8 @@ const DEFAULT_SESSION_CONSOLIDATION_THRESHOLD = 3;
 export async function consolidateSessionMemories(force = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) return 0;
-  const threshold = Math.max(
-    2,
-    settings.session_consolidation_threshold ?? DEFAULT_SESSION_CONSOLIDATION_THRESHOLD,
-  );
+  if (!settings.consolidation_enabled) return 0;
+  const thresholds = getSessionConsolidationThresholds(settings);
 
   const memories = loadSessionMemories();
   let totalRemoved = 0;
@@ -391,7 +425,7 @@ export async function consolidateSessionMemories(force = false) {
       (m) => m.type === type && !m.consolidated && !m.superseded_by,
     );
 
-    if (!force && unprocessed.length < threshold) continue;
+    if (!force && unprocessed.length < (thresholds[type] ?? 3)) continue;
     if (unprocessed.length === 0) continue;
 
     try {

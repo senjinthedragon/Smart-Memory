@@ -524,7 +524,7 @@ function getConsolidationThresholds(settings) {
  */
 export async function consolidateMemories(characterName, force = false) {
   const settings = extension_settings[MODULE_NAME];
-  if (!settings.longterm_consolidate || !characterName) return 0;
+  if (!settings.consolidation_enabled || !characterName) return 0;
   const thresholds = getConsolidationThresholds(settings);
 
   const memories = loadCharacterMemories(characterName);

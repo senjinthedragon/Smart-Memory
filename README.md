@@ -227,7 +227,6 @@ The **Generate Canon** button synthesizes a prose narrative from resolved arc su
 | Setting                                 | Default                                               | Description                                                                                                                                                                                             |
 | --------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Enable long-term memory                 | On                                                    | Extract and inject persistent character facts                                                                                                                                                           |
-| Auto-consolidate                        | On                                                    | Periodically merge near-duplicate entries                                                                                                                                                               |
 | Exclude this chat from long-term memory | Off                                                   | Suppresses long-term extraction and injection for this specific chat only - stored memories for other chats are not affected                                                                            |
 | Extract every N messages                | 3                                                     | How often automatic extraction runs                                                                                                                                                                     |
 | Max memories per character              | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
@@ -247,6 +246,24 @@ The long-term list shows a **retired** badge on superseded entries. A "Show reti
 | Injection token budget   | 400                                       | Least important memories trimmed first when exceeded - based on importance, expiration, and recency |
 | Injection template       | `Details from this session:\n{{session}}` | Wrapper text                                                                                        |
 | Injection position       | In-chat @ depth 3                         | Sits just above ST's default vector depth                                                           |
+
+### Consolidation
+
+Consolidation runs after each extraction pass and asks the LLM to merge near-duplicate or redundant entries into richer single items. This prevents the same information accumulating in slightly different forms across sessions. It runs silently in the background and is recommended for all setups.
+
+The Consolidation section is only shown in advanced mode. In simple mode it is always on with the defaults below.
+
+| Setting                              | Default | Description                                                                               |
+| ------------------------------------ | ------- | ----------------------------------------------------------------------------------------- |
+| Enable consolidation                 | On      | Master toggle - disabling this skips consolidation for both long-term and session memory  |
+| Long-term: consolidate [fact] after  | 4       | Number of unprocessed entries before a consolidation pass fires for that type             |
+| Long-term: consolidate [relationship]| 3       |                                                                                           |
+| Long-term: consolidate [preference]  | 3       |                                                                                           |
+| Long-term: consolidate [event]       | 4       |                                                                                           |
+| Session: consolidate [scene] after   | 3       | Number of unprocessed session entries before consolidation fires for that type            |
+| Session: consolidate [revelation]    | 3       |                                                                                           |
+| Session: consolidate [development]   | 3       |                                                                                           |
+| Session: consolidate [detail]        | 3       |                                                                                           |
 
 ### Character and World Profiles
 

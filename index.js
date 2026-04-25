@@ -182,13 +182,19 @@ const defaultSettings = {
   compaction_role: extension_prompt_roles.SYSTEM,
   compaction_template: 'Story so far:\n{{summary}}',
 
-  // Long-term
-  longterm_enabled: true,
-  longterm_consolidate: true,
+  // Consolidation (shared across tiers)
+  consolidation_enabled: true,
   longterm_consolidation_threshold_fact: 4,
   longterm_consolidation_threshold_relationship: 3,
   longterm_consolidation_threshold_preference: 3,
   longterm_consolidation_threshold_event: 4,
+  session_consolidation_threshold_scene: 3,
+  session_consolidation_threshold_revelation: 3,
+  session_consolidation_threshold_development: 3,
+  session_consolidation_threshold_detail: 3,
+
+  // Long-term
+  longterm_enabled: true,
   longterm_extract_every: 3,
   longterm_max_memories: 25,
   longterm_response_length: 600,
@@ -200,7 +206,6 @@ const defaultSettings = {
 
   // Session memory
   session_enabled: true,
-  session_consolidation_threshold: 3,
   session_extract_every: 3,
   session_max_memories: 30,
   session_response_length: 500,
@@ -764,7 +769,7 @@ async function onCharacterMessageRendered() {
             },
           );
           // Run consolidation after extraction if new memories were added.
-          if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
+          if (count > 0 && settings.consolidation_enabled && !consolidationRunning) {
             consolidationRunning = true;
             const removed = await consolidateMemories(characterName).catch((err) => {
               console.error('[SmartMemory] Consolidation error:', err);
@@ -1403,7 +1408,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 console.error('[SmartMemory] Long-term extraction error:', err);
                 return 0;
               });
-              if (count > 0 && settings.longterm_consolidate && !consolidationRunning) {
+              if (count > 0 && settings.consolidation_enabled && !consolidationRunning) {
                 consolidationRunning = true;
                 const removed = await consolidateMemories(characterName).catch((err) => {
                   console.error('[SmartMemory] Consolidation error:', err);
@@ -2669,6 +2674,16 @@ function loadSettings() {
   ) {
     extension_settings[MODULE_NAME].arcs_inject_budget = 700;
   }
+
+  // Migration: longterm_consolidate -> consolidation_enabled (now controls both tiers).
+  // If a user had explicitly disabled long-term consolidation, carry that intent forward.
+  if (
+    Object.prototype.hasOwnProperty.call(extension_settings[MODULE_NAME], 'longterm_consolidate') &&
+    !Object.prototype.hasOwnProperty.call(extension_settings[MODULE_NAME], 'consolidation_enabled')
+  ) {
+    extension_settings[MODULE_NAME].consolidation_enabled =
+      extension_settings[MODULE_NAME].longterm_consolidate;
+  }
 }
 
 /**
@@ -3105,6 +3120,52 @@ function bindSettingsUI() {
     injectSummary(val);
   });
 
+  // ---- Consolidation --------------------------------------------------
+  $('#sm_consolidate_enabled')
+    .prop('checked', s.consolidation_enabled ?? true)
+    .on('change', function () {
+      getSettings().consolidation_enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
+  for (const [type, defVal] of [
+    ['fact', 4],
+    ['relationship', 3],
+    ['preference', 3],
+    ['event', 4],
+  ]) {
+    const key = `longterm_consolidation_threshold_${type}`;
+    const spanId = `#sm_longterm_threshold_${type}_value`;
+    $(`#sm_longterm_threshold_${type}`)
+      .val(s[key] ?? defVal)
+      .on('input', function () {
+        const val = parseInt($(this).val(), 10);
+        getSettings()[key] = val;
+        $(spanId).text(val);
+        saveSettingsDebounced();
+      });
+    $(spanId).text(s[key] ?? defVal);
+  }
+
+  for (const [type, defVal] of [
+    ['scene', 3],
+    ['revelation', 3],
+    ['development', 3],
+    ['detail', 3],
+  ]) {
+    const key = `session_consolidation_threshold_${type}`;
+    const spanId = `#sm_session_threshold_${type}_value`;
+    $(`#sm_session_threshold_${type}`)
+      .val(s[key] ?? defVal)
+      .on('input', function () {
+        const val = parseInt($(this).val(), 10);
+        getSettings()[key] = val;
+        $(spanId).text(val);
+        saveSettingsDebounced();
+      });
+    $(spanId).text(s[key] ?? defVal);
+  }
+
   // ---- Long-term memory -----------------------------------------------
   $('#sm_longterm_enabled')
     .prop('checked', s.longterm_enabled)
@@ -3113,57 +3174,6 @@ function bindSettingsUI() {
       saveSettingsDebounced();
       injectMemories(getSelectedCharacterName(), isFreshStart()).catch(console.error);
     });
-
-  $('#sm_longterm_consolidate')
-    .prop('checked', s.longterm_consolidate ?? true)
-    .on('change', function () {
-      getSettings().longterm_consolidate = $(this).prop('checked');
-      saveSettingsDebounced();
-    });
-
-  $('#sm_longterm_threshold_fact')
-    .val(s.longterm_consolidation_threshold_fact ?? 4)
-    .on('input', function () {
-      const val = parseInt($(this).val(), 10);
-      getSettings().longterm_consolidation_threshold_fact = val;
-      $('#sm_longterm_threshold_fact_value').text(val);
-      saveSettingsDebounced();
-    });
-  $('#sm_longterm_threshold_fact_value').text(s.longterm_consolidation_threshold_fact ?? 4);
-
-  $('#sm_longterm_threshold_relationship')
-    .val(s.longterm_consolidation_threshold_relationship ?? 3)
-    .on('input', function () {
-      const val = parseInt($(this).val(), 10);
-      getSettings().longterm_consolidation_threshold_relationship = val;
-      $('#sm_longterm_threshold_relationship_value').text(val);
-      saveSettingsDebounced();
-    });
-  $('#sm_longterm_threshold_relationship_value').text(
-    s.longterm_consolidation_threshold_relationship ?? 3,
-  );
-
-  $('#sm_longterm_threshold_preference')
-    .val(s.longterm_consolidation_threshold_preference ?? 3)
-    .on('input', function () {
-      const val = parseInt($(this).val(), 10);
-      getSettings().longterm_consolidation_threshold_preference = val;
-      $('#sm_longterm_threshold_preference_value').text(val);
-      saveSettingsDebounced();
-    });
-  $('#sm_longterm_threshold_preference_value').text(
-    s.longterm_consolidation_threshold_preference ?? 3,
-  );
-
-  $('#sm_longterm_threshold_event')
-    .val(s.longterm_consolidation_threshold_event ?? 4)
-    .on('input', function () {
-      const val = parseInt($(this).val(), 10);
-      getSettings().longterm_consolidation_threshold_event = val;
-      $('#sm_longterm_threshold_event_value').text(val);
-      saveSettingsDebounced();
-    });
-  $('#sm_longterm_threshold_event_value').text(s.longterm_consolidation_threshold_event ?? 4);
 
   $('#sm_longterm_extract_every')
     .val(s.longterm_extract_every)
@@ -3278,16 +3288,6 @@ function bindSettingsUI() {
       saveSettingsDebounced();
       injectSessionMemories();
     });
-
-  $('#sm_session_consolidation_threshold')
-    .val(s.session_consolidation_threshold ?? 3)
-    .on('input', function () {
-      const val = parseInt($(this).val(), 10);
-      getSettings().session_consolidation_threshold = val;
-      $('#sm_session_consolidation_threshold_value').text(val);
-      saveSettingsDebounced();
-    });
-  $('#sm_session_consolidation_threshold_value').text(s.session_consolidation_threshold ?? 3);
 
   $('#sm_session_extract_every')
     .val(s.session_extract_every)
@@ -3715,7 +3715,7 @@ function bindSettingsUI() {
             });
             // Consolidate after each chunk so near-duplicates are collapsed before
             // the next chunk can add more similar entries.
-            if (settings.longterm_consolidate) {
+            if (settings.consolidation_enabled) {
               setStatusMessage(`Catching up... (${i}/${total} messages - consolidating ${name})`);
               await consolidateMemories(name).catch((err) => {
                 console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
@@ -3812,7 +3812,7 @@ function bindSettingsUI() {
         // Final consolidation pass for any entries that didn't accumulate enough
         // to hit the per-chunk threshold (e.g. a type that only got 1-2 new entries
         // across the whole chat). Forces consolidation regardless of threshold.
-        if (settings.longterm_enabled && settings.longterm_consolidate) {
+        if (settings.longterm_enabled && settings.consolidation_enabled) {
           for (const name of catchUpCharacterNames) {
             setStatusMessage(`Consolidating long-term memories for ${name}...`);
             await consolidateMemories(name, true).catch((err) => {
