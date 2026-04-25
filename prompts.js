@@ -74,6 +74,8 @@ export function buildSummaryPrompt(storedMemories = '') {
     NO_ACTION_PREAMBLE +
     `${storedSection}Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
 
+IMPORTANT: Summarize only the actual roleplay exchanges between characters. Do NOT reproduce, restate, or copy any injected memory context that appears before the conversation - this includes character history, long-term memories, character profiles, scene history, session details, or story arcs. Those are already stored separately. Only the story events that happened in the chat messages belong in this summary.
+
 Write the summary inside <summary> tags. Cover all nine sections below - do not skip or abbreviate any of them.
 
 <summary>
@@ -114,6 +116,8 @@ export function buildUpdateSummaryPrompt(storedMemories = '') {
   return (
     NO_ACTION_PREAMBLE +
     `${storedSection}An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
+
+IMPORTANT: Summarize only the actual roleplay exchanges between characters. Do NOT reproduce, restate, or copy any injected memory context - this includes character history, long-term memories, character profiles, scene history, session details, or story arcs. Those are already stored separately. Only story events from the chat messages belong in this summary.
 
 CRITICAL: You must reproduce every section in full. Do NOT write "Same as before", "Unchanged", "As previously noted", or any similar shorthand. The existing summary will not be available after this update - any section you omit or abbreviate is permanently lost.
 
