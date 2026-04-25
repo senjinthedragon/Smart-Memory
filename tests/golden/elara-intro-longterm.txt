@@ -1,7 +1,7 @@
-[fact:2:permanent:entity=Elara/character] Elara is a blacksmith who works at a forge and specializes in crafting blades.
+[fact:3:permanent:entity=Elara/character] Elara is a blacksmith who works at a forge and specializes in crafting blades.
 [fact:2:permanent:entity=Elara/character] Elara has a burn scar on her right forearm from an accident at the forge.
-[fact:2:permanent:entity=Port Varen/place] Elara grew up near Port Varen, on the south coast, near the Ashwood.
-[relationship:2:permanent:entity=Elara/character] Elara is willing to trade with the user for double payment, indicating trust or necessity.
-[relationship:2:permanent:entity=Elara/character] Elara has a personal connection to the Ashwood, as she grew up near it.
-[preference:2:session] Elara prefers brief, direct conversation and avoids emotional exposition.
-[fact:2:permanent:entity=Elara/character] Elara carries a shortsword with better balance than its appearance suggests.
+[fact:3:permanent:entity=Elara/character] Elara grew up near Port Varen on the south coast and had a traumatic connection to the Ashwood.
+[relationship:2:permanent:entity=Elara/character] Elara initially distrusts Senjin’s urgency but agrees to craft a blade for him, indicating a transactional but growing trust.
+[fact:3:permanent:entity=Port Varen/place] Port Varen is a coastal city on the south coast with historical ties to the Ashwood, where Elara spent her childhood.
+[event:2:permanent:entity=Elara/character] Elara received a commission from Senjin for a blade suited to Ashwood combat, affirming her recognition of his mission.
+[preference:2:session] Senjin prefers practical, well-balanced blades, with a preference for utility over aesthetics.

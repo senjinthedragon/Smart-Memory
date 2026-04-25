@@ -7,8 +7,8 @@
         "keywords": ["leaving", "port varen", "closing", "sold", "moving", "gone", "depart"]
       },
       {
-        "label": "brother's illness captured",
-        "keywords": ["brother", "ill", "sick", "family"]
+        "label": "brother's illness or familial obligation captured",
+        "keywords": ["brother", "ill", "sick", "family", "familial", "obligation"]
       }
     ]
   },

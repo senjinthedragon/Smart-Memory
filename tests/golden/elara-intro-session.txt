@@ -1,6 +1,8 @@
-[scene:2:session] Forge at night, tools and fire visible, Elara working with hammer, Senjin entering with urgent need.
-[revelation:3:session:entity=Elara/character] Elara reveals she grew up near Port Varen, on south coast, watching ships from Ashwood side, half never made it.
-[revelation:3:session:entity=Elara/character] Elara shows burn scar on right forearm from forge accident years ago, first mention of physical detail.
-[development:2:session] Senjin’s request for light blade for Ashwood leads to Elara’s personal revelation and connection to the Ashwood.
-[detail:2:session:entity=Elara/character] Elara hands Senjin a shortsword described as clean lines, well-balanced, “better than it looks.”
-[detail:2:session:entity=Port Varen/place] Named location: Port Varen, south coast, near Ashwood, referenced by Elara’s childhood.
+[scene:2:session] Forge at night, tools visible, firelight casting shadows, Elara working at an anvil.
+[revelation:3:session:entity=Elara/character] Elara reveals her forearm burn scar—from wrist to elbow—caused by a forge accident years ago.
+[revelation:3:session:entity=Port Varen/place] Elara grew up near Port Varen, on the south coast, watching ships from the Ashwood side.
+[development:2:session] Senjin’s request for a blade for the Ashwood prompts Elara’s personal recollection and local lore, shifting her tone to wistful.
+[detail:2:session:entity=The shortsword/object] The blade Elara gives Senjin is a shortsword, described as clean lines and well-balanced.
+[detail:2:session:entity=Elara/character] She pulls down her sleeve to reveal the scar, indicating unconscious self-display or defense.
+[revelation:2:session] Elara mentions half the ships from Ashwood never made it, linking location to danger and personal history.
+[detail:2:session:entity=Senjin/character] He identifies himself as heading into the Ashwood, triggering Elara’s emotional response.
