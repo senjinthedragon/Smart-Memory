@@ -71,6 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session memories and retired memories can be toggled live without closing
   the graph.
 
+### Removed
+
+- **Hide summarized messages**: the "Hide summarized messages" checkbox
+  introduced in v1.5.1 has been removed. The feature used SillyTavern's
+  `hideChatMessageRange` which sets `is_system` on messages, excluding them
+  from the LLM context window as well as hiding them visually. In practice
+  this broke scene continuity - the summary captures broad strokes but loses
+  immediate detail, causing the model to lose track of what just happened in
+  the current scene. Users wanting a tidy chat history can use SillyTavern's
+  Message Limit extension instead, which keeps a configurable number of recent
+  messages without touching context.
+
 ### Fixed
 
 - **Entity timeline timestamps showing "unknown"**: all memory entries in the
