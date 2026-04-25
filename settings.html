@@ -1058,6 +1058,43 @@
         </div>
       </details>
 
+      <!-- ══ AWAY RECAP ══ -->
+      <details class="sm-section">
+        <summary>
+          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+          <input type="checkbox" id="sm_recap_enabled" class="sm-section-toggle" />
+          Away Recap
+          <span
+            class="sm-info"
+            data-tooltip='When you return to a chat after being away for longer than the threshold, Smart Memory generates a short "Previously on..." summary and displays it as a popup so you can catch up before diving back in.'
+            >ⓘ</span
+          >
+        </summary>
+        <div class="sm-section-content">
+          <div class="sm-block" style="margin-top: 4px">
+            <button id="sm_recap_now" class="menu_button menu_button_icon">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <span>Generate Recap Now</span>
+            </button>
+          </div>
+
+          <p class="sm-section-title">Trigger</p>
+          <div class="sm-block">
+            <label
+              >Generate recap after: <b><span id="sm_recap_threshold_value"></span></b
+            ></label>
+            <input
+              id="sm_recap_threshold"
+              type="range"
+              min="1"
+              max="48"
+              step="1"
+              value="{{defaultSettings.recap_threshold_hours}}"
+            />
+          </div>
+        </div>
+      </details>
+
       <!-- ══ ENTITY REGISTRY ══ -->
       <details class="sm-section">
         <summary class="sm-section-header">
@@ -1136,43 +1173,6 @@
                 ></span
               >
             </label>
-          </div>
-        </div>
-      </details>
-
-      <!-- ══ AWAY RECAP ══ -->
-      <details class="sm-section">
-        <summary>
-          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
-          <input type="checkbox" id="sm_recap_enabled" class="sm-section-toggle" />
-          Away Recap
-          <span
-            class="sm-info"
-            data-tooltip='When you return to a chat after being away for longer than the threshold, Smart Memory generates a short "Previously on..." summary and displays it as a popup so you can catch up before diving back in.'
-            >ⓘ</span
-          >
-        </summary>
-        <div class="sm-section-content">
-          <div class="sm-block" style="margin-top: 4px">
-            <button id="sm_recap_now" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-clock-rotate-left"></i>
-              <span>Generate Recap Now</span>
-            </button>
-          </div>
-
-          <p class="sm-section-title">Trigger</p>
-          <div class="sm-block">
-            <label
-              >Generate recap after: <b><span id="sm_recap_threshold_value"></span></b
-            ></label>
-            <input
-              id="sm_recap_threshold"
-              type="range"
-              min="1"
-              max="48"
-              step="1"
-              value="{{defaultSettings.recap_threshold_hours}}"
-            />
           </div>
         </div>
       </details>
