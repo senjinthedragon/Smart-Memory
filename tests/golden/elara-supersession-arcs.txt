@@ -1,4 +1,3 @@
-[arc] Elara is leaving for Port Varen to care for her sick brother, with no clear return date.
-[arc] Senjin wants Elara to write to him once she is settled, but she hasn’t yet promised to do so.
-[arc] Elara sold the forge this morning and didn’t inform Senjin, creating unresolved tension between them.
-[arc] The forge is nearly empty and no longer reflects Elara’s identity, suggesting a personal transformation or loss.
+[arc] Elara sold the forge and is traveling to Port Varen to care for her ill brother.
+[arc] Senjin wants to stay in contact with Elara and expects her to write when settled.
+[arc] Elara is uncertain how to communicate her plans and feels guilty for not informing Senjin.
