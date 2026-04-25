@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Unified injection mode (experimental)**: a new toggle in the Developer
+  section merges all active memory tiers into a single IN_PROMPT block instead
+  of injecting each tier into its own named slot at different depths and
+  positions. Content is ordered most-stable-first (canon, profiles, long-term,
+  short-term, scenes) to most-immediate-last (session, arcs) so the model sees
+  active goals closest to its response via recency bias. The token usage bar
+  continues to show per-tier colour breakdowns even in unified mode. The
+  setting is off by default.
+
+- **Canon enabled/disabled toggle**: the Canon section now has an enable
+  checkbox matching the other memory tiers. Disabling canon suppresses both
+  injection and auto-regeneration on Profile B.
+
 - **Group chat memory comparison in token display**: the token usage bar now
   shows a compact per-character row for every group member beneath the main
   bar. Each row shows that character's stored personal memory footprint
