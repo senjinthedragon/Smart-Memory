@@ -152,6 +152,12 @@ import {
   areProfilesStale,
 } from './profiles.js';
 import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
+import {
+  clearUnifiedSlot,
+  getUnifiedTierBreakdown,
+  injectUnified,
+  maybeInjectUnified,
+} from './unified-inject.js';
 import { smLog } from './logging.js';
 import { showMemoryGraph } from './graph.js';
 
@@ -285,6 +291,10 @@ const defaultSettings = {
   // Verbose logging - when false, operational extraction/migration logs are
   // suppressed. Errors (console.error) are always shown regardless of this flag.
   verbose_logging: false,
+
+  // Experimental: merge all tier content into a single IN_PROMPT block instead
+  // of injecting each tier into its own named slot at different depths/positions.
+  unified_injection: false,
 
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
@@ -480,6 +490,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_REPAIR, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_PROFILES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_CANON, '', none, 0);
+  clearUnifiedSlot();
   updateTokenDisplay();
 }
 
@@ -845,6 +856,7 @@ async function onCharacterMessageRendered() {
 
         // Refresh entity panel after extraction since new entities may have been linked.
         updateEntityPanel(characterName);
+        maybeInjectUnified();
         updateTokenDisplay();
         setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
       } catch (err) {
@@ -996,6 +1008,7 @@ async function onChatChangedImpl() {
     updateProfilesUI(loadProfiles(selectedGroupCharacter));
     updateEntityPanel(selectedGroupCharacter);
 
+    maybeInjectUnified();
     updateTokenDisplay();
 
     if (settings.recap_enabled) {
@@ -1065,6 +1078,7 @@ async function onChatChangedImpl() {
   updateArcsUI();
   updateCanonUI(characterName);
   updateProfilesUI(loadProfiles(characterName));
+  maybeInjectUnified();
   updateTokenDisplay();
 
   // Regenerate profiles in the background if they are stale. Non-blocking -
@@ -1277,6 +1291,7 @@ async function onGroupWrapperFinished({ type } = {}) {
         if (summary) {
           injectSummary(summary);
           updateShortTermUI(summary);
+          maybeInjectUnified();
           updateTokenDisplay();
           setStatusMessage('Summary updated.');
           if (settings.compaction_hide_summarized) {
@@ -1301,6 +1316,7 @@ async function onGroupWrapperFinished({ type } = {}) {
       if (wasBreak) {
         injectSceneHistory();
         updateScenesUI();
+        maybeInjectUnified();
         updateTokenDisplay();
         sceneMessageBuffer = [];
         sceneBufferLastIndex = -1;
@@ -1562,6 +1578,7 @@ async function onGroupWrapperFinished({ type } = {}) {
     await injectMemories(selectedGroupCharacter, isFreshStart());
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
+    maybeInjectUnified();
     updateTokenDisplay();
   }
 
@@ -1661,10 +1678,17 @@ function updateTokenDisplay() {
 
   // ---- Top bar: actual injected content for the active character ----------
 
-  const tiers = TOKEN_TIERS.map((t) => ({
-    ...t,
-    tokens: estimateTokens(extension_prompts[t.key]?.value ?? ''),
-  })).filter((t) => t.tokens > 0);
+  // In unified mode the individual slots are empty - use the breakdown saved
+  // by the last injectUnified call so tier colours are still visible.
+  const settings = getSettings();
+  const tiers = (
+    settings.unified_injection
+      ? getUnifiedTierBreakdown()
+      : TOKEN_TIERS.map((t) => ({
+          ...t,
+          tokens: estimateTokens(extension_prompts[t.key]?.value ?? ''),
+        }))
+  ).filter((t) => t.tokens > 0);
 
   const total = tiers.reduce((sum, t) => sum + t.tokens, 0);
   const maxContext = getContext().maxContext || 0;
@@ -4028,6 +4052,7 @@ function bindSettingsUI() {
       updateArcsUI();
       updateProfilesUI(loadProfiles(characterName));
       updateEntityPanel(characterName);
+      maybeInjectUnified();
       updateTokenDisplay();
       saveSettingsDebounced();
 
@@ -4334,6 +4359,31 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().verbose_logging = $(this).prop('checked');
       saveSettingsDebounced();
+    });
+
+  $('#sm_unified_injection')
+    .prop('checked', s.unified_injection ?? false)
+    .on('change', function () {
+      const enabled = $(this).prop('checked');
+      getSettings().unified_injection = enabled;
+      saveSettingsDebounced();
+      if (enabled) {
+        injectUnified();
+      } else {
+        // Restore individual slots from stored data so the normal path
+        // resumes immediately without waiting for the next generation.
+        const characterName = getSelectedCharacterName();
+        clearUnifiedSlot();
+        const summary = loadAndInjectSummary();
+        updateShortTermUI(summary);
+        injectMemories(characterName, isFreshStart());
+        injectSessionMemories();
+        injectSceneHistory();
+        injectArcs();
+        injectCanon(characterName);
+        injectProfiles(characterName);
+      }
+      updateTokenDisplay();
     });
 
   $('#sm_check_continuity').on('click', async function () {

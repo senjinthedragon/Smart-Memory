@@ -42,6 +42,9 @@ export const PROMPT_KEY_REPAIR = 'smart_memory_repair';
 export const PROMPT_KEY_PROFILES = 'smart_memory_profiles';
 // Stable per-character narrative document compiled from resolved arc summaries.
 export const PROMPT_KEY_CANON = 'smart_memory_canon';
+// Single unified block used when unified_injection mode is enabled.
+// All individual tier slots are cleared and their content merged here instead.
+export const PROMPT_KEY_UNIFIED = 'smart_memory_unified';
 
 /** Valid type tags for long-term memory entries. */
 export const MEMORY_TYPES = ['fact', 'relationship', 'preference', 'event'];
