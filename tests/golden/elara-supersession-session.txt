@@ -1,17 +1,6 @@
-[scene:2:session] Forge closing time, morning, daylight fading, tools packed in cloth bundles.
-
-[revelation:3:session:entity=Elara/character] Elara reveals she sold the forge this morning and is leaving for Port Varen to care for her ill brother.
-
-[development:3:session:entity=Elara/character,Senjin/character] Senjin’s expectation that Elara would have communicated her plans is broken, now clarified as her emotional silence stemmed from uncertainty, not indifference.
-
-[detail:2:session:entity=Port Varen/place] Port Varen is named as Elara’s destination; not described further but critical for her future timeline.
-
-[detail:2:session:entity=forge/object] Forge is named as the location being sold; described as “nearly empty,” visually altered by Elara’s actions.
-
-[detail:2:session:entity=Elara/character] Elara’s emotional state is marked as “not knowing how” to communicate, with pause and nod indicating internal conflict.
-
-[detail:2:session:entity=Senjin/character] Senjin explicitly states “I want” to hear from Elara, anchoring his emotional stake in her journey.
-
-[detail:2:session] Time is explicitly set as “this morning” for sale and “morning” for Senjin’s visit, establishing temporal proximity of events.
-
-[detail:2:session] “Word travels fast” is cited as justification for Senjin’s knowledge of her status, revealing network dynamics within the setting.
+[revelation:3:session:entity=Elara/character] Elara reveals she sold the forge this morning.
+[development:3:session:entity=Elara/character,Senjin/character] Their working relationship shifts as Elara departs for Port Varen, leaving the forge sold and unspoken plans.
+[detail:2:session:entity=Port Varen/place] Port Varen is named as Elara’s destination.
+[detail:2:session:entity=Elara’s brother/character] Elara’s brother is ill and has no one else.
+[revelation:3:session:entity=Elara/character] Elara reveals she will write to Senjin once settled, not immediately.
+[detail:2:session:entity=forge/place] The forge is nearly empty and no longer resembles Elara’s workspace.

@@ -1,7 +1,5 @@
-[fact:3:permanent:entity=Elara/character] Elara is a blacksmith who works in a forge and crafts blades.
-[fact:3:permanent:entity=Elara/character] Elara has a burn scar on her right forearm from a forge accident.
-[fact:2:permanent:entity=Port Varen/place] Elara grew up near Port Varen on the south coast.
-[fact:2:permanent:entity=The Ashwood/place] Elara has personal history with The Ashwood, where she watched ships come in.
-[relationship:3:permanent:entity=Elara/character] The user and Elara have a transactional relationship that evolved into practical trust.
-[preference:2:session] The user prefers practical, no-nonsense dialogue with a hint of personal history.
-[preference:2:session] The user likes short, sharp interactions that reveal backstory.
+[fact:2:permanent:entity=Elara/character] Elara grew up near Port Varen, on the south coast, and used to watch ships come in from the Ashwood side.
+[fact:2:permanent:entity=Elara/character] Elara left Port Varen to work at the forge for better money and fewer ghosts.
+[fact:2:permanent:entity=Elara/character] Elara’s right forearm bears a burn scar from a forge accident years ago.
+[relationship:3:permanent:entity=Elara/character] We have an established transactional relationship rooted in mutual need — she provides blades, I provide payment.
+[preference:2:session:entity=Elara/character] Elara’s tone and manner suggest she values directness and practicality over small talk.
