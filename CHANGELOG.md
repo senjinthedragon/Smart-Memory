@@ -85,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scene break heuristic tightened**: the sleep/wake pattern no longer fires
+  on brief naps mid-scene - only on waking language that implies overnight
+  passage (dawn/morning/light/sun variants). The time-skip pattern no longer
+  fires on `that evening/morning` which was too broad and matched incidental
+  references within the same scene.
+
 - **Scene dedup now uses semantic embeddings**: scene break deduplication
   previously used only Jaccard word-overlap similarity, which failed to catch
   duplicate summaries when the heuristic fired multiple times on the same

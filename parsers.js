@@ -394,7 +394,9 @@ export function parseProfileOutput(response) {
 // and explicit separator markers authors use between scenes.
 const SCENE_BREAK_PATTERNS = [
   // Time skips - relative (hours/days/weeks/months/years later)
-  /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|weeks later|months later|years? later|a (few )?(hours?|days?|weeks?|months?|years?) (later|passed|had passed)|the following (day|morning|week|month|year)|some time later|meanwhile|after (a while|some time)|that (evening|night|afternoon|morning))\b/i,
+  // "that evening/night/morning" removed - too broad, fires on incidental
+  // references like "that morning he made breakfast" within the same scene.
+  /\b(later that (day|night|evening|morning)|the next (day|morning|evening|night)|hours later|days later|weeks later|months later|years? later|a (few )?(hours?|days?|weeks?|months?|years?) (later|passed|had passed)|the following (day|morning|week|month|year)|some time later|meanwhile|after (a while|some time))\b/i,
   // Time skips - absolute jumps ("a year passed", "three months went by")
   /\b(a (year|month|week|decade)|several (years?|months?|weeks?|days?)|[a-z]+ (years?|months?|weeks?|days?) (passed|went by|had passed|had gone by))\b/i,
   // Location transitions - arriving at a named or distinct new place.
@@ -406,8 +408,10 @@ const SCENE_BREAK_PATTERNS = [
   // Dawn/dusk transitions implying time passage through sleep or rest.
   /\b(as (dawn|morning|daylight|the sun) (broke|crept|arrived|filtered through|rose|spread)|when (dawn|morning) (came|broke|arrived))\b/i,
   /\b(as (night|darkness|dusk|evening) (fell|settled|crept|arrived|descended)|when (night|darkness|dusk) (came|fell|settled))\b/i,
-  // Sleep/wake transitions - waking after rest implies time has passed.
-  /\b((woke|stirred|roused) (to find|from (sleep|slumber)|as (dawn|morning|light)|with the (sun|light|dawn)))\b/i,
+  // Sleep/wake transitions - only fire when waking implies overnight passage
+  // (dawn/morning/light/sun variants). "Woke from sleep" and "woke to find"
+  // are too broad and fire on brief naps mid-scene.
+  /\b((woke|stirred|roused) (as (dawn|morning|light)|with the (sun|light|dawn)))\b/i,
   // Explicit separator markers (---, ***, * * *)
   /^[-*~]{3,}$/m,
   /\*\s*\*\s*\*/,
