@@ -237,6 +237,7 @@ const defaultSettings = {
   arcs_role: extension_prompt_roles.SYSTEM,
   arc_summary_response_length: 300,
   canon_response_length: 600,
+  canon_enabled: true,
   canon_inject_budget: 800,
   canon_position: extension_prompt_types.IN_PROMPT,
   canon_depth: 0,
@@ -831,6 +832,7 @@ async function onCharacterMessageRendered() {
         // pass. Gating on an increase (not just count >= 2) avoids a model call
         // on every extraction batch once the chat has two summaries.
         if (
+          settings.canon_enabled &&
           settings.arcs_enabled &&
           characterName &&
           getHardwareProfile() === 'b' &&
@@ -1463,6 +1465,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           // a new arc resolved this pass. Runs after arc extraction so it can
           // react to arcs closed in this round.
           if (
+            settings.canon_enabled &&
             settings.arcs_enabled &&
             getHardwareProfile() === 'b' &&
             loadArcSummaries().length > arcSummaryCountBefore
@@ -3127,6 +3130,20 @@ function bindSettingsUI() {
     });
 
   // ---- Canon ----------------------------------------------------------
+
+  $('#sm_canon_enabled')
+    .prop('checked', s.canon_enabled ?? true)
+    .on('change', function () {
+      getSettings().canon_enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+      if (!getSettings().canon_enabled) {
+        setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+        updateTokenDisplay();
+      } else {
+        injectCanon(getSelectedCharacterName());
+        updateTokenDisplay();
+      }
+    });
 
   $('#sm_canon_inject_budget')
     .val(s.canon_inject_budget)

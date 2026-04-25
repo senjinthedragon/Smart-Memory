@@ -155,6 +155,11 @@ export async function generateCanon(characterName) {
 export function injectCanon(characterName) {
   const settings = extension_settings[MODULE_NAME];
 
+  if (!(settings.canon_enabled ?? true)) {
+    setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+    return;
+  }
+
   const canon = loadCanon(characterName);
   if (!canon) {
     setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
