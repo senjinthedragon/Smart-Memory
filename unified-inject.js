@@ -29,9 +29,8 @@
  *                          so updateTokenDisplay can still render tier colours
  */
 
+import { extension_settings, extension_prompts } from '../../../extensions.js';
 import {
-  extension_settings,
-  extension_prompts,
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
