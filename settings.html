@@ -21,18 +21,6 @@
       </div>
 
       <!-- Group chat character selector (hidden in 1:1 chats) -->
-      <div id="sm_group_char_row" class="sm-block" style="display: none">
-        <label>
-          Viewing memories for
-          <span
-            class="sm-info"
-            data-tooltip="Select which group member's long-term memories, profiles, and continuity to view and manage in the panels below. Does not affect what each character receives in the prompt - that is handled automatically."
-            >ⓘ</span
-          >
-        </label>
-        <select id="sm_group_char_select" class="text_pole"></select>
-      </div>
-
       <!-- LLM source -->
       <p class="sm-section-title">Configuration</p>
       <div class="sm-block">
@@ -241,27 +229,37 @@
       <hr class="sysHR" />
 
       <!-- ══ TOKEN USAGE ══ -->
-      <details class="sm-section">
-        <summary>
-          <i class="fa-solid fa-chevron-right sm-section-chevron"></i>
+      <div class="sm-token-section">
+        <p class="sm-section-title">
           Token Usage
           <span
             class="sm-info"
-            data-tooltip="Estimated tokens currently injected by each Smart Memory tier. Updates after each generation. Uses ~4 chars/token - accurate enough for tuning budgets, not for exact counts."
+            data-tooltip="Estimated tokens currently injected by each Smart Memory tier. Updates after each generation. Hover a colour segment for the tier breakdown. Uses ~4 chars/token - accurate enough for tuning budgets, not for exact counts."
             >ⓘ</span
           >
-        </summary>
-        <div class="sm-section-content">
-          <div class="sm-token-bar-wrap">
-            <div id="sm_token_bar" class="sm-token-bar"></div>
-          </div>
-          <div class="sm-token-total">
-            <span id="sm_token_used">~0</span> / <span id="sm_token_max">?</span> tokens &mdash;
-            <span id="sm_token_pct">0</span>% of context
-          </div>
-          <div id="sm_token_group_rows" class="sm-token-group-rows" style="display:none"></div>
+        </p>
+        <div class="sm-token-bar-wrap">
+          <div id="sm_token_bar" class="sm-token-bar"></div>
         </div>
-      </details>
+        <div class="sm-token-total">
+          <span id="sm_token_used">~0</span> / <span id="sm_token_max">?</span> tokens &mdash;
+          <span id="sm_token_pct">0</span>% of context
+        </div>
+        <div id="sm_token_group_rows" class="sm-token-group-rows" style="display:none"></div>
+      </div>
+
+      <!-- Group character selector - shown only in group chats -->
+      <div id="sm_group_char_row" class="sm-block" style="display: none">
+        <label>
+          Viewing memories for
+          <span
+            class="sm-info"
+            data-tooltip="Select which group member's long-term memories, profiles, and continuity to view and manage in the panels below. Does not affect what each character receives in the prompt - that is handled automatically."
+            >ⓘ</span
+          >
+        </label>
+        <select id="sm_group_char_select" class="text_pole"></select>
+      </div>
 
       <!-- ══ LONG-TERM ══ -->
       <details class="sm-section">

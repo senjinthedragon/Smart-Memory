@@ -196,6 +196,12 @@
   transition: width 0.35s ease;
 }
 
+/* ── Token usage section (always visible, not an accordion) ─────────────── */
+
+#smart_memory_settings .sm-token-section {
+  margin: 2px 0 6px;
+}
+
 /* ── Per-character group memory rows ─────────────────────────────────────── */
 
 #smart_memory_settings .sm-token-group-rows {
