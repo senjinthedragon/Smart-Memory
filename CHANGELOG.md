@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Simple and advanced settings mode**: the settings panel now defaults to a
+  simplified view with a single **Memory context budget** slider that controls
+  total injection tokens. The budget is distributed across all tiers
+  automatically. An **Advanced mode** checkbox at the top of the panel
+  restores the full set of per-tier budgets, injection positions, depths, and
+  roles for users who want manual control.
+
 - **Persistent story arcs**: a pin button on each arc in the Story Threads
   panel lets you mark an arc as persistent. Persistent arcs are stored at the
   character level and automatically appear in every new chat with that

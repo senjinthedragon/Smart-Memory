@@ -274,6 +274,10 @@ const defaultSettings = {
   // 'b': force Profile B (hosted/high-performance behaviour)
   hardware_profile: 'auto',
 
+  // Settings panel mode: 'simple' shows a single budget slider; 'advanced' exposes
+  // per-tier injection budgets, positions, depths, and roles individually.
+  settings_mode: 'simple',
+
   // Verbose logging - when false, operational extraction/migration logs are
   // suppressed. Errors (console.error) are always shown regardless of this flag.
   verbose_logging: false,
@@ -281,6 +285,69 @@ const defaultSettings = {
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
 };
+
+// ---- Settings mode helpers -----------------------------------------------
+
+// Fixed proportions for the simplified total-budget slider. Each value is a
+// fraction of the total that gets allocated to that tier. Must sum to 1.0.
+const BUDGET_RATIOS = {
+  longterm: 0.16,
+  session: 0.13,
+  scenes: 0.1,
+  arcs: 0.22,
+  canon: 0.26,
+  profiles: 0.13,
+};
+
+/**
+ * Returns the sum of all per-tier inject budgets from current settings.
+ * Used to initialise the simplified slider from existing advanced values.
+ * @param {Object} s - Settings object.
+ * @returns {number}
+ */
+function totalBudgetFromSettings(s) {
+  return (
+    (s.longterm_inject_budget ?? 500) +
+    (s.session_inject_budget ?? 400) +
+    (s.scene_inject_budget ?? 300) +
+    (s.arcs_inject_budget ?? 700) +
+    (s.canon_inject_budget ?? 800) +
+    (s.profiles_inject_budget ?? 400)
+  );
+}
+
+/**
+ * Distributes a total token budget across tiers using BUDGET_RATIOS and
+ * writes the results directly into the settings object. Rounds to nearest 50
+ * to match the step granularity of the individual sliders.
+ * @param {number} total
+ * @param {Object} s - Settings object (mutated in place).
+ */
+function applyTotalBudget(total, s) {
+  const snap = (v) => Math.max(50, Math.round(v / 50) * 50);
+  s.longterm_inject_budget = snap(total * BUDGET_RATIOS.longterm);
+  s.session_inject_budget = snap(total * BUDGET_RATIOS.session);
+  s.scene_inject_budget = snap(total * BUDGET_RATIOS.scenes);
+  s.arcs_inject_budget = snap(total * BUDGET_RATIOS.arcs);
+  s.canon_inject_budget = snap(total * BUDGET_RATIOS.canon);
+  s.profiles_inject_budget = snap(total * BUDGET_RATIOS.profiles);
+}
+
+/**
+ * Shows or hides advanced-only controls based on the current settings mode.
+ * Also syncs the simplified budget slider value from the current per-tier totals.
+ * @param {'simple'|'advanced'} mode
+ */
+function applySettingsMode(mode) {
+  const isSimple = mode === 'simple';
+  $('.sm-advanced-only').toggle(!isSimple);
+  $('.sm-simple-only').toggle(isSimple);
+  if (isSimple) {
+    const total = totalBudgetFromSettings(getSettings());
+    $('#sm_total_budget').val(total);
+    $('#sm_total_budget_value').text(total);
+  }
+}
 
 // ---- Module-level state -------------------------------------------------
 
@@ -2666,6 +2733,29 @@ function bindSettingsUI() {
         onChatChanged();
       }
     });
+
+  // ---- Settings mode toggle -------------------------------------------
+  $('#sm_settings_mode_advanced')
+    .prop('checked', s.settings_mode === 'advanced')
+    .on('change', function () {
+      const mode = $(this).prop('checked') ? 'advanced' : 'simple';
+      getSettings().settings_mode = mode;
+      saveSettingsDebounced();
+      applySettingsMode(mode);
+    });
+
+  // ---- Simplified total budget slider ---------------------------------
+  $('#sm_total_budget')
+    .val(totalBudgetFromSettings(s))
+    .on('input', function () {
+      const total = parseInt($(this).val(), 10);
+      $('#sm_total_budget_value').text(total);
+      applyTotalBudget(total, getSettings());
+      saveSettingsDebounced();
+    });
+
+  // Apply initial mode on load.
+  applySettingsMode(s.settings_mode ?? 'simple');
 
   // ---- Group chat character selector ----------------------------------
   $('#sm_group_char_select').on('change', async function () {

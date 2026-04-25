@@ -132,6 +132,34 @@
         </label>
       </div>
 
+      <!-- Settings mode toggle -->
+      <div class="sm-block">
+        <label class="checkbox_label">
+          <input id="sm_settings_mode_advanced" type="checkbox" />
+          <span>
+            Advanced mode
+            <span
+              class="sm-info"
+              data-tooltip="Shows per-tier injection budgets, positions, depths, and roles. Leave off to use a single memory budget slider that controls all tiers proportionally."
+              >ⓘ</span
+            >
+          </span>
+        </label>
+      </div>
+
+      <!-- Simplified total budget slider (hidden in advanced mode) -->
+      <div class="sm-block sm-simple-only">
+        <label>
+          Memory context budget: <b><span id="sm_total_budget_value"></span></b> tokens
+          <span
+            class="sm-info"
+            data-tooltip="Total tokens allocated across all memory tiers. Drag right for more context (better recall, more tokens used); drag left for less. Each tier receives a fixed proportion of this total."
+            >ⓘ</span
+          >
+        </label>
+        <input id="sm_total_budget" type="range" min="800" max="8000" step="100" />
+      </div>
+
       <!-- Hardware profile override -->
       <div class="sm-block">
         <label>
@@ -375,8 +403,8 @@
             />
           </div>
 
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
+          <p class="sm-section-title sm-advanced-only">Injection</p>
+          <div class="sm-block sm-advanced-only">
             <label>
               Injection token budget: <b><span id="sm_longterm_inject_budget_value"></span></b>
               <span
@@ -403,7 +431,7 @@
               placeholder="Memories from previous conversations:\n{{memories}}"
             ></textarea>
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>Injection position</label>
             <div class="radio_group">
               <label>
@@ -518,8 +546,8 @@
             />
           </div>
 
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
+          <p class="sm-section-title sm-advanced-only">Injection</p>
+          <div class="sm-block sm-advanced-only">
             <label>
               Injection token budget: <b><span id="sm_session_inject_budget_value"></span></b>
               <span
@@ -546,7 +574,7 @@
               placeholder="Details from this session:\n{{session}}"
             ></textarea>
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>Injection position</label>
             <div class="radio_group">
               <label>
@@ -680,7 +708,7 @@
               placeholder="Story so far:\n{{summary}}"
             ></textarea>
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>Injection position</label>
             <div class="radio_group">
               <label>
@@ -779,8 +807,8 @@
             />
           </div>
 
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
+          <p class="sm-section-title sm-advanced-only">Injection</p>
+          <div class="sm-block sm-advanced-only">
             <label>
               Injection token budget: <b><span id="sm_scene_inject_budget_value"></span></b>
               <span
@@ -791,7 +819,7 @@
             </label>
             <input id="sm_scene_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>Injection position</label>
             <div class="radio_group">
               <label>
@@ -875,8 +903,8 @@
             />
           </div>
 
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
+          <p class="sm-section-title sm-advanced-only">Injection</p>
+          <div class="sm-block sm-advanced-only">
             <label>
               Injection token budget: <b><span id="sm_arcs_inject_budget_value"></span></b>
               <span
@@ -887,7 +915,7 @@
             </label>
             <input id="sm_arcs_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>Injection position</label>
             <div class="radio_group">
               <label>
@@ -960,8 +988,8 @@
           </div>
           <div id="sm_canon_status" class="sm_canon_status"></div>
 
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
+          <p class="sm-section-title sm-advanced-only">Injection</p>
+          <div class="sm-block sm-advanced-only">
             <label>
               Injection token budget: <b><span id="sm_canon_inject_budget_value"></span></b>
               <span
@@ -972,7 +1000,7 @@
             </label>
             <input id="sm_canon_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>
               Template
               <span
@@ -988,7 +1016,7 @@
               placeholder="Character history:&#10;{{canon}}"
             ></textarea>
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>Injection position</label>
             <div class="radio_group">
               <label>
@@ -1081,8 +1109,8 @@
             />
           </div>
 
-          <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
+          <p class="sm-section-title sm-advanced-only">Injection</p>
+          <div class="sm-block sm-advanced-only">
             <label>
               Injection token budget: <b><span id="sm_profiles_inject_budget_value"></span></b>
               <span
@@ -1093,7 +1121,7 @@
             </label>
             <input id="sm_profiles_inject_budget" type="range" min="100" max="1000" step="50" />
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>Injection position</label>
             <div class="radio_group">
               <label>

@@ -51,6 +51,18 @@
   margin-top: 4px;
 }
 
+/* ── Settings mode (simple / advanced) ──────────────────────────────────── */
+
+/* Hidden by default; shown when advanced mode is active (toggled via JS) */
+#smart_memory_settings .sm-advanced-only {
+  display: none;
+}
+
+/* Hidden by default; shown when simple mode is active (toggled via JS) */
+#smart_memory_settings .sm-simple-only {
+  display: none;
+}
+
 /* ── Section accordions ──────────────────────────────────────────────────── */
 
 #smart_memory_settings details.sm-section {

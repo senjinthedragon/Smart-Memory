@@ -155,6 +155,15 @@ If you change ST's vector storage depth, set session memory one higher so it sti
 
 All settings are saved automatically per profile.
 
+### Simple and Advanced Mode
+
+The settings panel has two modes:
+
+- **Simple mode** (default) - shows only the essentials: a single **Memory context budget** slider that controls how many tokens Smart Memory can inject in total. The budget is distributed across all tiers automatically using fixed proportions.
+- **Advanced mode** - reveals the full set of per-tier injection budgets, injection positions, depths, and roles for complete manual control. Toggle it with the **Advanced mode** checkbox at the top of the settings panel.
+
+Switching from simple to advanced preserves whatever values were last applied by the total budget slider, so power users can start simple and refine from there.
+
 ### Hardware Profile
 
 Smart Memory can automatically adapt its behavior based on your setup.
