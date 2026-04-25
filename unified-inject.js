@@ -78,6 +78,16 @@ const INDIVIDUAL_KEYS = TIER_ORDER.map((t) => t.key);
 let lastTierBreakdown = [];
 
 /**
+ * Content cache keyed by prompt key. Holds the last known non-empty content
+ * for each tier so that tiers not refreshed in the current extraction cycle
+ * (canon, scenes) are not dropped from the unified block just because their
+ * individual slots were cleared by the previous pass.
+ * Reset on chat change via clearUnifiedSlot().
+ * @type {Record<string, string>}
+ */
+let contentCache = {};
+
+/**
  * Returns the per-tier token breakdown from the last injectUnified call.
  * @returns {Array<{key: string, label: string, color: string, tokens: number}>}
  */
@@ -86,11 +96,14 @@ export function getUnifiedTierBreakdown() {
 }
 
 /**
- * Clears the unified injection slot and resets the stored breakdown.
+ * Clears the unified injection slot, the stored breakdown, and the content
+ * cache. Call on chat change so stale content from a previous chat never
+ * bleeds into a new one.
  */
 export function clearUnifiedSlot() {
   setExtensionPrompt(PROMPT_KEY_UNIFIED, '', extension_prompt_types.NONE, 0);
   lastTierBreakdown = [];
+  contentCache = {};
 }
 
 /**
@@ -98,15 +111,22 @@ export function clearUnifiedSlot() {
  * records per-tier token counts, clears the individual slots, and injects
  * the merged content into PROMPT_KEY_UNIFIED as a single IN_PROMPT block.
  *
+ * Tiers not refreshed in this cycle (e.g. canon, scenes when no break fired)
+ * fall back to the content cache so they are not silently dropped from the
+ * block just because their slot was cleared by the previous pass.
+ *
  * Call this after all individual injectors have run for a given generation
  * cycle. Tiers with no content are skipped silently.
  */
 export function injectUnified() {
-  // Snapshot content and token counts before we clear anything.
-  const populated = TIER_ORDER.map((tier) => ({
-    ...tier,
-    content: extension_prompts[tier.key]?.value ?? '',
-  })).filter((t) => t.content.length > 0);
+  // For each tier: use the fresh slot value if present, otherwise fall back
+  // to the cache. Update the cache whenever fresh content is available.
+  const populated = TIER_ORDER.map((tier) => {
+    const fresh = extension_prompts[tier.key]?.value ?? '';
+    if (fresh.length > 0) contentCache[tier.key] = fresh;
+    const content = fresh.length > 0 ? fresh : (contentCache[tier.key] ?? '');
+    return { ...tier, content };
+  }).filter((t) => t.content.length > 0);
 
   lastTierBreakdown = populated.map((t) => ({
     key: t.key,
