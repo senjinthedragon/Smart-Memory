@@ -1,11 +1,4 @@
-[arc] Senjin is heading into the Ashwood and needs a suitable blade.
-[arc] Elara has a burn scar on her forearm from a forge accident years ago.
-[arc] Elara grew up near Port Varen on the south coast and witnessed ships from the Ashwood side.
-[arc] Elara came to the forge for better money and fewer ghosts, implying she left something behind.
-[arc] Elara’s arm injury may be connected to the Ashwood’s dangers, but this is not confirmed.
-[arc] Senjin may be risking his life by entering the Ashwood, based on Elara’s mention of ships that never made it.
-[arc] The blade Elara gives Senjin is described as having better balance than it looks — suggesting possible hidden qualities or unknown risks.
-[arc] Elara’s statement “I came here for work. Better money, fewer ghosts” implies she left behind something emotionally significant.
-[arc] Elara’s reference to Port Varen and the Ashwood may hint at an unresolved personal connection or past tragedy.
-
-NONE
+[arc] Senjin is heading into the Ashwood with a newly acquired blade, but the danger there remains unexplained.
+[arc] Elara mentions Port Varen and her connection to the Ashwood, hinting at personal history and possible unresolved trauma.
+[arc] Elara’s burn scar is linked to a past forge accident, but the full details and consequences remain unknown.
+[arc] Elara left Port Varen for work, implying a choice between safety and opportunity, with potential emotional cost.

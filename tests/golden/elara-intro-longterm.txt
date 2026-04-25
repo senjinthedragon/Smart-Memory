@@ -1,6 +1,8 @@
-[fact:3:permanent:entity=Elara/character] Elara is a blacksmith who works at a forge near the Ashwood.
-[fact:3:permanent:entity=Elara/character] Elara has a burn scar on her right forearm from a forge accident.
-[fact:2:permanent:entity=Port Varen/place] Elara grew up near Port Varen on the south coast.
-[fact:2:permanent:entity=Ashwood/place] Elara has personal experience with the Ashwood, having watched ships come and go from its side.
-[relationship:3:permanent:entity=Elara/character] Elara is willing to work with the user despite her skepticism, showing trust.
-[preference:2:session] Elara uses blunt, practical language and responds to direct requests without small talk.
+[fact:2:permanent:entity=Elara/character] Elara is a blacksmith who works in a forge and reshapes weapons.
+[fact:2:permanent:entity=Elara/character] Elara has a burn scar on her right forearm from a past forge accident.
+[fact:2:permanent:entity=Port Varen/place] Elara grew up near Port Varen, on the south coast.
+[fact:2:permanent:entity=The Ashwood/place] Elara has personal experience with the Ashwood, having watched ships come and go from that side.
+[relationship:2:permanent:entity=Elara/character] Elara has a transactional but pragmatic working relationship with the user, based on past collaboration (e.g. escaping the dungeon).
+[preference:2:session:entity=Elara/character] Elara prefers brief, practical dialogue and dislikes small talk; she’s direct and matter-of-fact in conversation.
+[event:2:permanent:entity=Senjin/character,Elara/character] Senjin requested a blade specifically suited for the Ashwood, which Elara acknowledged by referencing her own past experiences there.
+[fact:2:permanent:entity=Elara/character] Elara’s shortsword is well-balanced, indicating her craftsmanship and practical knowledge of weapon design.

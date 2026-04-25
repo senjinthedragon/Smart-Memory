@@ -1,0 +1,83 @@
+{
+  "description": "Real-world roleplay excerpt from a Whisperwood campaign. 18 messages across 4 characters with embedded lore, physical descriptions, magic abilities, and open plot threads. Tests extraction quality on content resembling actual production prompts.",
+  "prior_longterm": [
+    "[fact:3:permanent:entity=Finn/character] Finn is the Guardian of the Whisperwood, a sentient forest with magical properties.",
+    "[fact:3:permanent:entity=Senjin/character] Senjin is a young gay anthro dragon with purple metallic scales, golden ventral scales, ebony claws and horns, and shadow magic.",
+    "[relationship:3:permanent:entity=Senjin/character,Alex/character,Finn/character] The trio - Senjin, Alex, and Finn - share a deep fraternal bond and operate as co-guardians of the Whisperwood.",
+    "[fact:2:permanent:entity=Miren/character] Miren is an emerald-winged sprite who serves as a guide and source of forest lore."
+  ],
+  "messages": [
+    {
+      "name": "Senjin",
+      "mes": "I'm a little nervous... I've never been in a forest this big before. What was that sound?"
+    },
+    {
+      "name": "Finn",
+      "mes": "\"Easy now,\" I murmur, placing a reassuring hand on your shoulder for a brief moment before pointing up. \"Just a Shadow Catbird. Their calls can sound like a woman weeping. They're shy creatures, more scared of us than we are of them. Stick close, and I'll make sure nothing harms you. The forest speaks its own language; you just need to learn how to listen.\""
+    },
+    {
+      "name": "Senjin",
+      "mes": "*I sit by the fire, watching you carve a small piece of wood.* What are you making?"
+    },
+    {
+      "name": "Finn",
+      "mes": "I glance up from my work, the firelight dancing in my amber eyes. A small smile plays on my muzzle as I hold up the half-finished object - a small, detailed carving of a bird in flight. \"Just a little hobby of mine. Helps pass the time.\" I offer it to you to inspect. \"My father taught me. He said every piece of wood has a story trapped inside it, and it's the carver's job to set it free. This one,\" I say, my voice growing a little softer, \"reminds me of the feeling of freedom you only get out here.\""
+    },
+    {
+      "name": "Senjin",
+      "mes": "We need to cross this chasm, but the bridge is out! What do we do?"
+    },
+    {
+      "name": "Finn",
+      "mes": "I walk to the edge of the chasm, peering down into the misty depths before scanning the other side. My expression is focused, calm. \"Don't worry. The bridge may be gone, but the forest always provides another way.\" I point to a thick, gnarled vine hanging from an ancient, overhanging tree. \"That vine is strong enough to hold us. I'll go first and secure a rope on the other side for you. Just trust me, and don't look down.\""
+    },
+    {
+      "name": "Senjin",
+      "mes": "Thank you for everything, Finn. I would have been completely lost without you."
+    },
+    {
+      "name": "Finn",
+      "mes": "I chuckle softly, stoking the campfire with a stick. The flames crackle, sending sparks up towards the starry sky. \"Think nothing of it. It's not every day I get such good company on the trail. Besides,\" I say, looking over at you with a sincere warmth, \"protecting this wilderness, and those who respect it, is what I do. I'm glad our paths crossed.\""
+    },
+    {
+      "name": "Alex",
+      "mes": "Miren's response was swift, almost as if her words had been waiting to be spoken. \"Ah, but that's the true nature of the Laments, is it not?\" she said, her eyes glinting in the flickering firelight like hidden emeralds. \"Spirits of longing, searching for a name, a voice, a place to call their own. When one finally finds it, the joy is... indescribable. But it is also a change, an evolution. They no longer simply mourn, they now understand, they now belong.\" Miren's wings shimmered, the emerald light casting an ethereal glow over the trio's gathered faces. \"But let us not dwell on such serious matters. Tell me, have you three found your own names yet, here in the Whisperwood? Not the ones your mothers and fathers gave you, but the ones the forest speaks to you with when the moon is new and the trees whisper secrets on the wind?\""
+    },
+    {
+      "name": "Finn",
+      "mes": "I've always called myself the guardian of the Whisperwood, but perhaps there's another name the forest gives me, one whispered in the night breeze among the ancient trees."
+    },
+    {
+      "name": "Senjin",
+      "mes": "\"A name given by the forest?\" Senjin repeats, his voice cool. He looks at Finn, acknowledging the 'Guardian' title, then turns back to Miren. \"The forest hasn't whispered a name to me yet, Miren. It usually just hums when I use my magic. But if the 'Unbound' are looking for a host to 'belong' to... that sounds less like joy and more like a theft of self.\" He nudges Alex. \"Don't get too caught up in the poetry, pup. A wolf is a wolf, no matter what the trees whisper.\""
+    },
+    {
+      "name": "Finn",
+      "mes": "\"It's true,\" Finn rumbles, his voice a deep, steady rumble, \"that some would call the Whisperwood's whispers a cruel trick, luring in the weak-willed to their doom.\" He pauses, the firelight casting long shadows across his weathered face as he contemplates Miren's words. \"But to me, those eerie cries are a summons, an invitation to the sublime - beautiful in their wild, unsettling song.\" Finn's amber eyes hold a faraway gaze. \"I do not claim to be a mystic or seer, as Alex may be, nor a poet like Senjin. But in the Whisperwood, I have found something greater than myself - magic that speaks directly to my soul, a harmony with the land's rhythms and secrets.\" He leans back, cradling a mug of hot tea in his hands. \"Miren knows this place better than any of us, and her words carry weight. Perhaps there's truth in the forest's whispers... or perhaps it's simply madness, fueled by a forest's ancient longing.\""
+    },
+    {
+      "name": "Alex",
+      "mes": "Alex looks up from his thoughts on Miren's words. He reaches out, wrapping his small, furry hands around Senjin's muscular arm. \"Senjin, Finn's right,\" Alex says softly. \"I trust what you feel, about the woods, the magic... everything.\" His gaze drifts to Finn, searching for a similar connection. \"And I think, maybe, if we listen closely, like Finn is saying, we can hear the Whisperwood's secrets too.\" As if sensing the shift in the air, the fire crackles, a sudden gust of wind carrying the scent of damp earth through the clearing. Alex shivers slightly, his pointed ears twitching. \"Maybe we should... try to find out what the Whisperwood's whispering, huh? If it's not too scary... or strange...\""
+    },
+    {
+      "name": "Senjin",
+      "mes": "Senjin lets out a sharp, huffed breath that sends a faint wisp of dark smoke curling from his nostrils. \"No more camp stories, Finn. We left the fire behind a mile ago.\" He looks down at Alex, his expression softening just a fraction. \"And don't worry about being 'scary' or 'strange,' pup. You've got a dragon and a guardian at your back. The woods should be the ones worried about us.\" He turns his head sharply back toward the toadstool, his purple scales catching what little light filters through the canopy. \"Miren! You're getting quiet. If the 'Unbound' are spirits searching for a host, tell us plainly: do they ask permission, or do they just take what they want? My shadow magic doesn't like the sound of 'theft of self,' and I'd hate to have to use it on a guest.\""
+    },
+    {
+      "name": "Finn",
+      "mes": "I nod in understanding at Senjin's question, my own eyes narrowing slightly. I lean in closer, my warm breath ruffling Miren's wings as I speak directly to her. \"Ah, Senjin, always so ready for a fight - though I suppose some measure of defense is wise in these woods.\" Miren regards me, her emerald eyes sparkling with an inner light. \"Respect and reverence are not traits inherent to the Unbound,\" Miren says, her words carrying a mournful weight. \"Most are simple spirits, lost and in pain, crying out for solace and identity. They do not ask permission, for they do not truly understand the concept in their timeless state. The Unbound claim what they will, taking shelter in the bodies of the living and imprinting their essence upon the lands they find. But make no mistake, guardians - this possession is no passive process. The spirit and the host must reconcile, each giving of themselves, or the Unbound's touch will bring ruin upon the land and its people.\""
+    },
+    {
+      "name": "Alex",
+      "mes": "Alex swallows hard, his throat dry as he listens to Miren's words, her gentle voice carrying an undercurrent of deep sadness. \"They just... take?\" Alex whispers, his voice barely audible over the distant hooting of owls. Suddenly, the firefly sprite materializes in mid-air, glowing brighter in agitation. \"There's... something...\" Miren stammers, her voice trembling. \"A presence... I don't think it's one of the Lamenting.\" She pauses, gathering her courage, before plunging into the woods, her emerald light fluttering like a moth in pursuit of a flame. \"Alex, stay close,\" Finn rumbles, rising to his full height. \"Keep both hands on Senjin's fur if you need to.\""
+    },
+    {
+      "name": "Senjin",
+      "mes": "Senjin's eyes flash, the purple scales along his neck bristling. He doesn't have 'fur' for Alex to grab, but he lowers his shoulder so the pup can grip the ridges of his scales. \"No, Finn. I'm not letting her lead us into a blind chase,\" Senjin growls, his voice vibrating with a draconic sub-bass. He doesn't move toward Miren's retreating green light yet. Instead, he turns his head toward the 'thuds' they heard earlier. \"Miren! Come back here!\" he roars, the shadow magic at his feet surging outward like a physical tether. \"You don't get to drop a 'ruin upon the land' warning and then vanish. If that presence isn't a Lamenting, then what is it? A host-taker?\""
+    },
+    {
+      "name": "Alex",
+      "mes": "Alex's heart leaps into his throat as Senjin bellows after Miren, the dragon's voice a fearsome challenge echoing through the Whisperwood. He clings to Senjin's ridged neck, feeling the heat of the dragon's skin seep into his small paw, comforted by the solidity beneath him. \"Aa... alright,\" Alex croaks, his voice a bit steadier. He peeks up at Senjin, his amber eyes wide and determined. \"Let's... find out who or what is making those noises.\""
+    }
+  ]
+}

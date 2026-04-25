@@ -1,6 +1,6 @@
-[scene:2:session] Forge at night, tools and glowing metal, Elara working at an anvil.
-[revelation:3:session:entity=Elara/character] Elara reveals her forearm burn scar from a years-old forge accident.
-[revelation:3:session:entity=Port Varen/place] Elara grew up near Port Varen, south coast, watching ships from Ashwood side.
-[revelation:3:session:entity=Senjin/character] Senjin reveals he's heading into the Ashwood.
-[development:2:session] Elara agrees to sell Senjin a blade after initially refusing, influenced by his offer to pay double and his mention of Ashwood.
-[detail:2:session:entity=shortsword/object] Elara hands Senjin a shortsword described as clean lines, well-balanced, and better in balance than it looks.
+[scene:2:session] Forge backroom, dim with firelight, tools and metal scraps visible, hammer and dagger central.
+[revelation:3:session:entity=Elara/character] Elara reveals her forearm burn scar, from wrist to elbow, pale and wide, linked to a forge accident years ago.
+[revelation:3:session:entity=Port Varen/place] Elara grew up near Port Varen, on the south coast, near Ashwood shipping lanes, which she associates with lost ships.
+[development:2:session] Senjin’s urgent need for a blade in Ashwood prompts Elara’s personal anecdote, softening her earlier refusal.
+[detail:3:permanent:entity=The shortsword/object] Elara hands Senjin a well-balanced shortsword, calling its balance better than it looks.
+[detail:3:permanent:entity=The Ashwood/place] Mentioned as a dangerous, perilous region, with half of ships never returning, tied to Elara’s past.

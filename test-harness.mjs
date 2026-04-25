@@ -432,7 +432,7 @@ console.log(c.dim('─'.repeat(60)));
 runParserTests();
 
 if (!PARSERS_ONLY) {
-  const fixtures = ['elara-intro', 'elara-supersession'];
+  const fixtures = ['elara-intro', 'elara-supersession', 'whisperwood-long'];
 
   for (const name of fixtures) {
     console.log(c.bold(`\nExtraction test: ${name}`));

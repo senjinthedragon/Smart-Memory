@@ -1,0 +1,6 @@
+[fact:2:permanent:entity=Finn/character] Finn’s amber eyes hold a faraway gaze when he speaks of the forest’s whispers.
+[fact:3:permanent:entity=Senjin/character] Senjin’s shadow magic can surge outward like a tether, and he bristles with purple scales when agitated.
+[fact:2:session:entity=Miren/character] Miren’s emerald wings shimmer when she speaks of the Unbound, casting an ethereal glow.
+[relationship:2:permanent:entity=Senjin/character,Alex/character,Finn/character] The trio’s bond is tested by uncertainty, with Senjin skeptical of forest whispers and Alex eager to listen.
+[preference:2:session] The user favors grounded, emotionally charged moments over poetic abstraction in the forest setting.
+[event:2:permanent:entity=Senjin/character,Finn/character] Finn and Senjin share a tense but respectful dynamic, with Senjin challenging Finn’s mystical interpretations.
