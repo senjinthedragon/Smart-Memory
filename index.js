@@ -3197,6 +3197,7 @@ function bindSettingsUI() {
       if (summary) {
         injectSummary(summary);
         updateShortTermUI(summary);
+        maybeInjectUnified();
         updateTokenDisplay();
         setStatusMessage('Summary updated.');
       }
@@ -3230,6 +3231,7 @@ function bindSettingsUI() {
       if (text) {
         injectCanon(characterName);
         updateCanonUI(characterName);
+        maybeInjectUnified();
         updateTokenDisplay();
         setStatusMessage('Canon summary updated.');
       } else {
