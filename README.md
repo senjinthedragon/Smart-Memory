@@ -159,10 +159,10 @@ All settings are saved automatically per profile.
 
 The settings panel has two modes:
 
-- **Simple mode** (default) - shows only the essentials: a single **Memory context budget** slider that controls how many tokens Smart Memory can inject in total. The budget is distributed across all tiers automatically using fixed proportions.
-- **Advanced mode** - reveals the full set of per-tier injection budgets, injection positions, depths, and roles for complete manual control. Toggle it with the **Advanced mode** checkbox at the top of the settings panel.
+- **Simple mode** (default) - shows only the most commonly adjusted controls: hardware profile, extraction frequency (Low/Medium/High), and a single total memory context budget slider. Consolidation, injection templates, compaction tuning, and all per-tier position/depth/role settings are hidden and run on sensible defaults.
+- **Advanced mode** - reveals everything: per-tier budgets, injection positions, depths, roles, template fields, compaction threshold, response lengths, and the Consolidation section. Toggle it with the **Advanced mode** checkbox at the top of the settings panel.
 
-Switching from simple to advanced preserves whatever values were last applied by the total budget slider, so power users can start simple and refine from there.
+Switching from simple to advanced never overwrites your values - the advanced controls always show the current state, including any values previously set by the simple-mode sliders.
 
 ### Hardware Profile
 

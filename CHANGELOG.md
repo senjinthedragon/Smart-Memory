@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Extraction frequency dropdown**: simple mode gains an Extraction frequency
+  selector (Low / Medium / High, mapping to every 5 / 3 / 1 messages) placed
+  below the hardware profile. The individual per-tier extract-every sliders
+  move to advanced mode only.
+
 - **Consolidation settings panel**: all consolidation settings are now grouped
   into a single root-level Consolidation section (visible in advanced mode
   only - hidden in simple mode, where consolidation runs on with sensible
@@ -18,11 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   detail), replacing the previous single shared slider.
 
 - **Simple and advanced settings mode**: the settings panel now defaults to a
-  simplified view with a single **Memory context budget** slider that controls
-  total injection tokens. The budget is distributed across all tiers
-  automatically. An **Advanced mode** checkbox at the top of the panel
-  restores the full set of per-tier budgets, injection positions, depths, and
-  roles for users who want manual control.
+  simplified view exposing only the most commonly adjusted controls. Advanced
+  mode restores the full set of per-tier budgets, injection positions, depths,
+  roles, templates, extraction frequencies, and compaction tuning knobs for
+  users who want manual control.
 
 - **Persistent story arcs**: a pin button on each arc in the Story Threads
   panel lets you mark an arc as persistent. Persistent arcs are stored at the

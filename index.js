@@ -159,6 +159,8 @@ import { showMemoryGraph } from './graph.js';
 
 const defaultSettings = {
   enabled: true,
+  settings_mode: 'simple',
+  extraction_frequency: 'medium',
 
   // LLM source for all memory operations (extraction, summarization, recap)
   source: memory_sources.main,
@@ -279,10 +281,6 @@ const defaultSettings = {
   // 'b': force Profile B (hosted/high-performance behaviour)
   hardware_profile: 'auto',
 
-  // Settings panel mode: 'simple' shows a single budget slider; 'advanced' exposes
-  // per-tier injection budgets, positions, depths, and roles individually.
-  settings_mode: 'simple',
-
   // Verbose logging - when false, operational extraction/migration logs are
   // suppressed. Errors (console.error) are always shown regardless of this flag.
   verbose_logging: false,
@@ -292,6 +290,9 @@ const defaultSettings = {
 };
 
 // ---- Settings mode helpers -----------------------------------------------
+
+// Extraction frequency presets for the simple-mode dropdown.
+const EXTRACTION_FREQUENCY_MAP = { low: 5, medium: 3, high: 1 };
 
 // Fixed proportions for the simplified total-budget slider. Each value is a
 // fraction of the total that gets allocated to that tier. Must sum to 1.0.
@@ -2933,6 +2934,23 @@ function bindSettingsUI() {
 
   updateProfileLabel();
   syncProfileGating();
+
+  $('#sm_extraction_frequency')
+    .val(s.extraction_frequency ?? 'medium')
+    .on('change', function () {
+      const freq = $(this).val();
+      const every = EXTRACTION_FREQUENCY_MAP[freq] ?? 3;
+      const settings = getSettings();
+      settings.extraction_frequency = freq;
+      settings.longterm_extract_every = every;
+      settings.session_extract_every = every;
+      saveSettingsDebounced();
+      // Keep the advanced sliders in sync so switching to advanced mode shows the right values.
+      $('#sm_longterm_extract_every').val(every);
+      $('#sm_longterm_extract_every_value').text(every);
+      $('#sm_session_extract_every').val(every);
+      $('#sm_session_extract_every_value').text(every);
+    });
 
   // ---- Short-term (compaction) ----------------------------------------
   $('#sm_compaction_enabled')

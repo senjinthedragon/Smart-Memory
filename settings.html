@@ -178,6 +178,23 @@
         <div id="sm_hardware_profile_label" class="sm_hardware_profile_label"></div>
       </div>
 
+      <!-- Extraction frequency (simple mode only) -->
+      <div class="sm-block sm-simple-only">
+        <label>
+          Extraction frequency
+          <span
+            class="sm-info"
+            data-tooltip="How often Smart Memory reads new messages and extracts memories. Low = every 5 messages, Medium = every 3, High = every message. Higher frequency means more up-to-date memory but more model calls."
+            >ⓘ</span
+          >
+        </label>
+        <select id="sm_extraction_frequency" class="text_pole">
+          <option value="low">Low (every 5 messages)</option>
+          <option value="medium">Medium (every 3 messages)</option>
+          <option value="high">High (every message)</option>
+        </select>
+      </div>
+
       <!-- Catch Up / Reset buttons -->
       <div class="sm-block" style="display: flex; gap: 6px; align-items: center">
         <button id="sm_catch_up" class="menu_button menu_button_icon" style="flex: 1">
@@ -298,7 +315,7 @@
           </div>
 
           <p class="sm-section-title">Extraction</p>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label
               >Extract after every <b><span id="sm_longterm_extract_every_value"></span></b> AI
               messages</label
@@ -338,7 +355,7 @@
             </label>
             <input id="sm_longterm_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>
               Template
               <span
@@ -422,7 +439,7 @@
           </div>
 
           <p class="sm-section-title">Extraction</p>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label
               >Extract after every <b><span id="sm_session_extract_every_value"></span></b> AI
               messages</label
@@ -461,7 +478,7 @@
             </label>
             <input id="sm_session_inject_budget" type="range" min="100" max="2000" step="50" />
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>
               Template
               <span
@@ -547,7 +564,7 @@
           </div>
 
           <p class="sm-section-title">Extraction</p>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>
               Context threshold:
               <b><span id="sm_compaction_threshold_value"></span></b>
@@ -566,7 +583,7 @@
               value="{{defaultSettings.compaction_threshold}}"
             />
           </div>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>
               Response length: <b><span id="sm_compaction_response_length_value"></span></b> tokens
             </label>
@@ -595,7 +612,7 @@
           </div>
 
           <p class="sm-section-title">Injection</p>
-          <div class="sm-block">
+          <div class="sm-block sm-advanced-only">
             <label>
               Template
               <span
