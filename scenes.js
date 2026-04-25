@@ -29,7 +29,7 @@
  * saveSceneHistory           - persists the scene history array to chatMetadata
  * clearSceneHistory          - empties scene history for the current chat
  * summarizeScene             - generates a 2-3 sentence mini-summary of a scene
- * processSceneBreak          - orchestrates detection + summarization + storage
+ * processSceneBreak          - orchestrates detection + summarization + dedup + storage
  * linkMemoriesToLastScene    - attaches memory ids to the most recent scene entry
  * injectSceneHistory         - pushes scene history into the prompt via setExtensionPrompt
  */
@@ -45,6 +45,7 @@ import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './cons
 import { buildSceneDetectPrompt, SCENE_SUMMARY_PROMPT } from './prompts.js';
 import { detectSceneBreakHeuristic } from './parsers.js';
 import { smLog } from './logging.js';
+import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 
 // Re-export so index.js can import directly from scenes.js as before.
 export { detectSceneBreakHeuristic };
@@ -53,8 +54,7 @@ export { detectSceneBreakHeuristic };
 
 /**
  * Jaccard word-overlap similarity between two scene summary strings.
- * Used to avoid storing duplicate summaries when the heuristic fires
- * multiple times during the same narrative event.
+ * Used as a fallback when embeddings are unavailable.
  * @param {string} a
  * @param {string} b
  * @returns {number} Similarity in [0, 1].
@@ -66,6 +66,25 @@ function sceneJaccard(a, b) {
   let intersection = 0;
   for (const w of aWords) if (bWords.has(w)) intersection++;
   return intersection / (aWords.size + bWords.size - intersection);
+}
+
+/**
+ * Semantic similarity between two scene summary strings.
+ * Uses embeddings when available and falls back to Jaccard.
+ * @param {string} a
+ * @param {string} b
+ * @returns {Promise<{score: number, semantic: boolean}>}
+ */
+async function sceneSimilarity(a, b) {
+  const aKey = a.toLowerCase().trim();
+  const bKey = b.toLowerCase().trim();
+  const vectorMap = await getEmbeddingBatch([aKey, bKey]);
+  const aVec = vectorMap.get(aKey);
+  const bVec = vectorMap.get(bKey);
+  if (aVec && bVec) {
+    return { score: cosineSimilarity(aVec, bVec), semantic: true };
+  }
+  return { score: sceneJaccard(a, b), semantic: false };
 }
 
 // ---- Heuristics ---------------------------------------------------------
@@ -173,6 +192,20 @@ export async function processSceneBreak(lastMessageText, recentMessages, previou
   const settings = extension_settings[MODULE_NAME];
   if (!settings.scene_enabled) return false;
 
+  // Require a minimum number of messages in the buffer before accepting a
+  // scene break. Without this, the heuristic can fire multiple times in quick
+  // succession at the start of a new scene (e.g. several messages all
+  // describing a morning wake-up), producing duplicate summaries of the same
+  // opening beats before the scene has had a chance to develop.
+  const minMessages = settings.scene_min_messages ?? 5;
+  const nonSystemMessages = recentMessages.filter((m) => !m.is_system);
+  if (nonSystemMessages.length < minMessages) {
+    smLog(
+      `[SmartMemory] Scene break suppressed - only ${nonSystemMessages.length}/${minMessages} messages in buffer.`,
+    );
+    return false;
+  }
+
   const isBreak = settings.scene_ai_detect
     ? await detectSceneBreakAI(lastMessageText, previousAiMessage)
     : detectSceneBreakHeuristic(lastMessageText);
@@ -187,16 +220,19 @@ export async function processSceneBreak(lastMessageText, recentMessages, previou
   const history = loadSceneHistory();
 
   // Skip if the new summary is too similar to the most recent stored scene.
-  // Prevents duplicate entries when the heuristic fires multiple times on
-  // the same narrative event.
-  // 0.5 is intentionally higher than the arc dedup threshold (0.4) - scene
-  // summaries are shorter and more concrete so the same threshold would be
-  // too permissive for near-identical phrasings.
-  const SCENE_DEDUP_THRESHOLD = 0.5;
+  // Uses semantic embeddings when available, falling back to Jaccard.
+  // Cosine threshold 0.82 catches rephrased versions of the same scene that
+  // Jaccard misses due to varied wording.
   const lastScene = history[history.length - 1];
-  if (lastScene && sceneJaccard(summary, lastScene.summary) >= SCENE_DEDUP_THRESHOLD) {
-    smLog('[SmartMemory] Scene summary too similar to previous - skipping duplicate.');
-    return false;
+  if (lastScene) {
+    const { score, semantic } = await sceneSimilarity(summary, lastScene.summary);
+    const threshold = semantic ? 0.82 : 0.55;
+    if (score >= threshold) {
+      smLog(
+        `[SmartMemory] Scene summary too similar to previous (${semantic ? 'semantic' : 'jaccard'} ${score.toFixed(3)}) - skipping duplicate.`,
+      );
+      return false;
+    }
   }
 
   const max = settings.scene_max_history ?? 5;

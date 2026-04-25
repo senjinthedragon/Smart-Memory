@@ -85,6 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scene dedup now uses semantic embeddings**: scene break deduplication
+  previously used only Jaccard word-overlap similarity, which failed to catch
+  duplicate summaries when the heuristic fired multiple times on the same
+  narrative event and the model described it with different wording each time.
+  Deduplication now uses cosine similarity on embeddings (threshold 0.82) with
+  Jaccard as a fallback when embeddings are unavailable (threshold raised to
+  0.55). A minimum buffer length check (default 5 non-system messages) now
+  also suppresses scene breaks that fire before the scene has had a chance to
+  develop, which was the root cause of the duplicates.
+
 - **Compaction summary reproducing injected memory context**: the compaction
   model would sometimes copy canon, profiles, or other injected memory content
   verbatim into the summary output, causing duplicate blocks in the prompt.
