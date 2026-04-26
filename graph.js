@@ -62,7 +62,7 @@ const REPULSION_K = 3500; // Coulomb-like repulsion strength
 const SPRING_K = 0.05; // Hooke's law spring stiffness
 const SPRING_REST_EM = 140; // entity-memory edge rest length
 const SPRING_REST_MM = 55; // memory-memory (supersedes) rest length
-const DAMPING = 0.86; // velocity multiplied by this each tick
+const DAMPING = 0.88; // velocity multiplied by this each tick
 const GRAVITY_K = 0.012; // pull toward world origin (0,0)
 const ALPHA_DECAY = 0.992; // simulation cools by this factor each tick
 const ALPHA_MIN = 0.004; // stop when alpha falls below this
@@ -132,9 +132,11 @@ export function showMemoryGraph(characterName) {
 
   bindEvents(canvas, $overlay, characterName);
 
-  // Run the simulation briefly to get an initial settled layout, then
-  // auto-fit the camera so the graph fills the canvas on any screen size.
-  for (let i = 0; i < 120; i++) tick();
+  // Run the simulation to get an initial settled layout before showing the
+  // graph. 200 ticks brings alpha to ~0.20 (vs ~0.38 at 120), clearing the
+  // main turbulence phase where large entity nodes would otherwise visibly
+  // orbit each other before damping takes over.
+  for (let i = 0; i < 200; i++) tick();
   fitCameraToNodes();
 
   scheduleFrame();
@@ -253,8 +255,10 @@ function initPositions(nodes, edges) {
   const entities = nodes.filter((n) => n.nodeType === 'entity');
   const memories = nodes.filter((n) => n.nodeType === 'memory');
 
-  // Entities: evenly spaced on a circle, radius scales with count.
-  const er = Math.max(180, entities.length * 40);
+  // Entities: evenly spaced on a circle. Radius scales with both count and
+  // node size so large entity nodes start far enough apart that the initial
+  // repulsion burst doesn't produce orbital energy before damping can absorb it.
+  const er = Math.max(ENTITY_RADIUS * 7, entities.length * 50);
   entities.forEach((e, i) => {
     const angle = (2 * Math.PI * i) / Math.max(entities.length, 1) - Math.PI / 2;
     e.x = Math.cos(angle) * er;
