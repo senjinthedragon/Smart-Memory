@@ -30,13 +30,15 @@
  * is not available, or the API call fails - so the system degrades gracefully
  * for users who have not installed an embedding model.
  *
- * getEmbeddingBatch   - fetches vectors for multiple texts in one API call
- * cosineSimilarity    - re-exported from similarity.js for callers that import here
- * batchVerify         - compares candidates against existing memories; returns
- *                       passed (new), superseded (state-change updates), and
- *                       rejected (duplicates)
- * clearEmbeddingCache - clears the in-session cache (call on chat change)
- * getHardwareProfile  - returns the active hardware profile ('a' or 'b')
+ * getEmbeddingBatch      - fetches vectors for multiple texts in one API call
+ * cosineSimilarity       - re-exported from similarity.js for callers that import here
+ * batchVerify            - compares candidates against existing memories; returns
+ *                          passed (new), superseded (state-change updates), and
+ *                          rejected (duplicates)
+ * clearEmbeddingCache    - clears the in-session cache (call on chat change)
+ * hasEmbeddingFailed     - returns true when an embedding call has failed this session
+ * clearEmbeddingFailed   - resets the failure flag (call when the user re-enables or reconfigures)
+ * getHardwareProfile     - returns the active hardware profile ('a' or 'b')
  */
 
 import { extension_settings } from '../../../extensions.js';
@@ -132,6 +134,24 @@ export async function getEmbeddingBatch(texts) {
 // consumers without pulling in extensions.js. Re-exported here for callers that
 // already import from embeddings.js.
 export { cosineSimilarity } from './similarity.js';
+
+/**
+ * Returns true if an embedding API call has failed at least once this session.
+ * Used by the UI to show a persistent warning when embeddings are silently
+ * falling back to keyword matching.
+ * @returns {boolean}
+ */
+export function hasEmbeddingFailed() {
+  return embeddingWarnedThisSession;
+}
+
+/**
+ * Resets the embedding failure flag. Call when the user re-enables embeddings
+ * or changes the URL/model so the next call gets a fresh chance.
+ */
+export function clearEmbeddingFailed() {
+  embeddingWarnedThisSession = false;
+}
 
 /**
  * Returns the active hardware profile: 'a' (local/low-VRAM) or 'b' (hosted).

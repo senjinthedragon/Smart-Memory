@@ -134,6 +134,8 @@ import {
   getHardwareProfile,
   getEmbeddingBatch,
   cosineSimilarity,
+  hasEmbeddingFailed,
+  clearEmbeddingFailed,
 } from './embeddings.js';
 import { jaccardSimilarity } from './similarity.js';
 import { clearCanon, generateCanon, injectCanon, loadCanon, saveCanon } from './canon.js';
@@ -1093,6 +1095,7 @@ async function onChatChangedImpl() {
   updateProfilesUI(loadProfiles(characterName));
   maybeInjectUnified();
   updateTokenDisplay();
+  updateEmbeddingNotice();
 
   // Regenerate profiles in the background if they are stale. Non-blocking -
   // the existing stored profiles (if any) were already injected above, so the
@@ -2015,6 +2018,17 @@ function initTypePickers() {
       $('.sm-type-picker').removeClass('open');
     }
   });
+}
+
+/**
+ * Shows or hides the embedding inactive notice at the top of the settings panel.
+ * Visible when embeddings are disabled in settings OR when an API call has
+ * failed this session (meaning the model is enabled but unreachable).
+ */
+function updateEmbeddingNotice() {
+  const settings = getSettings();
+  const inactive = !settings.embedding_enabled || hasEmbeddingFailed();
+  $('#sm_embedding_notice').toggle(inactive);
 }
 
 /** Syncs the Fresh Start checkbox state. */
@@ -4359,6 +4373,10 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().embedding_enabled = $(this).prop('checked');
       $('#sm_embedding_config').toggle(getSettings().embedding_enabled);
+      // Reset failure flag so the next attempt gets a clean slate.
+      clearEmbeddingFailed();
+      $('#sm_embedding_test_result').text('');
+      updateEmbeddingNotice();
       saveSettingsDebounced();
     });
   $('#sm_embedding_config').toggle(s.embedding_enabled);
@@ -4367,6 +4385,9 @@ function bindSettingsUI() {
     .val(s.embedding_url ?? '')
     .on('input', function () {
       getSettings().embedding_url = $(this).val().trim();
+      clearEmbeddingFailed();
+      $('#sm_embedding_test_result').text('');
+      updateEmbeddingNotice();
       saveSettingsDebounced();
     });
 
@@ -4374,6 +4395,9 @@ function bindSettingsUI() {
     .val(s.embedding_model ?? 'nomic-embed-text')
     .on('input', function () {
       getSettings().embedding_model = $(this).val().trim();
+      clearEmbeddingFailed();
+      $('#sm_embedding_test_result').text('');
+      updateEmbeddingNotice();
       saveSettingsDebounced();
     });
 
@@ -4383,6 +4407,43 @@ function bindSettingsUI() {
       getSettings().embedding_keep = $(this).prop('checked');
       saveSettingsDebounced();
     });
+
+  $('#sm_embedding_test').on('click', async function () {
+    const $btn = $(this);
+    const $result = $('#sm_embedding_test_result');
+    $btn.prop('disabled', true);
+    $result.text('Testing...');
+    try {
+      const map = await getEmbeddingBatch(['smart memory test']);
+      if (map.size > 0) {
+        $result.html('<span style="color: var(--green, #5a8)">Connected</span>');
+        clearEmbeddingFailed();
+        updateEmbeddingNotice();
+      } else {
+        $result.html(
+          '<span style="color: var(--warning, #ca6)">No response - check URL and model name</span>',
+        );
+      }
+    } catch {
+      $result.html(
+        '<span style="color: var(--warning, #ca6)">Connection failed - is Ollama running?</span>',
+      );
+    } finally {
+      $btn.prop('disabled', false);
+    }
+  });
+
+  // "Set up embeddings" link in the notice scrolls to the dedup section.
+  $('#sm_embedding_notice_link').on('click', function (e) {
+    e.preventDefault();
+    const $dedup = $('#sm_embedding_enabled').closest('details');
+    if ($dedup.length) {
+      $dedup.prop('open', true);
+      $dedup[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+
+  updateEmbeddingNotice();
 
   // ---- Profiles -------------------------------------------------------
   $('#sm_profiles_enabled')

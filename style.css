@@ -1428,6 +1428,39 @@
   user-select: none;
 }
 
+/* Embedding inactive notice - shown at the top of the panel when semantic
+   embeddings are disabled or have failed this session. Amber tint without
+   hardcoding colors so it adapts to any ST theme. */
+#sm_embedding_notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(180, 130, 20, 0.12);
+  border: 1px solid rgba(180, 130, 20, 0.35);
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+#sm_embedding_notice i {
+  margin-top: 1px;
+  flex-shrink: 0;
+  color: rgb(200, 150, 40);
+}
+
+#sm_embedding_notice a {
+  color: inherit;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+/* Inline result shown next to the Test button after a connection check. */
+#sm_embedding_test_result {
+  font-size: 0.85em;
+  margin-left: 6px;
+}
+
 /* Read-only mode: hide the "Delete messages" context menu option while
    active so message deletions cannot shift the ghosting range index. */
 body.sm-read-only #option_delete_mes,

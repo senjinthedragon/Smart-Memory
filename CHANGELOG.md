@@ -85,6 +85,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Embedding inactive notice**: a persistent amber notice now appears at the
+  top of the Smart Memory settings panel whenever semantic embeddings are
+  inactive - either because the toggle is off, or because an API call failed
+  this session (meaning the model is enabled but unreachable). The notice
+  explains that deduplication falls back to keyword matching and includes a
+  "Set up embeddings" link that opens and scrolls to the deduplication section.
+  It disappears automatically once embeddings are working.
+
+- **Embedding test button**: a "Test connection" button in the Deduplication
+  settings fires a small test call to the configured Ollama endpoint and shows
+  an inline result - green "Connected" on success, or a descriptive error if
+  Ollama is not running or the model is not installed.
+
 - **Arc dedup now uses semantic embeddings**: arc deduplication previously used
   only Jaccard word overlap (threshold 0.4). Arc descriptions are full narrative
   sentences where different phrasing can describe the same unresolved thread -
