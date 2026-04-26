@@ -85,6 +85,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Group character selector not updating on membership changes**: adding or
+  removing a character from a group chat mid-session did not update the group
+  character selector or token display until the next chat reload. Smart Memory
+  now listens to the `GROUP_UPDATED` event and rebuilds both immediately.
+
 - **Scene break heuristic tightened**: the sleep/wake pattern no longer fires
   on brief naps mid-scene - only on waking language that implies overnight
   passage (dawn/morning/light/sun variants). The time-skip pattern no longer
