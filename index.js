@@ -44,6 +44,7 @@ import {
   is_send_press,
   getMaxContextSize,
 } from '../../../../script.js';
+import { callGenericPopup, POPUP_TYPE } from '../../../../scripts/popup.js';
 import {
   getContext,
   extension_settings,
@@ -4558,6 +4559,22 @@ function bindSettingsUI() {
     } finally {
       $(this).prop('disabled', false);
     }
+  });
+
+  $('#sm_about').on('click', async function () {
+    // Populate version from manifest.json so it stays in sync automatically.
+    try {
+      const manifest = await fetch(
+        '/scripts/extensions/third-party/Smart-Memory/manifest.json',
+      ).then((r) => r.json());
+      $('#sm_about_version').text(manifest.version ?? '');
+    } catch {
+      $('#sm_about_version').text('');
+    }
+    await callGenericPopup($('#sm_about_modal').clone().show()[0], POPUP_TYPE.DISPLAY, '', {
+      wide: false,
+      large: false,
+    });
   });
 }
 
