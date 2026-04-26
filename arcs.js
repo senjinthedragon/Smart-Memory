@@ -35,6 +35,7 @@
  * loadArcSummaries       - returns the stored arc summary array for the current chat
  * clearArcSummaries      - empties all arc summaries for the current chat
  * loadPersistentArcs     - returns the character-level persistent arc array
+ * savePersistentArcs     - writes a persistent arc array to character-level storage
  * mergePersistentArcs    - merges character-level persistent arcs into chatMetadata on chat open
  * promoteArc             - marks a chat arc as persistent and saves it to character level
  * demoteArc              - removes the persistent flag from an arc and cleans character level
@@ -244,7 +245,7 @@ export function loadPersistentArcs(characterName) {
  * @param {string} characterName
  * @param {Array<{content: string, ts: number, persistent: true}>} arcs
  */
-function savePersistentArcs(characterName, arcs) {
+export function savePersistentArcs(characterName, arcs) {
   if (!characterName) return;
   if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
   if (!extension_settings[MODULE_NAME].characters[characterName])

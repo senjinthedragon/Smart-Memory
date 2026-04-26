@@ -119,6 +119,8 @@ import {
   clearArcSummaries,
   loadArcSummaries,
   mergePersistentArcs,
+  loadPersistentArcs,
+  savePersistentArcs,
   promoteArc,
   demoteArc,
 } from './arcs.js';
@@ -393,6 +395,11 @@ let catchUpCancelled = false;
 // Populated by onCharacterMessageRendered when context.groupId is set, cleared
 // by onGroupWrapperStarted at the top of each new round.
 let respondedThisRound = new Set();
+
+// True once loadAndInjectRepair() has been called for the first character in a
+// group round. Prevents the one-shot repair note from being re-injected for
+// every subsequent character in the same round.
+let repairInjectedThisRound = false;
 
 // Last observed chat length, used to distinguish new messages from swipes.
 // CHARACTER_MESSAGE_RENDERED fires on both; swipes do not grow the chat array.
@@ -1217,6 +1224,7 @@ function onGroupWrapperStarted({ type } = {}) {
   // preceding real round before onGroupWrapperFinished can loop over them.
   if (type === 'quiet') return;
   respondedThisRound = new Set();
+  repairInjectedThisRound = false;
 }
 
 /**
@@ -1260,7 +1268,14 @@ async function onGroupMemberDrafted(chId) {
   injectSceneHistory();
   injectArcs();
   injectProfiles(characterName);
-  loadAndInjectRepair();
+  // Repair is one-shot - only the first character in a round gets it.
+  // Subsequent characters call clearRepair() so the slot doesn't carry over.
+  if (!repairInjectedThisRound) {
+    loadAndInjectRepair();
+    repairInjectedThisRound = true;
+  } else {
+    clearRepair();
+  }
 
   // The token display is NOT updated here. Injecting this character's slots
   // is correct for the model, but updating the display here would overwrite
@@ -1287,6 +1302,11 @@ async function onGroupWrapperFinished({ type } = {}) {
   if (!settings.enabled) return;
   const context = getContext();
   if (!context.chat || context.chat.length === 0) return;
+
+  // Snapshot before any await - onGroupWrapperStarted resets respondedThisRound
+  // for the next round and can fire while this function is mid-await if the user
+  // sends a new message quickly. Everything below uses the snapshot.
+  const roundResponders = new Set(respondedThisRound);
 
   // Build scene check text from the end of the completed round.
   const lastMsg = context.chat
@@ -1375,7 +1395,7 @@ async function onGroupWrapperFinished({ type } = {}) {
       const sessionWindow = getStableExtractionWindow(context.chat, 40);
       // Scale the raw window by character count so that after per-character
       // filtering each character still gets roughly 20 messages of context.
-      const longtermRawSize = 20 * Math.max(1, respondedThisRound.size);
+      const longtermRawSize = 20 * Math.max(1, roundResponders.size);
       const longtermWindow = getStableExtractionWindow(context.chat, longtermRawSize);
 
       if (longtermWindow.length === 0 && sessionWindow.length === 0) {
@@ -1383,6 +1403,9 @@ async function onGroupWrapperFinished({ type } = {}) {
       } else {
         messagesSinceLastExtraction = 0;
         setStatusMessage('Extracting memories...');
+
+        const capturedGen = chatLoadId;
+        const chatChanged = () => chatLoadId !== capturedGen;
 
         const originalBudgets = {
           longterm_inject_budget: settings.longterm_inject_budget,
@@ -1404,6 +1427,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           settings.arcs_inject_budget = budgets.arcs;
           settings.profiles_inject_budget = budgets.profiles;
 
+          if (chatChanged()) throw CHAT_SWITCHED;
           // Session extraction is chat-wide - all characters share one session store.
           if (settings.session_enabled && sessionWindow.length > 0 && !isFreshStart()) {
             const priorSessionIds = new Set(
@@ -1412,7 +1436,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 .filter(Boolean),
             );
 
-            const count = await extractSessionMemories(sessionWindow).catch((err) => {
+            const count = await extractSessionMemories(sessionWindow, chatChanged).catch((err) => {
               console.error('[SmartMemory] Session extraction error:', err);
               return 0;
             });
@@ -1439,9 +1463,10 @@ async function onGroupWrapperFinished({ type } = {}) {
             }
           }
 
+          if (chatChanged()) throw CHAT_SWITCHED;
           // Long-term extraction and profiles run per character since each
           // character has their own store. Sequential per CLAUDE.md constraint.
-          for (const characterName of respondedThisRound) {
+          for (const characterName of roundResponders) {
             // Filter to this character's messages plus user messages so the
             // model only sees context directly relevant to the character being
             // extracted. User messages are included because they address all
@@ -1496,6 +1521,7 @@ async function onGroupWrapperFinished({ type } = {}) {
             }
           }
 
+          if (chatChanged()) throw CHAT_SWITCHED;
           // Arc extraction is chat-wide - once per round after all characters.
           // Snapshot summary count first so the canon check below can detect a
           // new resolution without re-running extraction.
@@ -1503,13 +1529,25 @@ async function onGroupWrapperFinished({ type } = {}) {
 
           if (settings.arcs_enabled && !isFreshStart()) {
             const arcWindow = getStableExtractionWindow(context.chat, 100);
-            const count = await extractArcs(arcWindow).catch((err) => {
+            const count = await extractArcs(arcWindow, null, chatChanged).catch((err) => {
               console.error('[SmartMemory] Arc extraction error:', err);
               return 0;
             });
             injectArcs();
             updateArcsUI();
             total += count;
+
+            // Clean persistent arcs for all responding characters. The solo path
+            // does this inside extractArcs via characterName, but group arc
+            // extraction is chat-wide with no single characterName. Any persistent
+            // arc whose content is no longer in the current arc list was resolved.
+            const currentArcContents = new Set(loadArcs().map((a) => a.content));
+            for (const charName of roundResponders) {
+              const persistent = loadPersistentArcs(charName);
+              if (persistent.length === 0) continue;
+              const cleaned = persistent.filter((a) => currentArcContents.has(a.content));
+              if (cleaned.length < persistent.length) savePersistentArcs(charName, cleaned);
+            }
           }
 
           // Profile B only: auto-regenerate canon per responding character when
@@ -1522,7 +1560,7 @@ async function onGroupWrapperFinished({ type } = {}) {
             getHardwareProfile() === 'b' &&
             loadArcSummaries().length > arcSummaryCountBefore
           ) {
-            for (const characterName of respondedThisRound) {
+            for (const characterName of roundResponders) {
               await generateCanon(characterName)
                 .then(() => injectCanon(characterName))
                 .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
@@ -1530,7 +1568,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           }
 
           // Refresh entity panel with the last character who responded.
-          const lastResponder = [...respondedThisRound].at(-1);
+          const lastResponder = [...roundResponders].at(-1);
           if (lastResponder) updateEntityPanel(lastResponder);
 
           // Refresh the settings panel for whichever character the selector
@@ -1541,7 +1579,11 @@ async function onGroupWrapperFinished({ type } = {}) {
 
           setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
         } catch (err) {
-          console.error('[SmartMemory] Extraction error:', err);
+          if (err === CHAT_SWITCHED) {
+            smLog('[SmartMemory] Group extraction aborted: chat switched mid-extraction.');
+          } else {
+            console.error('[SmartMemory] Extraction error:', err);
+          }
           setStatusMessage('');
         } finally {
           Object.assign(settings, originalBudgets);
@@ -1565,7 +1607,7 @@ async function onGroupWrapperFinished({ type } = {}) {
     messagesSinceLastProfileRegen >= settings.profiles_regen_every
   ) {
     messagesSinceLastProfileRegen = 0;
-    for (const characterName of respondedThisRound) {
+    for (const characterName of roundResponders) {
       generateProfiles(characterName)
         .then((profiles) => {
           if (profiles) {
@@ -1583,7 +1625,7 @@ async function onGroupWrapperFinished({ type } = {}) {
   // Step 6 (Profile B only): silent continuity check - once per round using
   // the last character who responded. Running per-character would multiply
   // model calls by character count for the same round of messages.
-  const lastResponder = [...respondedThisRound].at(-1);
+  const lastResponder = [...roundResponders].at(-1);
   if (
     getHardwareProfile() === 'b' &&
     settings.continuity_auto_check &&
@@ -3036,7 +3078,8 @@ function bindSettingsUI() {
 
   // ---- Group chat character selector ----------------------------------
   $('#sm_group_char_select').on('change', async function () {
-    selectedGroupCharacter = $(this).val() || null;
+    const selection = $(this).val() || null;
+    selectedGroupCharacter = selection;
     updateLongTermUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
@@ -3045,10 +3088,11 @@ function bindSettingsUI() {
     // Re-inject the character-specific slots so updateTokenDisplay reads
     // the selected character's content rather than whoever responded last.
     // onGroupMemberDrafted will overwrite these again before the next Generate().
-    await injectMemories(selectedGroupCharacter);
+    await injectMemories(selection);
+    if (selectedGroupCharacter !== selection) return;
     await injectSessionMemories();
-    injectCanon(selectedGroupCharacter);
-    injectProfiles(selectedGroupCharacter);
+    injectCanon(selection);
+    injectProfiles(selection);
     updateTokenDisplay();
   });
 
