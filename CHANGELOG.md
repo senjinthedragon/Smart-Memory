@@ -85,6 +85,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Graph node drag causing orbital spin**: dragging a node and releasing it
+  would send the graph into a sustained spinning orbit that took many seconds to
+  settle. DAMPING raised from 0.88 to 0.90 and the reheat on drag-end lowered
+  from 0.25 to 0.10 so the graph settles quickly after a drag without continuing
+  to orbit.
+
+- **XSS in Ollama model dropdown**: the model name dropdown for the memory LLM
+  source was built via string interpolation into innerHTML, allowing a crafted
+  model name returned by the Ollama API to inject markup. The list is now built
+  using jQuery DOM construction so model names are always treated as text.
+
+- **Retired memories included in continuity checker and compaction digest**:
+  superseded memories were fed into the continuity checker's established-facts
+  block and the compaction cross-tier digest without filtering. The checker could
+  then flag contradictions against facts that had already been retired, and the
+  compaction digest wasted token budget on outdated content. Both now filter by
+  `!m.superseded_by` before including memories.
+
+- **Null guard missing in `injectRepair`**: `injectRepair` wrote to
+  `chatMetadata[META_KEY]` without first checking whether `chatMetadata` itself
+  was set. In any context where chatMetadata had not yet been initialised the
+  function would throw. A guard now returns early if `chatMetadata` is absent.
+
+- **Arc-resolution race: stale indices after async model call**: the arc
+  extraction loop captured integer indices into the `existing` arcs array to
+  identify arcs to resolve, then performed async model calls. By the time the
+  loop came to act on those indices, the array could have changed (e.g. a new arc
+  was added from a parallel path), making the stored indices point at the wrong
+  arcs. Resolution targets are now captured as arc objects before any awaits, and
+  the arc list is re-fetched after async work completes with matching done by
+  content rather than by index.
+
+- **Cross-chat state corruption during extraction**: if the user switched chats
+  while a multi-tier extraction pass was in progress, later tiers and metadata
+  saves still completed against the original chat's data - writing session
+  memories, arc updates, and summaries into the new chat's store. A
+  `CHAT_SWITCHED` sentinel and `chatLoadId` capture now abort the extraction pass
+  at each tier boundary and before any chatMetadata write if the chat has changed
+  since extraction began. The same guard covers the group chat extraction path.
+
+- **Unhandled rejections from fire-and-forget `updateLastActive` calls**: the
+  three `updateLastActive()` call sites in the event handlers did not observe the
+  returned promise. If `saveMetadata()` rejected (e.g. on a transient write
+  error), the rejection was silently swallowed in some environments and surfaced
+  as an unhandled-rejection warning in others. All three sites now attach
+  `.catch(console.error)`.
+
+- **`respondedThisRound` race in group chat wrapper**: `onGroupWrapperFinished`
+  read `respondedThisRound` after its first `await`, by which point other group
+  members' draft events could have already started mutating the set for the next
+  round. The participant set is now snapshotted into `roundResponders` at the
+  very start of the handler before any awaits, and all internal references use the
+  snapshot.
+
+- **Persistent arcs not cleaned from character store after group round**:
+  when an arc resolved during a group round, it was removed from the chat-local
+  arc list but the per-character persistent arc store was never updated, leaving
+  the resolved arc to reappear in the next chat. After arc extraction completes in
+  the group path, all responding characters' persistent arc stores are now pruned
+  against the current arc content set.
+
+- **Continuity repair injected to every character in a group round**: when
+  auto-repair was enabled and a repair note was queued, `loadAndInjectRepair` was
+  called for every character that drafted in the round, re-injecting the repair
+  prompt for each one. The note is now injected only for the first character to
+  draft in a round; subsequent characters call `clearRepair` instead so the
+  one-shot note fires exactly once per round.
+
+- **Group character selector staleness race**: the `change` handler on the group
+  character selector called `injectMemories` and then `injectSessionMemories`
+  across two awaits. If the user changed the selector again before the first await
+  resolved, the second inject ran with stale selector state, clobbering the
+  injection from the newer selection. The handler now captures the selected value
+  at entry and bails after the first await if the selection has since changed.
+
 - **Embedding inactive notice**: a persistent amber notice now appears at the
   top of the Smart Memory settings panel whenever semantic embeddings are
   inactive - either because the toggle is off, or because an API call failed
@@ -225,6 +300,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every memory at creation) formatted as a locale date/time string.
 
 ### Changed
+
+- **All lone and paired buttons are now full-width in the settings panel**: any
+  button with nothing beside it, or two buttons side by side with nothing else,
+  now expand to fill the available panel width (50/50 split for pairs). Previously
+  buttons kept their intrinsic width, leaving large amounts of unused space to
+  their right. Implemented via a shared `sm-btn-row` flex class applied to all
+  affected button containers.
+
+- **Embedding test button moved inside the Deduplication config block**: the
+  "Test connection" button now sits below the "Keep model in memory" checkbox
+  inside the Deduplication settings block, rather than floating above it. The
+  result span now appears below the button as a sibling element rather than
+  inline to its right.
 
 - **Extraction prompts now explicitly prioritize physical anchors**: both the
   long-term and session extraction prompts have been updated to treat physical
