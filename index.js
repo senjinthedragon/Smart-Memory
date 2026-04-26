@@ -548,7 +548,7 @@ async function onCharacterMessageRendered() {
   if (isSwipe) {
     // Still update lastActive so the recap threshold stays accurate during
     // a long swipe session where the user is clearly present.
-    updateLastActive();
+    updateLastActive().catch(console.error);
     return;
   }
 
@@ -570,7 +570,7 @@ async function onCharacterMessageRendered() {
     }
 
     $('#sm_recap_overlay').remove();
-    updateLastActive();
+    updateLastActive().catch(console.error);
     return;
   }
 
@@ -955,7 +955,7 @@ async function onCharacterMessageRendered() {
   }
 
   // Step 7: update lastActive so the away recap threshold stays accurate.
-  updateLastActive();
+  updateLastActive().catch(console.error);
 }
 
 // Debounce timer for onChatChanged. ST fires both CHAT_LOADED and CHAT_CHANGED
