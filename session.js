@@ -276,7 +276,12 @@ async function deduplicateSession(existing, incoming, max) {
  * @param {Array} recentMessages - Last N message objects from context.chat.
  * @returns {Promise<number>} Count of new items added (0 on failure or nothing found).
  */
-export async function extractSessionMemories(recentMessages) {
+/**
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; if it returns true the function
+ *   bails out before writing to chatMetadata. Used by the automatic extraction path to abort when
+ *   the user switches chats mid-extraction.
+ */
+export async function extractSessionMemories(recentMessages, abortCheck = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) return 0;
 
@@ -398,6 +403,7 @@ export async function extractSessionMemories(recentMessages) {
     ];
 
     const added = finalActive.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
+    if (abortCheck?.()) return 0;
     await saveSessionMemories([...finalActive, ...updatedRetired]);
 
     return added;

@@ -389,9 +389,12 @@ async function generateArcSummary(arcContent) {
  * Returns the count of new arcs added.
  * @param {Array} messages - Full context.chat array.
  * @param {string|null} [characterName] - Active character, used to clean persistent arcs when resolved.
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; if it returns true the function
+ *   bails out before any chatMetadata write. Used by the automatic extraction path to abort when
+ *   the user switches chats mid-extraction.
  * @returns {Promise<number>} Count of new arcs added (0 on failure or nothing found).
  */
-export async function extractArcs(messages, characterName = null) {
+export async function extractArcs(messages, characterName = null, abortCheck = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.arcs_enabled) return 0;
 
@@ -417,16 +420,17 @@ export async function extractArcs(messages, characterName = null) {
 
     const { add, resolve } = parseArcOutput(response, existing);
 
+    // Convert resolve indices to arc objects immediately, before any async work.
+    // Storing content rather than indices means subsequent loadArcs() re-fetches
+    // after async summarization can match by content instead of stale positions -
+    // safe against concurrent UI edits (delete, add) during the model call window.
+    const resolvedArcObjects = resolve.map((i) => existing[i]).filter(Boolean);
+
     // Generate arc summaries for each resolved arc before removing them.
     // Sequential calls - Ollama serializes anyway and parallel calls risk OOM.
-    if (resolve.length > 0) {
-      // `existing` is captured before this loop. A concurrent arc-delete via the
-      // UI during the model call could make existing[idx] stale, but the window
-      // is narrow enough in practice that we accept it here rather than re-fetching.
+    if (resolvedArcObjects.length > 0) {
       const arcSummaries = loadArcSummaries();
-      for (const idx of resolve) {
-        const resolved = existing[idx];
-        if (!resolved) continue;
+      for (const resolved of resolvedArcObjects) {
         try {
           const result = await generateArcSummary(resolved.content);
           if (result) {
@@ -444,13 +448,14 @@ export async function extractArcs(messages, characterName = null) {
           // Non-fatal - arc is still resolved even if summarization fails.
         }
       }
+      if (abortCheck?.()) return 0;
       await saveArcSummaries(arcSummaries);
     }
 
     // For persistent arcs that were resolved, also clean them from character-level
     // storage so they don't resurface in the next chat.
-    if (characterName && resolve.length > 0) {
-      const persistentToRemove = resolve.map((i) => existing[i]).filter((a) => a?.persistent);
+    if (characterName && resolvedArcObjects.length > 0) {
+      const persistentToRemove = resolvedArcObjects.filter((a) => a?.persistent);
       if (persistentToRemove.length > 0) {
         let charPersistent = loadPersistentArcs(characterName);
         for (const resolved of persistentToRemove) {
@@ -460,12 +465,17 @@ export async function extractArcs(messages, characterName = null) {
           }
           charPersistent = kept;
         }
+        if (abortCheck?.()) return 0;
         savePersistentArcs(characterName, charPersistent);
       }
     }
 
-    // Filter out resolved arcs.
-    let afterResolve = existing.filter((_, i) => !resolve.includes(i));
+    // Re-load the current arc list after all async summarization work. Matching
+    // by content (not stale indices) means any UI edits during the async window
+    // are reflected in what we keep.
+    const currentArcs = loadArcs();
+    const resolvedContentSet = new Set(resolvedArcObjects.map((a) => a.content));
+    let afterResolve = currentArcs.filter((a) => !resolvedContentSet.has(a.content));
 
     // Clean up any duplicates that accumulated in storage from previous passes.
     afterResolve = await deduplicateArcs(afterResolve);
@@ -495,6 +505,7 @@ export async function extractArcs(messages, characterName = null) {
     // slice(-max) keeps the most recent arcs when over the limit.
     const merged = [...afterResolve, ...dedupedAdd].slice(-max);
 
+    if (abortCheck?.()) return 0;
     await saveArcs(merged);
     return dedupedAdd.length;
   } catch (err) {

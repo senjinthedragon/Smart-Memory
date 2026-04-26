@@ -687,6 +687,11 @@ async function onCharacterMessageRendered() {
     if (messagesSinceLastExtraction >= extractEvery) {
       extractionRunning = true;
 
+      // Capture the current chat generation so we can abort before any write if
+      // the user switches chats while a model call is in progress.
+      const capturedGen = chatLoadId;
+      const chatChanged = () => chatLoadId !== capturedGen;
+
       // Use separate windows per tier. Session benefits from more context than
       // long-term (scene/detail extraction needs the surrounding messages);
       // long-term extraction targets distilled facts that are visible in a
@@ -740,6 +745,7 @@ async function onCharacterMessageRendered() {
         settings.arcs_inject_budget = budgets.arcs;
         settings.profiles_inject_budget = budgets.profiles;
 
+        if (chatChanged()) throw CHAT_SWITCHED;
         if (settings.session_enabled && sessionWindow.length > 0 && !isFreshStart()) {
           // Snapshot existing memory ids before extraction so we can identify
           // which memories are new and link them to the current scene.
@@ -749,7 +755,7 @@ async function onCharacterMessageRendered() {
               .filter(Boolean),
           );
 
-          const count = await extractSessionMemories(sessionWindow).catch((err) => {
+          const count = await extractSessionMemories(sessionWindow, chatChanged).catch((err) => {
             console.error('[SmartMemory] Session extraction error:', err);
             return 0;
           });
@@ -779,6 +785,7 @@ async function onCharacterMessageRendered() {
           }
         }
 
+        if (chatChanged()) throw CHAT_SWITCHED;
         if (
           settings.longterm_enabled &&
           characterName &&
@@ -819,13 +826,14 @@ async function onCharacterMessageRendered() {
         // resolution in this pass (the count only grows when an arc closes).
         const arcSummaryCountBefore = settings.arcs_enabled ? loadArcSummaries().length : 0;
 
+        if (chatChanged()) throw CHAT_SWITCHED;
         if (settings.arcs_enabled && !isFreshStart()) {
           // Arc extraction uses a wider window than other tiers so it can catch
           // arcs opened earlier in the session, but is capped to avoid overflowing
           // the model's context on long chats. Existing arcs are passed to the
           // prompt so resolution still works even outside this window.
           const arcWindow = getStableExtractionWindow(context.chat, 100);
-          const count = await extractArcs(arcWindow, characterName).catch((err) => {
+          const count = await extractArcs(arcWindow, characterName, chatChanged).catch((err) => {
             console.error('[SmartMemory] Arc extraction error:', err);
             return 0;
           });
@@ -838,6 +846,7 @@ async function onCharacterMessageRendered() {
         // latest memories. Sequential - same constraint as the other tiers.
         // Skipped in freshStart chats - no new memories were written so
         // regeneration would waste a model call producing the same output.
+        if (chatChanged()) throw CHAT_SWITCHED;
         if (settings.profiles_enabled && characterName && !isFreshStart()) {
           await generateProfiles(characterName)
             .then((profiles) => {
@@ -854,6 +863,7 @@ async function onCharacterMessageRendered() {
         // Profile B only: auto-regenerate canon when a new arc resolved this
         // pass. Gating on an increase (not just count >= 2) avoids a model call
         // on every extraction batch once the chat has two summaries.
+        if (chatChanged()) throw CHAT_SWITCHED;
         if (
           settings.canon_enabled &&
           settings.arcs_enabled &&
@@ -873,7 +883,11 @@ async function onCharacterMessageRendered() {
         updateTokenDisplay();
         setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
       } catch (err) {
-        console.error('[SmartMemory] Extraction error:', err);
+        if (err === CHAT_SWITCHED) {
+          smLog('[SmartMemory] Extraction aborted: chat switched mid-extraction.');
+        } else {
+          console.error('[SmartMemory] Extraction error:', err);
+        }
         setStatusMessage('');
       } finally {
         // Restore original budget settings so chat-load / settings-change injection
@@ -949,10 +963,14 @@ async function onCharacterMessageRendered() {
 // into one deferred run ensures the context is stable before we act on it.
 let chatChangedTimer = null;
 
-// Incremented each time onChatChangedImpl starts. Async callbacks (recap) capture
-// this value and bail out if it has changed by the time they resolve - prevents
-// a slow recap from a previous chat appearing over a different chat.
+// Incremented each time onChatChangedImpl starts. Async callbacks (recap, extraction)
+// capture this value and bail out if it has changed by the time they resolve - prevents
+// a slow operation from a previous chat writing into a different chat's metadata.
 let chatLoadId = 0;
+
+// Sentinel thrown inside the extraction try/finally when a chat switch is detected
+// mid-extraction. Caught separately from real errors so it is not logged as a failure.
+const CHAT_SWITCHED = Symbol('chat-switched');
 
 function onChatChanged() {
   clearTimeout(chatChangedTimer);
