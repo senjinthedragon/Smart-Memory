@@ -2008,6 +2008,7 @@ function initTypePickers() {
 /** Syncs the Fresh Start checkbox state. */
 function updateFreshStartUI(freshStart) {
   $('#sm_fresh_start').prop('checked', !!freshStart);
+  $('body').toggleClass('sm-read-only', !!freshStart);
 }
 
 /**
@@ -3411,6 +3412,7 @@ function bindSettingsUI() {
       // to ghost if the user disables it later.
       const context = getContext();
       await setReadOnlyStartIndex(context.chat?.length ?? 0);
+      $('body').addClass('sm-read-only');
     } else {
       // Ghost all messages generated during the read-only window so they
       // are excluded from context and future extraction passes.
@@ -3421,6 +3423,7 @@ function bindSettingsUI() {
         await hideChatMessageRange(startIndex, endIndex, false);
       }
       await setReadOnlyStartIndex(null);
+      $('body').removeClass('sm-read-only');
     }
 
     await injectMemories(getSelectedCharacterName());
