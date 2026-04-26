@@ -121,15 +121,17 @@ Smart Memory is designed to work _alongside_ SillyTavern's built-in vector stora
 
 If you are on limited VRAM (8GB or less), keep the Message Limit extension enabled and consider lowering **Max session memories** to around 15 to keep prompt size comfortable.
 
-### Recommended local model
+### Recommended local models
 
-For local Ollama setups with limited VRAM (8GB or less), the best tested model for Smart Memory's extraction and summarization tasks is:
+For local Ollama setups with limited VRAM (8GB or less), three models have been tested against Smart Memory's full extraction harness and score 47-48/48 (98-100%):
 
-**`huihui_ai/qwen3-vl-abliterated:8b-instruct`**
+**`huihui_ai/qwen3-vl-abliterated:8b-instruct`** (6.1 GB) - primary recommendation. Reliable, consistent, no thinking overhead. Abliterated variant handles explicit roleplay content without refusals.
 
-It follows structured output formats reliably, handles explicit roleplay content without refusals, and fits comfortably at 4-bit quantization on an 8GB card alongside the embedding model.
+**`mistral:7b`** (4.1 GB) - strong alternative when VRAM is tighter. Matches qwen3-vl quality with no thinking mode. A good choice if you want to free up headroom for the embedding model alongside the roleplay model.
 
-Other 8B-class models tested against Smart Memory's prompts consistently produced garbled or nonsense output once the combined prompt length (chat history + existing memories + instructions) exceeded their effective context window. Smart Memory's extraction prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle here. If you try a different model and get malformed output, context overflow is the most likely cause.
+**`gemma3:4b`** (3.3 GB) - lightest recommended option. Matches qwen3-vl on most extractions; occasionally classifies long-term-relevant details into the session tier on very long chats. Use if 4 GB is your hard limit.
+
+All three follow structured output formats reliably. Smart Memory's extraction prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle here if the combined prompt length exceeds its effective context window. If you get malformed or empty extraction output with a different model, context overflow is the most likely cause.
 
 ### Injection depth stacking order
 
