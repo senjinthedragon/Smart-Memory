@@ -466,6 +466,16 @@ When two stored memories cannot both be true and neither clearly replaces the ot
 
 ---
 
+## Known Limitations
+
+**Editing past messages** - If a message is edited after Smart Memory has already extracted memories from it, those memories are not updated. The character may hold beliefs formed from the original text that no longer match the edited version. If you edit a message and the change is significant, review the relevant memory entries manually and correct or delete them as needed.
+
+**Hiding past messages** - Hiding a message that Smart Memory has already processed does not remove the memories formed from it. The information stays in the character's memory even though the message is no longer in context.
+
+**Checkpoints and branches** - See the [Read-only Mode](#read-only-mode) section.
+
+---
+
 ## License
 
 Licensed under the [GNU Affero General Public License v3.0](LICENSE).
