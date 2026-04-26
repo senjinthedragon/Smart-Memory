@@ -208,7 +208,6 @@ ollama pull nomic-embed-text
 | Enable auto-summarization | On                           | Summarize automatically at threshold                                                                                                                                                                                                                                                                                      |
 | Context threshold         | 80%                          | Summarize when context reaches this % of the model's limit                                                                                                                                                                                                                                                                |
 | Summary response length   | 2000 tokens                  | Length budget for the summary - also acts as the injection cap                                                                                                                                                                                                                                                            |
-| Hide summarized messages  | Off                          | After each compaction, automatically hide all messages that have been folded into the summary. They remain in the chat file but are visually collapsed and excluded from the context window - the injected summary already covers their content. Toggling this on an existing chat applies or restores hiding immediately |
 | Injection template        | `Story so far:\n{{summary}}` | Wrapper text around the summary                                                                                                                                                                                                                                                                                           |
 | Injection position        | In-prompt                    | Where in the prompt the summary appears                                                                                                                                                                                                                                                                                   |
 
@@ -216,6 +215,7 @@ ollama pull nomic-embed-text
 
 | Setting            | Default                          | Description                                                                                          |
 | ------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Enable canon       | On                               | Inject canon and allow auto-regeneration. Disabling suppresses both injection and Profile B auto-gen |
 | Injection budget   | 800 tokens                       | Canon text is trimmed from the end if it exceeds this limit                                          |
 | Injection template | `Character history:\n{{canon}}`  | Wrapper text around the canon document                                                               |
 | Injection position | In-prompt                        | Where in the prompt canon appears                                                                    |
@@ -224,15 +224,14 @@ The **Generate Canon** button synthesizes a prose narrative from resolved arc su
 
 ### Long-term Memory
 
-| Setting                                 | Default                                               | Description                                                                                                                                                                                             |
-| --------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enable long-term memory                 | On                                                    | Extract and inject persistent character facts                                                                                                                                                           |
-| Exclude this chat from long-term memory | Off                                                   | Suppresses long-term extraction and injection for this specific chat only - stored memories for other chats are not affected                                                                            |
-| Extract every N messages                | 3                                                     | How often automatic extraction runs                                                                                                                                                                     |
-| Max memories per character              | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
-| Injection token budget                  | 500                                                   | Least important memories are trimmed first when the budget is exceeded - based on importance, expiration, recency, and how often a memory has been recalled                                             |
-| Injection template                      | `Memories from previous conversations:\n{{memories}}` | Wrapper text                                                                                                                                                                                            |
-| Injection position                      | In-prompt                                             | Where in the prompt memories appear                                                                                                                                                                     |
+| Setting                    | Default                                               | Description                                                                                                                                                                                             |
+| -------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable long-term memory    | On                                                    | Extract and inject persistent character facts                                                                                                                                                           |
+| Extract every N messages   | 3                                                     | How often automatic extraction runs                                                                                                                                                                     |
+| Max memories per character | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
+| Injection token budget     | 500                                                   | Least important memories are trimmed first when the budget is exceeded - based on importance, expiration, recency, and how often a memory has been recalled                                             |
+| Injection template         | `Memories from previous conversations:\n{{memories}}` | Wrapper text                                                                                                                                                                                            |
+| Injection position         | In-prompt                                             | Where in the prompt memories appear                                                                                                                                                                     |
 
 The long-term list shows a **retired** badge on superseded entries. A "Show retired memories" toggle reveals them. Each retired entry has a "superseded by" link to the replacement. Memories with unresolved contradictions show a yellow warning indicator.
 
@@ -332,6 +331,12 @@ The registry is built from both the persistent (long-term) and session stores an
 
 All manual operations are in the **Configuration** section at the top of the panel, or inside their respective tier sections.
 
+### Read-only Mode
+
+The **Read-only mode - protect character memories** toggle sits just below the chat action buttons. When enabled, the character arrives with all their memories and behaves normally, but nothing from this chat is saved back to their persistent state - no new long-term memories, arcs, canon, or profiles are written.
+
+Use it to try out a risky scene before committing it to the character's history, or for a consequence-free session. Turn it off again afterward and their memories are exactly as you left them.
+
 ### Memorize Chat
 
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
@@ -354,7 +359,7 @@ Clears all Smart Memory context for the current chat - summary, session memories
 
 Clears everything for a clean slate - long-term memories, canon, and entity registry for the current character plus all chat-scoped tiers (summary, session memories, scene history, arcs, profiles). Does not suppress future memory generation; the AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
 
-To prevent a specific chat from contributing to long-term memory at all, use the **Exclude this chat from long-term memory** checkbox in the Long-term Memory section instead.
+To prevent a specific chat from contributing to long-term memory at all, use the **Read-only mode** toggle at the top of the settings panel instead.
 
 ### Per-tier Extract Buttons
 
@@ -445,9 +450,10 @@ When two stored memories cannot both be true and neither clearly replaces the ot
 
 ### Developer
 
-| Setting         | Default | Description                                                                                                                                           |
-| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Verbose logging | Off     | Print extraction, consolidation, migration, and scene detection progress to the browser console. Errors are always logged regardless of this setting. |
+| Setting                          | Default | Description                                                                                                                                                                                                                                                              |
+| -------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Verbose logging                  | Off     | Print extraction, consolidation, migration, and scene detection progress to the browser console. Errors are always logged regardless of this setting.                                                                                                                    |
+| Unified injection (experimental) | Off     | Merges all active memory tiers into a single IN_PROMPT block. Ordered most-stable-first (canon, profiles, long-term) to most-immediate-last (session, arcs). Token bar still shows per-tier breakdowns.                                                                  |
 
 ---
 
