@@ -85,6 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Checkpoint and branch support via read-only mode**: Smart Memory now
+  warns when a checkpoint or branch is created without read-only mode active,
+  since long-term memories will continue forming and will not roll back if the
+  user later switches to the checkpoint or branch. When read-only mode is
+  disabled, a confirmation dialog asks whether to commit or discard the
+  session. Commit runs full extraction (long-term, arcs, profiles) on the
+  read-only window messages and keeps all session memories, treating the
+  window as if it had always been active. Discard purges session memories and
+  hides the window messages as before.
+
 - **Session memories leaked from read-only sessions**: session extraction was
   not gated by read-only mode, so memories extracted during a read-only window
   were accumulating in session memory and feeding into character profiles and

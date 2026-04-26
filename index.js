@@ -2871,6 +2871,77 @@ function isCatchUpRunning() {
 }
 
 /**
+ * Runs extraction on messages generated during the read-only window, then
+ * lifts the gate without purging or ghosting anything. Called when the user
+ * chooses to commit a read-only session rather than discard it.
+ *
+ * Session memories are already present (extraction was gated, not deleted).
+ * This function fills in the missing tiers: long-term, arcs, and profiles.
+ *
+ * @param {number} startIndex - Chat index where the read-only window began.
+ * @returns {Promise<void>}
+ */
+async function commitReadOnlyWindow(startIndex) {
+  const context = getContext();
+  const settings = extension_settings[MODULE_NAME];
+  const windowMessages = (context.chat ?? [])
+    .slice(startIndex)
+    .filter((m) => m.mes && !m.is_system);
+
+  if (windowMessages.length === 0) return;
+
+  const characterName = getSelectedCharacterName();
+  const characterNames = (() => {
+    if (!context.groupId) return characterName ? [characterName] : [];
+    const group = context.groups?.find((g) => g.id === context.groupId);
+    if (!group) return characterName ? [characterName] : [];
+    return group.members
+      .filter((avatar) => !(group.disabled_members ?? []).includes(avatar))
+      .map((avatar) => context.characters.find((c) => c.avatar === avatar)?.name)
+      .filter(Boolean);
+  })();
+
+  setStatusMessage('Committing read-only session...');
+
+  for (const name of characterNames) {
+    if (settings.longterm_enabled) {
+      const nameWindow = context.groupId
+        ? windowMessages.filter((m) => m.is_user || m.name === name)
+        : windowMessages;
+      if (nameWindow.length > 0) {
+        await extractAndStoreMemories(name, nameWindow).catch((err) =>
+          console.error('[SmartMemory] Commit long-term extraction error:', err),
+        );
+        if (settings.consolidation_enabled) {
+          await consolidateMemories(name).catch((err) =>
+            console.error('[SmartMemory] Commit consolidation error:', err),
+          );
+        }
+      }
+    }
+    if (settings.profiles_enabled && name) {
+      await generateProfiles(name)
+        .then((profiles) => {
+          if (profiles) {
+            injectProfiles(name);
+            updateProfilesUI(profiles);
+          }
+        })
+        .catch((err) => console.error('[SmartMemory] Commit profile generation error:', err));
+    }
+  }
+
+  if (settings.arcs_enabled) {
+    await extractArcs(windowMessages).catch((err) =>
+      console.error('[SmartMemory] Commit arc extraction error:', err),
+    );
+  }
+
+  saveSettingsDebounced();
+  setStatusMessage('Session committed.');
+}
+
+/**
  * Binds all settings panel controls to their corresponding settings values.
  * Each control reads from getSettings() on mount and writes back on change,
  * calling saveSettingsDebounced() to persist.
@@ -3417,25 +3488,38 @@ function bindSettingsUI() {
       await setReadOnlyStartIndex(context.chat?.length ?? 0);
       $('body').addClass('sm-read-only');
     } else {
-      // Purge any session memories that accumulated during the read-only window
-      // before they can feed into profiles or the entity registry.
-      const startTime = getReadOnlyStartTime();
-      if (startTime !== null) {
-        await purgeSessionMemoriesSince(startTime).catch((err) =>
-          console.error('[SmartMemory] Session memory purge failed:', err),
-        );
-      }
-
-      // Ghost all messages generated during the read-only window so they
-      // are excluded from context and future extraction passes.
       const startIndex = getReadOnlyStartIndex();
+      const startTime = getReadOnlyStartTime();
       const context = getContext();
       const endIndex = (context.chat?.length ?? 1) - 1;
-      if (startIndex !== null && endIndex >= startIndex) {
-        await hideChatMessageRange(startIndex, endIndex, false);
+      const hasWindow = startIndex !== null && endIndex >= startIndex;
+
+      const commit = hasWindow
+        ? confirm(
+            'Commit memories from this read-only session?\n\n' +
+              'OK - Keep session memories and extract long-term memories from this window.\n' +
+              'Cancel - Discard all memories and hide messages from this window.',
+          )
+        : false;
+
+      if (commit) {
+        // Lift the gate and process the window as if it had always been active.
+        await setReadOnlyStartIndex(null);
+        $('body').removeClass('sm-read-only');
+        await commitReadOnlyWindow(startIndex);
+      } else {
+        // Discard: purge session memories then ghost the messages.
+        if (startTime !== null) {
+          await purgeSessionMemoriesSince(startTime).catch((err) =>
+            console.error('[SmartMemory] Session memory purge failed:', err),
+          );
+        }
+        if (hasWindow) {
+          await hideChatMessageRange(startIndex, endIndex, false);
+        }
+        await setReadOnlyStartIndex(null);
+        $('body').removeClass('sm-read-only');
       }
-      await setReadOnlyStartIndex(null);
-      $('body').removeClass('sm-read-only');
     }
 
     await injectMemories(getSelectedCharacterName());
@@ -4501,6 +4585,19 @@ jQuery(async function () {
   eventSource.on(event_types.GROUP_MEMBER_DRAFTED, onGroupMemberDrafted);
   eventSource.on(event_types.GROUP_WRAPPER_FINISHED, onGroupWrapperFinished);
   eventSource.on(event_types.GROUP_UPDATED, onGroupUpdated);
+
+  // Warn when the user creates a checkpoint or branch without read-only mode
+  // active. Long-term memories will continue forming in the current chat and
+  // will not roll back if they later switch to the checkpoint/branch.
+  $(document).on('click', '.mes_create_bookmark, .mes_create_branch', () => {
+    if (!isFreshStart()) {
+      toastr.warning(
+        'Smart Memory is still active. Enable read-only mode first to keep this session consequence-free.',
+        'Smart Memory',
+        { timeOut: 7000, positionClass: 'toast-bottom-right' },
+      );
+    }
+  });
 
   // When the user swipes, immediately abort any in-flight Ollama or
   // OpenAI-compat memory generation. Without this, the swipe generation request
