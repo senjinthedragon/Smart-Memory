@@ -69,6 +69,25 @@
         </div>
       </div>
 
+      <!-- Read-only mode - sits below the chat action buttons since it is a
+           chat-level mode switch, not a per-tier setting -->
+      <div class="sm-block">
+        <label
+          class="checkbox_label"
+          title="When checked, nothing from this chat is written back to the character's persistent memory."
+        >
+          <input id="sm_fresh_start" type="checkbox" />
+          <span>
+            Read-only mode - protect character memories
+            <span
+              class="sm-info"
+              data-tooltip="The character arrives with all their memories and behaves normally, but nothing from this chat is saved. Use it to try out a risky scene before committing it to their history, or to let loose without consequences - wreck the relationship, start a fight, test a dramatic confession. Turn it off again and their memories are exactly as you left them."
+              >ⓘ</span
+            >
+          </span>
+        </label>
+      </div>
+
       <hr class="sysHR" />
 
       <!-- ══ TOKEN USAGE ══ -->
@@ -135,24 +154,6 @@
               <i class="fa-solid fa-trash-can"></i>
               <span>Clear Memories</span>
             </button>
-          </div>
-
-          <p class="sm-section-title">Behaviour</p>
-          <div class="sm-block">
-            <label
-              class="checkbox_label"
-              title="When checked, nothing from this chat is written back to the character's persistent memory."
-            >
-              <input id="sm_fresh_start" type="checkbox" />
-              <span>
-                Read-only mode - protect character memories
-                <span
-                  class="sm-info"
-                  data-tooltip="The character arrives with all their memories and behaves normally, but nothing from this chat is saved. Use it to try out a risky scene before committing it to their history, or to let loose without consequences - wreck the relationship, start a fight, test a dramatic confession. Turn it off again and their memories are exactly as you left them."
-                  >ⓘ</span
-                >
-              </span>
-            </label>
           </div>
 
           <p class="sm-section-title">Extraction</p>
