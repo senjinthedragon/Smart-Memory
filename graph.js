@@ -62,7 +62,7 @@ const REPULSION_K = 3500; // Coulomb-like repulsion strength
 const SPRING_K = 0.05; // Hooke's law spring stiffness
 const SPRING_REST_EM = 140; // entity-memory edge rest length
 const SPRING_REST_MM = 55; // memory-memory (supersedes) rest length
-const DAMPING = 0.88; // velocity multiplied by this each tick
+const DAMPING = 0.90; // velocity multiplied by this each tick
 const GRAVITY_K = 0.012; // pull toward world origin (0,0)
 const ALPHA_DECAY = 0.992; // simulation cools by this factor each tick
 const ALPHA_MIN = 0.004; // stop when alpha falls below this
@@ -669,7 +669,7 @@ function bindEvents(canvas, $overlay, characterName) {
       node.y = world.y + gs.dragging.offsetY;
       node.vx = 0;
       node.vy = 0;
-      gs.alpha = Math.max(gs.alpha, 0.25); // briefly reheat so graph settles
+      gs.alpha = Math.max(gs.alpha, 0.10); // briefly reheat so graph settles
       return;
     }
 
