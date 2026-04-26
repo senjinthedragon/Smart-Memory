@@ -21,8 +21,8 @@
  * Long-term memory: per-character persistent facts stored in extension_settings.
  *
  * Memories survive across all sessions and are injected at the start of every
- * new chat with the same character. A fresh-start flag in chatMetadata can
- * suppress injection for a specific chat.
+ * new chat with the same character. A fresh-start flag in chatMetadata suppresses
+ * extraction for a specific chat while keeping injection active.
  *
  * loadCharacterMemories    - returns the stored memory array for a character
  * saveCharacterMemories    - persists the memory array for a character
@@ -624,15 +624,14 @@ export async function consolidateMemories(characterName, force = false) {
  * Clears the injection slot if fresh-start is active, no character is set,
  * or the character has no memories yet.
  * @param {string} characterName
- * @param {boolean} [freshStart=false] - If true, suppress injection for this chat.
  * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
  *   Only pass true from the post-extraction path (one real AI response turn). All other callers
  *   (chat load, settings change, etc.) leave telemetry unchanged to avoid inflating the signal.
  */
-export async function injectMemories(characterName, freshStart = false, updateTelemetry = false) {
+export async function injectMemories(characterName, updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
 
-  if (!settings.longterm_enabled || freshStart || !characterName) {
+  if (!settings.longterm_enabled || !characterName) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
     return;
   }

@@ -34,7 +34,11 @@
               >
             </span>
           </button>
-          <button id="sm_cancel_catch_up" class="menu_button menu_button_icon" style="display: none">
+          <button
+            id="sm_cancel_catch_up"
+            class="menu_button menu_button_icon"
+            style="display: none"
+          >
             <i class="fa-solid fa-xmark"></i>
             <span>Cancel</span>
           </button>
@@ -84,7 +88,7 @@
           <span id="sm_token_used">~0</span> / <span id="sm_token_max">?</span> tokens &mdash;
           <span id="sm_token_pct">0</span>% of context
         </div>
-        <div id="sm_token_group_rows" class="sm-token-group-rows" style="display:none"></div>
+        <div id="sm_token_group_rows" class="sm-token-group-rows" style="display: none"></div>
       </div>
 
       <!-- Group character selector - shown only in group chats -->
@@ -137,14 +141,14 @@
           <div class="sm-block">
             <label
               class="checkbox_label"
-              title="When checked, long-term memories are NOT injected for this specific chat."
+              title="When checked, no new memories are extracted or generated for this chat. Existing memories are still injected normally."
             >
               <input id="sm_fresh_start" type="checkbox" />
               <span>
                 Exclude this chat from long-term memory
                 <span
                   class="sm-info"
-                  data-tooltip="Prevents long-term memories from being extracted or injected for this specific chat. Useful for test sessions or one-off chats you don't want affecting the character's persistent memory."
+                  data-tooltip="Prevents any new memories, arcs, profiles, or canon from being extracted or generated for this chat. Existing memories are still injected so the character behaves normally. Useful for test sessions or one-off chats you don't want affecting the character's persistent memory."
                   >ⓘ</span
                 >
               </span>

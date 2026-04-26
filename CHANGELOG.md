@@ -85,6 +85,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **"Exclude from long-term memory" now correctly gates extraction not injection**:
+  the flag previously blocked injection of existing memories while still
+  allowing extraction to write new ones - the opposite of its intent. It now
+  suppresses all extraction and generation (long-term, arcs, profiles, canon
+  auto-generation, catch-up) while injecting existing memories normally so the
+  character behaves with their full established context. Test and throwaway chats
+  can no longer accidentally pollute persistent character state.
+
 - **Group character selector not updating on membership changes**: adding or
   removing a character from a group chat mid-session did not update the group
   character selector or token display until the next chat reload. Smart Memory

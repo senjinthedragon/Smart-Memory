@@ -767,7 +767,12 @@ async function onCharacterMessageRendered() {
           }
         }
 
-        if (settings.longterm_enabled && characterName && longtermWindow.length > 0) {
+        if (
+          settings.longterm_enabled &&
+          characterName &&
+          longtermWindow.length > 0 &&
+          !isFreshStart()
+        ) {
           const count = await extractAndStoreMemories(characterName, longtermWindow).catch(
             (err) => {
               console.error('[SmartMemory] Long-term extraction error:', err);
@@ -793,7 +798,7 @@ async function onCharacterMessageRendered() {
           }
           // Inject once after extraction (and any consolidation) - this is the
           // one call per AI response turn where telemetry should be updated.
-          await injectMemories(characterName, isFreshStart(), true);
+          await injectMemories(characterName, true);
           updateLongTermUI(characterName);
           total += count;
         }
@@ -802,7 +807,7 @@ async function onCharacterMessageRendered() {
         // resolution in this pass (the count only grows when an arc closes).
         const arcSummaryCountBefore = settings.arcs_enabled ? loadArcSummaries().length : 0;
 
-        if (settings.arcs_enabled) {
+        if (settings.arcs_enabled && !isFreshStart()) {
           // Arc extraction uses a wider window than other tiers so it can catch
           // arcs opened earlier in the session, but is capped to avoid overflowing
           // the model's context on long chats. Existing arcs are passed to the
@@ -819,7 +824,9 @@ async function onCharacterMessageRendered() {
 
         // Regenerate profiles after each extraction pass so they reflect the
         // latest memories. Sequential - same constraint as the other tiers.
-        if (settings.profiles_enabled && characterName) {
+        // Skipped in freshStart chats - no new memories were written so
+        // regeneration would waste a model call producing the same output.
+        if (settings.profiles_enabled && characterName && !isFreshStart()) {
           await generateProfiles(characterName)
             .then((profiles) => {
               if (profiles) {
@@ -839,6 +846,7 @@ async function onCharacterMessageRendered() {
           settings.canon_enabled &&
           settings.arcs_enabled &&
           characterName &&
+          !isFreshStart() &&
           getHardwareProfile() === 'b' &&
           loadArcSummaries().length > arcSummaryCountBefore
         ) {
@@ -989,7 +997,7 @@ async function onChatChangedImpl() {
     // confidence/decay fields and other v2+ additions are present. Other members
     // are migrated lazily on their first onGroupMemberDrafted.
     if (selectedGroupCharacter) ensureCharacterMigrated(selectedGroupCharacter);
-    await injectMemories(selectedGroupCharacter, isFreshStart());
+    await injectMemories(selectedGroupCharacter);
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
@@ -1054,7 +1062,7 @@ async function onChatChangedImpl() {
   injectCanon(characterName);
   updateShortTermUI(summary);
 
-  await injectMemories(characterName, freshStart);
+  await injectMemories(characterName);
 
   await injectSessionMemories();
   injectSceneHistory();
@@ -1077,7 +1085,7 @@ async function onChatChangedImpl() {
   // Regenerate profiles in the background if they are stale. Non-blocking -
   // the existing stored profiles (if any) were already injected above, so the
   // user sees coherent context immediately and the refresh is invisible.
-  if (settings.profiles_enabled && characterName && !freshStart) {
+  if (settings.profiles_enabled && characterName && !isFreshStart()) {
     const thresholdMs = (settings.profiles_stale_threshold_minutes ?? 30) * 60 * 1000;
     if (areProfilesStale(thresholdMs, characterName)) {
       generateProfiles(characterName)
@@ -1209,14 +1217,12 @@ async function onGroupMemberDrafted(chId) {
     saveSettingsDebounced();
   }
 
-  const freshStart = isFreshStart();
-
   // Restore all injected context for this character.
   const summary = loadAndInjectSummary();
   injectCanon(characterName);
   updateShortTermUI(summary);
 
-  await injectMemories(characterName, freshStart);
+  await injectMemories(characterName);
   await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
@@ -1409,7 +1415,11 @@ async function onGroupWrapperFinished({ type } = {}) {
               (m) => m.is_user || m.name === characterName,
             );
 
-            if (settings.longterm_enabled && characterLongtermWindow.length > 0) {
+            if (
+              settings.longterm_enabled &&
+              characterLongtermWindow.length > 0 &&
+              !isFreshStart()
+            ) {
               const count = await extractAndStoreMemories(
                 characterName,
                 characterLongtermWindow,
@@ -1436,7 +1446,7 @@ async function onGroupWrapperFinished({ type } = {}) {
               total += count;
             }
 
-            if (settings.profiles_enabled && characterName) {
+            if (settings.profiles_enabled && characterName && !isFreshStart()) {
               await generateProfiles(characterName)
                 .then((profiles) => {
                   if (profiles) {
@@ -1456,7 +1466,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           // new resolution without re-running extraction.
           const arcSummaryCountBefore = settings.arcs_enabled ? loadArcSummaries().length : 0;
 
-          if (settings.arcs_enabled) {
+          if (settings.arcs_enabled && !isFreshStart()) {
             const arcWindow = getStableExtractionWindow(context.chat, 100);
             const count = await extractArcs(arcWindow).catch((err) => {
               console.error('[SmartMemory] Arc extraction error:', err);
@@ -1473,6 +1483,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           if (
             settings.canon_enabled &&
             settings.arcs_enabled &&
+            !isFreshStart() &&
             getHardwareProfile() === 'b' &&
             loadArcSummaries().length > arcSummaryCountBefore
           ) {
@@ -1565,7 +1576,7 @@ async function onGroupWrapperFinished({ type } = {}) {
   // last responder's data is still in the slots. Re-inject for the selector choice
   // so the token display reflects what the panel is showing, not who generated last.
   if (selectedGroupCharacter) {
-    await injectMemories(selectedGroupCharacter, isFreshStart());
+    await injectMemories(selectedGroupCharacter);
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
     maybeInjectUnified();
@@ -2698,7 +2709,7 @@ function renderMemoriesList(memories, characterName) {
       memories[idx].content = newContent;
       saveCharacterMemories(characterName, memories);
       saveSettingsDebounced();
-      injectMemories(characterName, isFreshStart()).catch(console.error);
+      injectMemories(characterName).catch(console.error);
       renderMemoriesList(loadCharacterMemories(characterName), characterName);
     });
 
@@ -2747,7 +2758,7 @@ function renderMemoriesList(memories, characterName) {
     });
     saveCharacterMemories(characterName, memories);
     saveSettingsDebounced();
-    injectMemories(characterName, isFreshStart()).catch(console.error);
+    injectMemories(characterName).catch(console.error);
     renderMemoriesList(loadCharacterMemories(characterName), characterName);
   });
 }
@@ -2915,7 +2926,7 @@ function bindSettingsUI() {
     // Re-inject the character-specific slots so updateTokenDisplay reads
     // the selected character's content rather than whoever responded last.
     // onGroupMemberDrafted will overwrite these again before the next Generate().
-    await injectMemories(selectedGroupCharacter, isFreshStart());
+    await injectMemories(selectedGroupCharacter);
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
@@ -3328,7 +3339,7 @@ function bindSettingsUI() {
     .on('change', function () {
       getSettings().longterm_enabled = $(this).prop('checked');
       saveSettingsDebounced();
-      injectMemories(getSelectedCharacterName(), isFreshStart()).catch(console.error);
+      injectMemories(getSelectedCharacterName()).catch(console.error);
     });
 
   $('#sm_longterm_extract_every')
@@ -3391,7 +3402,7 @@ function bindSettingsUI() {
   $('#sm_fresh_start').on('change', async function () {
     const val = $(this).prop('checked');
     await setFreshStart(val);
-    await injectMemories(getSelectedCharacterName(), val);
+    await injectMemories(getSelectedCharacterName());
   });
 
   $('#sm_extract_now').on('click', async function () {
@@ -3432,7 +3443,7 @@ function bindSettingsUI() {
     saveSettingsDebounced();
     updateLongTermUI(characterName);
     updateCanonUI(characterName);
-    injectMemories(null, true).catch(console.error);
+    injectMemories(null).catch(console.error);
     setStatusMessage('Memories cleared.');
   });
 
@@ -3855,7 +3866,7 @@ function bindSettingsUI() {
           `Catching up... (${i}/${total} messages, ${Math.round((i / total) * 100)}%)`,
         );
 
-        if (settings.longterm_enabled) {
+        if (settings.longterm_enabled && !isFreshStart()) {
           for (const name of catchUpCharacterNames) {
             // Filter chunk to this character's messages + user messages, matching
             // the Phase 2 per-character window filtering used in automatic extraction.
@@ -3889,7 +3900,7 @@ function bindSettingsUI() {
             console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
           });
         }
-        if (settings.arcs_enabled) {
+        if (settings.arcs_enabled && !isFreshStart()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - extracting arcs)`);
           await extractArcs(chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
@@ -3899,7 +3910,7 @@ function bindSettingsUI() {
         // Re-inject after each chunk so the token display reflects what is
         // actually stored, not just what was injected before catch-up started.
         if (settings.longterm_enabled && characterName) {
-          await injectMemories(characterName, isFreshStart());
+          await injectMemories(characterName);
         }
         if (settings.session_enabled) {
           await injectSessionMemories();
@@ -4028,7 +4039,7 @@ function bindSettingsUI() {
 
       // Re-inject and refresh UI for everything processed so far, whether the
       // run completed or was cancelled partway through.
-      await injectMemories(characterName, isFreshStart());
+      await injectMemories(characterName);
       injectSessionMemories();
       injectSceneHistory();
       injectArcs();
@@ -4161,7 +4172,7 @@ function bindSettingsUI() {
 
     // Clear all injection slots.
     loadAndInjectSummary();
-    await injectMemories(characterName, isFreshStart());
+    await injectMemories(characterName);
     injectSessionMemories();
     injectSceneHistory();
     injectArcs();
@@ -4363,7 +4374,7 @@ function bindSettingsUI() {
         clearUnifiedSlot();
         const summary = loadAndInjectSummary();
         updateShortTermUI(summary);
-        injectMemories(characterName, isFreshStart());
+        injectMemories(characterName);
         injectSessionMemories();
         injectSceneHistory();
         injectArcs();
@@ -4551,10 +4562,12 @@ jQuery(async function () {
           const recentLongTerm = getStableExtractionWindowWithFallback(context.chat, 20);
           const recentSession = getStableExtractionWindowWithFallback(context.chat, 40);
           const recentArcs = getStableExtractionWindowWithFallback(context.chat, 100);
-          await extractAndStoreMemories(characterName, recentLongTerm);
+          if (!isFreshStart()) {
+            await extractAndStoreMemories(characterName, recentLongTerm);
+            await extractArcs(recentArcs);
+          }
           await extractSessionMemories(recentSession);
-          await extractArcs(recentArcs);
-          await injectMemories(characterName, isFreshStart());
+          await injectMemories(characterName);
           await injectSessionMemories();
           injectArcs();
           updateLongTermUI(characterName);
