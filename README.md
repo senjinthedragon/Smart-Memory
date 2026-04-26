@@ -337,6 +337,8 @@ The **Read-only mode - protect character memories** toggle sits just below the c
 
 Use it to try out a risky scene before committing it to the character's history, or for a consequence-free session. Turn it off again afterward and their memories are exactly as you left them.
 
+When you turn read-only off, all messages generated during that window are automatically hidden from the AI - they will never be picked up by future extraction passes or included in context. The "Delete messages" option in the chat context menu is also suppressed while read-only is active to prevent message deletions from corrupting the hidden range. You can toggle read-only on and off multiple times in the same chat; each window is ghosted independently when disabled.
+
 ### Memorize Chat
 
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
