@@ -655,6 +655,10 @@ function migrateChat_v1(chatMeta) {
  * long-term memory. These fields are used by the per-memory confidence decay
  * system introduced in v1.4.0.
  *
+ * v1 guarantees that every memory already has an `id` field (added by
+ * migrateCharacter_v1 via applyGraphDefaults), so id-based operations are
+ * safe from this version onward without a null-guard.
+ *
  * @param {Object} charData - Character data object.
  * @returns {Object} Updated character data with schema_version NOT yet set.
  */
@@ -792,10 +796,8 @@ function applyMigrations(container, steps) {
       assertNonDestructive(before, current, version + 1, '', allowDelete);
       smLog(`[SmartMemory] Applied migration step v${version + 1}.`);
     } else {
-      // A missing step is expected when one registry has no change for this
+      // A missing step is normal when one registry has no change for a given
       // version (e.g. CHAT_MIGRATIONS has v3 but CHARACTER_MIGRATIONS does not).
-      // Log so it is visible in debug but do not throw.
-      smLog(`[SmartMemory] No migration step for v${version + 1} in this registry - skipping.`);
     }
     version++;
   }

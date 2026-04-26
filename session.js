@@ -276,7 +276,10 @@ export async function extractSessionMemories(recentMessages) {
 
     // Pass long-term memories so the model skips facts already stored there.
     // Cap to 15 entries to avoid inflating the prompt on local hardware.
-    const characterName = getContext().name2 || getContext().characterName || null;
+    // In group chats there is no single authoritative character, so skip this
+    // hint rather than arbitrarily biasing toward one member's long-term store.
+    const isGroup = !!getContext().groupId;
+    const characterName = isGroup ? null : getContext().name2 || getContext().characterName || null;
     const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
     const longtermText =
       longtermMemories.length > 0 ? formatMemoriesForPrompt(longtermMemories.slice(0, 15)) : '';

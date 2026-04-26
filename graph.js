@@ -109,6 +109,7 @@ export function showMemoryGraph(characterName) {
   gs = {
     nodes,
     edges,
+    nodeById: new Map(nodes.map((n) => [n.id, n])),
     canvas,
     ctx,
     characterName,
@@ -315,7 +316,7 @@ function tick() {
   }
 
   // Spring forces along edges.
-  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const nodeById = gs.nodeById;
   for (const edge of edges) {
     const a = nodeById.get(edge.source);
     const b = nodeById.get(edge.target);
@@ -393,7 +394,7 @@ function render() {
   ctx.translate(width / 2 + camera.x, height / 2 + camera.y);
   ctx.scale(camera.scale, camera.scale);
 
-  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const nodeById = gs.nodeById;
 
   // When a node is selected, dim everything not directly connected.
   const highlightIds = buildHighlightSet(selected, edges);
@@ -565,10 +566,11 @@ function renderTooltip() {
   const sx = node.x * camera.scale + canvas.width / 2 + camera.x;
   const sy = node.y * camera.scale + canvas.height / 2 + camera.y;
 
+  const esc = (s) => $('<div>').text(s).html();
   const typeLabel = node.nodeType === 'entity' ? `Entity - ${node.subtype}` : node.subtype;
-  const content = `<strong>${node.nodeType === 'entity' ? node.label : node.subtype}</strong>
-    <span class="sm_graph_tip_type">${typeLabel}</span>
-    <span class="sm_graph_tip_detail">${$('<div>').text(node.detail).html()}</span>`;
+  const content = `<strong>${esc(node.nodeType === 'entity' ? node.label : node.subtype)}</strong>
+    <span class="sm_graph_tip_type">${esc(typeLabel)}</span>
+    <span class="sm_graph_tip_detail">${esc(node.detail)}</span>`;
 
   $tip.html(content);
 
@@ -820,6 +822,7 @@ function rebuildGraph(characterName) {
   const { nodes, edges } = buildGraph(characterName, gs.opts);
   gs.nodes = nodes;
   gs.edges = edges;
+  gs.nodeById = new Map(nodes.map((n) => [n.id, n]));
   initPositions(nodes, edges);
   gs.alpha = 1.0;
   gs.selected = null;

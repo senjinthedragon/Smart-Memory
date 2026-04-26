@@ -101,6 +101,7 @@ import {
 import {
   processSceneBreak,
   summarizeScene,
+  sceneSimilarity,
   injectSceneHistory,
   loadSceneHistory,
   saveSceneHistory,
@@ -232,6 +233,7 @@ const defaultSettings = {
   scene_enabled: true,
   scene_ai_detect: false,
   scene_max_history: 5,
+  scene_min_messages: 3,
   scene_summary_length: 200,
   scene_inject_budget: 300,
   scene_position: extension_prompt_types.IN_CHAT,
@@ -608,7 +610,9 @@ async function onCharacterMessageRendered() {
 
   // Step 1: compaction - awaited before extraction to prevent concurrent use
   // of ST's TempResponseLength singleton, which would corrupt amount_gen.
-  if (settings.compaction_enabled && !compactionRunning) {
+  // Gated by !isFreshStart() so read-only sessions never advance summaryEnd
+  // past the ghosted window; the discard path then has nothing to roll back.
+  if (settings.compaction_enabled && !compactionRunning && !isFreshStart()) {
     compactionRunning = true;
     try {
       const needed = await shouldCompact();
@@ -629,7 +633,6 @@ async function onCharacterMessageRendered() {
         if (compactionToast) toastr.clear(compactionToast);
         if (summary) {
           injectSummary(summary);
-          // Canon overwrites the slot when active.
           injectCanon(characterName);
           updateShortTermUI(summary);
           updateTokenDisplay();
@@ -650,8 +653,9 @@ async function onCharacterMessageRendered() {
   // would corrupt amount_gen if it raced with extraction.
   // Check both the AI response and the preceding user message - transitions
   // are often written by the user and not echoed by the AI.
+  // Gated by !isFreshStart() so no scene summaries are written during read-only.
   const sceneCheckText = [lastUserMsgText, lastMsgText].filter(Boolean).join('\n');
-  if (settings.scene_enabled && sceneCheckText) {
+  if (settings.scene_enabled && sceneCheckText && !isFreshStart()) {
     try {
       const wasBreak = await processSceneBreak(sceneCheckText, sceneMessageBuffer, prevAiMsgText);
       if (wasBreak) {
@@ -893,6 +897,7 @@ async function onCharacterMessageRendered() {
     (settings.profiles_regen_every ?? 0) > 0 &&
     getHardwareProfile() === 'b' &&
     characterName &&
+    !isFreshStart() &&
     messagesSinceLastProfileRegen >= settings.profiles_regen_every
   ) {
     messagesSinceLastProfileRegen = 0;
@@ -976,6 +981,7 @@ async function onChatChangedImpl() {
   setContinuityBadge(null);
   lastKnownChatLength = 0;
   clearEmbeddingCache();
+  clearUnifiedSlot();
 
   // Migrate chat data first - no character name needed, operates on chatMetadata.
   // Fast no-op when the container is already at the current schema version.
@@ -1276,7 +1282,8 @@ async function onGroupWrapperFinished({ type } = {}) {
   const prevAiMsgText = aiMessages.length >= 2 ? aiMessages[aiMessages.length - 2].mes : '';
 
   // Step 1: compaction - once per round rather than per character response.
-  if (settings.compaction_enabled && !compactionRunning) {
+  // Gated by !isFreshStart() matching the solo path.
+  if (settings.compaction_enabled && !compactionRunning && !isFreshStart()) {
     compactionRunning = true;
     try {
       const needed = await shouldCompact();
@@ -1311,8 +1318,9 @@ async function onGroupWrapperFinished({ type } = {}) {
   }
 
   // Step 2: scene break detection - once for the round using accumulated buffer.
+  // Gated by !isFreshStart() matching the solo path.
   const sceneCheckText = [lastUserMsgText, lastMsgText].filter(Boolean).join('\n');
-  if (settings.scene_enabled && sceneCheckText) {
+  if (settings.scene_enabled && sceneCheckText && !isFreshStart()) {
     try {
       const wasBreak = await processSceneBreak(sceneCheckText, sceneMessageBuffer, prevAiMsgText);
       if (wasBreak) {
@@ -1532,6 +1540,7 @@ async function onGroupWrapperFinished({ type } = {}) {
     settings.profiles_enabled &&
     (settings.profiles_regen_every ?? 0) > 0 &&
     getHardwareProfile() === 'b' &&
+    !isFreshStart() &&
     messagesSinceLastProfileRegen >= settings.profiles_regen_every
   ) {
     messagesSinceLastProfileRegen = 0;
@@ -2010,7 +2019,7 @@ function initTypePickers() {
 
 /** Syncs the Fresh Start checkbox state. */
 function updateFreshStartUI(freshStart) {
-  $('#sm_fresh_start').prop('checked', !!freshStart);
+  $('#sm_read_only').prop('checked', !!freshStart);
   $('body').toggleClass('sm-read-only', !!freshStart);
 }
 
@@ -3477,7 +3486,7 @@ function bindSettingsUI() {
       saveSettingsDebounced();
     });
 
-  $('#sm_fresh_start').on('change', async function () {
+  $('#sm_read_only').on('change', async function () {
     const val = $(this).prop('checked');
     await setFreshStart(val);
 
@@ -4026,7 +4035,7 @@ function bindSettingsUI() {
         }
         if (settings.arcs_enabled && !isFreshStart()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - extracting arcs)`);
-          await extractArcs(chunk).catch((err) => {
+          await extractArcs(chunk, characterName).catch((err) => {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
         }
@@ -4060,20 +4069,36 @@ function bindSettingsUI() {
           setStatusMessage('Detecting and summarizing scenes...');
           const sceneHistory = loadSceneHistory();
           const max = settings.scene_max_history ?? 5;
+          const minMessages = settings.scene_min_messages ?? 3;
           let sceneBuffer = [];
+
+          /**
+           * Deduplicates a candidate summary against the last three stored scenes,
+           * mirroring the check in processSceneBreak. Returns true if the summary
+           * is too similar to an existing entry and should be skipped.
+           */
+          const isDuplicateScene = async (candidate) => {
+            const recent = sceneHistory.slice(-3);
+            for (const prev of recent) {
+              const { score, semantic } = await sceneSimilarity(candidate, prev.summary);
+              const threshold = semantic ? 0.82 : 0.55;
+              if (score >= threshold) return true;
+            }
+            return false;
+          };
 
           for (const msg of allMessages) {
             if (catchUpCancelled) break;
             sceneBuffer.push(msg);
 
             const msgText = msg.mes ?? '';
-            if (detectSceneBreakHeuristic(msgText) && sceneBuffer.length > 1) {
+            if (detectSceneBreakHeuristic(msgText) && sceneBuffer.length >= minMessages) {
               const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
                 console.error('[SmartMemory] Catch-up scene summary failed:', err);
                 return null;
               });
-              if (sceneSummary) {
-                sceneHistory.push({ summary: sceneSummary, ts: Date.now() });
+              if (sceneSummary && !(await isDuplicateScene(sceneSummary))) {
+                sceneHistory.push({ summary: sceneSummary, ts: Date.now(), source_memory_ids: [] });
                 if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
               }
               sceneBuffer = [];
@@ -4081,13 +4106,13 @@ function bindSettingsUI() {
           }
 
           // Summarize any remaining messages after the last break as the current scene.
-          if (!catchUpCancelled && sceneBuffer.length > 1) {
+          if (!catchUpCancelled && sceneBuffer.length >= minMessages) {
             const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
               console.error('[SmartMemory] Catch-up final scene summary failed:', err);
               return null;
             });
-            if (sceneSummary) {
-              sceneHistory.push({ summary: sceneSummary, ts: Date.now() });
+            if (sceneSummary && !(await isDuplicateScene(sceneSummary))) {
+              sceneHistory.push({ summary: sceneSummary, ts: Date.now(), source_memory_ids: [] });
               if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
             }
           }
@@ -4571,7 +4596,10 @@ function bindSettingsUI() {
     } catch {
       $('#sm_about_version').text('');
     }
-    await callGenericPopup($('#sm_about_modal').clone().show()[0], POPUP_TYPE.DISPLAY, '', {
+    const $modal = $('#sm_about_modal').clone().show();
+    // Remove IDs from the clone so they do not duplicate the hidden template's IDs in the DOM.
+    $modal.find('[id]').addBack('[id]').removeAttr('id');
+    await callGenericPopup($modal[0], POPUP_TYPE.DISPLAY, '', {
       wide: false,
       large: false,
     });
@@ -4717,7 +4745,7 @@ jQuery(async function () {
           const recentArcs = getStableExtractionWindowWithFallback(context.chat, 100);
           if (!isFreshStart()) {
             await extractAndStoreMemories(characterName, recentLongTerm);
-            await extractArcs(recentArcs);
+            await extractArcs(recentArcs, characterName);
             await extractSessionMemories(recentSession);
           }
           await injectMemories(characterName);

@@ -29,6 +29,7 @@
  * saveSceneHistory           - persists the scene history array to chatMetadata
  * clearSceneHistory          - empties scene history for the current chat
  * summarizeScene             - generates a 2-3 sentence mini-summary of a scene
+ * sceneSimilarity            - returns {score, semantic} between two scene summary strings
  * processSceneBreak          - orchestrates detection + summarization + dedup + storage
  * linkMemoriesToLastScene    - attaches memory ids to the most recent scene entry
  * injectSceneHistory         - pushes scene history into the prompt via setExtensionPrompt
@@ -75,7 +76,7 @@ function sceneJaccard(a, b) {
  * @param {string} b
  * @returns {Promise<{score: number, semantic: boolean}>}
  */
-async function sceneSimilarity(a, b) {
+export async function sceneSimilarity(a, b) {
   const aKey = a.toLowerCase().trim();
   const bKey = b.toLowerCase().trim();
   const vectorMap = await getEmbeddingBatch([aKey, bKey]);
@@ -219,17 +220,19 @@ export async function processSceneBreak(lastMessageText, recentMessages, previou
 
   const history = loadSceneHistory();
 
-  // Skip if the new summary is too similar to the most recent stored scene.
+  // Skip if the new summary is too similar to any of the last three stored scenes.
+  // Checking a small window guards against scene descriptions that repeat after
+  // a few exchanges without triggering a break (e.g. slow-paced ERP scenes).
   // Uses semantic embeddings when available, falling back to Jaccard.
   // Cosine threshold 0.82 catches rephrased versions of the same scene that
   // Jaccard misses due to varied wording.
-  const lastScene = history[history.length - 1];
-  if (lastScene) {
-    const { score, semantic } = await sceneSimilarity(summary, lastScene.summary);
+  const recentScenes = history.slice(-3);
+  for (const candidate of recentScenes) {
+    const { score, semantic } = await sceneSimilarity(summary, candidate.summary);
     const threshold = semantic ? 0.82 : 0.55;
     if (score >= threshold) {
       smLog(
-        `[SmartMemory] Scene summary too similar to previous (${semantic ? 'semantic' : 'jaccard'} ${score.toFixed(3)}) - skipping duplicate.`,
+        `[SmartMemory] Scene summary too similar to a recent scene (${semantic ? 'semantic' : 'jaccard'} ${score.toFixed(3)}) - skipping duplicate.`,
       );
       return false;
     }

@@ -85,6 +85,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unified injection cache leaked across chat changes**: switching chats while
+  unified injection was enabled could carry stale tier content from the previous
+  chat into the new one. The content cache is now cleared at the start of every
+  chat change.
+
+- **Session extraction biased toward one character in group chats**: session
+  extraction passed one group member's long-term memories to the model as a
+  deduplication hint, ignoring all other members. In group chats the hint is now
+  suppressed entirely, since there is no single authoritative character.
+
+- **Scene catch-up deduplication and minimum buffer**: the catch-up loop (used
+  when first running Smart Memory on an existing chat) now checks new scene
+  summaries against the last three stored scenes before appending, matching the
+  deduplication logic in normal scene processing. A minimum message buffer
+  (default 3, respecting `scene_min_messages`) is also enforced, preventing
+  trivially short fragments from being summarized as scenes. Scene entries
+  written by catch-up now include `source_memory_ids` for future traceability.
+
+- **Scene dedup checked only the most recent scene**: the normal scene break
+  path compared each new summary only against the immediately preceding scene.
+  It now checks the last three stored scenes, catching slow-paced sessions
+  where repeated descriptions accumulate without triggering a break.
+
+- **Graph tooltip XSS**: entity and memory node labels were injected into the
+  tooltip innerHTML without escaping, allowing a crafted memory content string
+  to inject markup. All tooltip fields are now HTML-escaped before insertion.
+
 - **Checkpoint and branch support via read-only mode**: Smart Memory now
   warns when a checkpoint or branch is created without read-only mode active,
   since long-term memories will continue forming and will not roll back if the

@@ -46,8 +46,8 @@ import {
   PROMPT_KEY_PROFILES,
   PROMPT_KEY_CANON,
   PROMPT_KEY_UNIFIED,
+  estimateTokens,
 } from './constants.js';
-import { estimateTokens } from './constants.js';
 
 /**
  * Canonical tier ordering for the unified block.
