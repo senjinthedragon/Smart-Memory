@@ -82,7 +82,10 @@ import {
   clearCharacterMemories,
   isFreshStart,
   setFreshStart,
+  getReadOnlyStartIndex,
+  setReadOnlyStartIndex,
 } from './longterm.js';
+import { hideChatMessageRange } from '../../../../scripts/chats.js';
 import { updateLastActive, getAwayHours, generateRecap, displayRecap } from './recap.js';
 import {
   extractSessionMemories,
@@ -3402,6 +3405,24 @@ function bindSettingsUI() {
   $('#sm_fresh_start').on('change', async function () {
     const val = $(this).prop('checked');
     await setFreshStart(val);
+
+    if (val) {
+      // Record where this read-only window starts so we know which messages
+      // to ghost if the user disables it later.
+      const context = getContext();
+      await setReadOnlyStartIndex(context.chat?.length ?? 0);
+    } else {
+      // Ghost all messages generated during the read-only window so they
+      // are excluded from context and future extraction passes.
+      const startIndex = getReadOnlyStartIndex();
+      const context = getContext();
+      const endIndex = (context.chat?.length ?? 1) - 1;
+      if (startIndex !== null && endIndex >= startIndex) {
+        await hideChatMessageRange(startIndex, endIndex, false);
+      }
+      await setReadOnlyStartIndex(null);
+    }
+
     await injectMemories(getSelectedCharacterName());
   });
 

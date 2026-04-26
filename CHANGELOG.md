@@ -85,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Read-only mode ghosts messages on disable**: when read-only mode is turned
+  off, all messages generated during that window are automatically marked as
+  hidden (`is_system`) so they are excluded from context and can never be
+  picked up by future extraction passes. Multiple toggle cycles each ghost
+  their own window independently. The start index for each window is stored
+  in chatMetadata when read-only is enabled and cleared after ghosting.
+
 - **"Exclude from long-term memory" renamed to "Read-only mode"**: the option
   is now described in terms of what you can do with it rather than its internal
   mechanism. The character arrives with all their memories and behaves normally;

@@ -33,6 +33,8 @@
  * injectMemories           - pushes memories into the prompt via setExtensionPrompt
  * isFreshStart             - returns whether the current chat has fresh-start enabled
  * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
+ * getReadOnlyStartIndex    - returns the chat index at which read-only mode was last enabled
+ * setReadOnlyStartIndex    - stores or clears the read-only window start index
  */
 
 import {
@@ -763,5 +765,33 @@ export async function setFreshStart(value) {
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].freshStart = value;
+  await context.saveMetadata();
+}
+
+/**
+ * Returns the chat message index at which read-only mode was last enabled,
+ * or null if not set. Used to determine which messages to ghost on disable.
+ * @returns {number|null}
+ */
+export function getReadOnlyStartIndex() {
+  const context = getContext();
+  const val = context.chatMetadata?.[META_KEY]?.readOnlyStartIndex;
+  return typeof val === 'number' ? val : null;
+}
+
+/**
+ * Stores or clears the read-only window start index.
+ * Pass a number to record where the current window begins; pass null to clear.
+ * @param {number|null} index
+ */
+export async function setReadOnlyStartIndex(index) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  if (index === null) {
+    delete context.chatMetadata[META_KEY].readOnlyStartIndex;
+  } else {
+    context.chatMetadata[META_KEY].readOnlyStartIndex = index;
+  }
   await context.saveMetadata();
 }
