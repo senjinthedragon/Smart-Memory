@@ -1251,6 +1251,13 @@
   flex-wrap: wrap;
 }
 
+#sm_graph_controls .menu_button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 .sm_graph_toggle {
   display: flex;
   align-items: center;
