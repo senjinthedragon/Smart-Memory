@@ -85,13 +85,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **"Exclude from long-term memory" now correctly gates extraction not injection**:
-  the flag previously blocked injection of existing memories while still
-  allowing extraction to write new ones - the opposite of its intent. It now
-  suppresses all extraction and generation (long-term, arcs, profiles, canon
-  auto-generation, catch-up) while injecting existing memories normally so the
-  character behaves with their full established context. Test and throwaway chats
-  can no longer accidentally pollute persistent character state.
+- **"Exclude from long-term memory" renamed to "Read-only mode"**: the option
+  is now described in terms of what you can do with it rather than its internal
+  mechanism. The character arrives with all their memories and behaves normally;
+  nothing from the chat is written back to their persistent state. Useful for
+  trying out a risky scene before committing it, or for a consequence-free
+  session that leaves the character's history untouched. The underlying fix
+  (extraction suppressed, injection kept active) is described in the fix entry
+  below.
 
 - **Group character selector not updating on membership changes**: adding or
   removing a character from a group chat mid-session did not update the group
