@@ -1576,6 +1576,25 @@ async function onGroupWrapperFinished({ type } = {}) {
   await updateLastActive();
 }
 
+// ---- Group membership changes -------------------------------------------
+
+/**
+ * Fires when the group roster changes (GROUP_UPDATED) - a member was added
+ * or removed while a chat is open. Rebuilds the group character selector so
+ * the new member appears immediately, and refreshes the token display to
+ * include or drop their memory footprint row.
+ *
+ * Injection context for a newly added member is handled automatically:
+ * onGroupMemberDrafted fires before their first generation and sets up all
+ * slots at that point, so no pre-injection is needed here.
+ */
+function onGroupUpdated() {
+  const context = getContext();
+  if (!context.groupId) return;
+  updateGroupCharSelector();
+  updateTokenDisplay();
+}
+
 // ---- UI helpers ---------------------------------------------------------
 
 /**
@@ -4431,6 +4450,7 @@ jQuery(async function () {
   eventSource.on(event_types.GROUP_WRAPPER_STARTED, onGroupWrapperStarted);
   eventSource.on(event_types.GROUP_MEMBER_DRAFTED, onGroupMemberDrafted);
   eventSource.on(event_types.GROUP_WRAPPER_FINISHED, onGroupWrapperFinished);
+  eventSource.on(event_types.GROUP_UPDATED, onGroupUpdated);
 
   // When the user swipes, immediately abort any in-flight Ollama or
   // OpenAI-compat memory generation. Without this, the swipe generation request
