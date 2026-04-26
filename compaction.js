@@ -112,8 +112,10 @@ export async function runCompaction() {
     // summary can focus on narrative flow rather than restating known facts.
     // Capped to avoid overwhelming local model context windows.
     const characterName = context.name2 || context.characterName || null;
-    const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
-    const sessionMemories = loadSessionMemories();
+    const longtermMemories = characterName
+      ? loadCharacterMemories(characterName).filter((m) => !m.superseded_by)
+      : [];
+    const sessionMemories = loadSessionMemories().filter((m) => !m.superseded_by);
     // Build a digest of what is stored at other tiers so the summary can skip
     // restating known facts. Cap by token budget rather than entry count so a
     // few very long memories don't overflow the model context window.

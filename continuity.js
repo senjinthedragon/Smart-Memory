@@ -86,14 +86,14 @@ function gatherEstablishedFacts(characterName) {
   }
 
   if (characterName) {
-    const longterm = loadCharacterMemories(characterName);
+    const longterm = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
     if (longterm.length > 0) {
       const text = longterm.map((m) => `[${m.type}] ${m.content}`).join('\n');
       parts.push('-- LONG-TERM MEMORIES --\n' + text);
     }
   }
 
-  const session = loadSessionMemories();
+  const session = loadSessionMemories().filter((m) => !m.superseded_by);
   if (session.length > 0) {
     const text = session.map((m) => `[${m.type}] ${m.content}`).join('\n');
     parts.push('-- SESSION DETAILS --\n' + text);
@@ -170,6 +170,7 @@ export async function generateRepair(contradictions, characterName) {
  */
 export function injectRepair(repairNote) {
   const context = getContext();
+  if (!context.chatMetadata) return;
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY][REPAIR_KEY] = repairNote;
   context.saveMetadata()?.catch(console.error);

@@ -3061,7 +3061,7 @@ function bindSettingsUI() {
         $select.append('<option value="">No models found</option>');
       } else {
         models.forEach((name) => {
-          $select.append(`<option value="${name}">${name}</option>`);
+          $select.append($('<option>', { value: name, text: name }));
         });
         const best = models.includes(prevModel) ? prevModel : models[0];
         $select.val(best);
