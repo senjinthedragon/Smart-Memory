@@ -337,7 +337,14 @@ The **Read-only mode - protect character memories** toggle sits just below the c
 
 Use it to try out a risky scene before committing it to the character's history, or for a consequence-free session. Turn it off again afterward and their memories are exactly as you left them.
 
-When you turn read-only off, all messages generated during that window are automatically hidden from the AI - they will never be picked up by future extraction passes or included in context. The "Delete messages" option in the chat context menu is also suppressed while read-only is active to prevent message deletions from corrupting the hidden range. You can toggle read-only on and off multiple times in the same chat; each window is ghosted independently when disabled.
+When you turn read-only off, a confirmation dialog asks what to do with the window:
+
+- **OK (Commit)** - keeps everything. Session memories are preserved and Smart Memory runs full extraction on the window messages - long-term memories, arcs, and profiles are built as if read-only had never been active. The messages stay visible.
+- **Cancel (Discard)** - throws everything away. Session memories are purged and all messages in the window are automatically hidden from the AI so they can never be picked up by future extraction passes. This is the default consequence-free path.
+
+The "Delete messages" option in the chat context menu is suppressed while read-only is active to prevent message deletions from corrupting the hidden range. You can toggle read-only on and off multiple times in the same chat; each window is handled independently.
+
+**Using read-only with checkpoints and branches**: SillyTavern's checkpoint and branch features save the chat up to a specific message as a new chat file. Smart Memory's long-term memories are shared across all chats with the same character and will not roll back if you switch to a checkpoint or branch. If you plan to use checkpoints or branches to explore alternative story paths, enable read-only mode first. Smart Memory will warn you with a toast notification if you create a checkpoint or branch without read-only active.
 
 ### Memorize Chat
 
