@@ -29,6 +29,7 @@
  * saveArcs               - persists the arc array to chatMetadata
  * deleteArc              - removes a single arc by index
  * clearArcs              - empties all arcs for the current chat
+ * arcSimilarity          - returns {score, semantic} between two arc strings (cosine primary, Jaccard fallback)
  * extractArcs            - runs extraction against the conversation, deduplicates, and updates the arc list
  * injectArcs             - pushes active arcs into the prompt via setExtensionPrompt
  * loadArcSummaries       - returns the stored arc summary array for the current chat
@@ -53,12 +54,13 @@ import { parseArcOutput } from './parsers.js';
 import { loadSceneHistory } from './scenes.js';
 import { loadSessionMemories } from './session.js';
 import { smLog } from './logging.js';
+import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 
 // ---- Deduplication ------------------------------------------------------
 
 /**
  * Jaccard word-overlap similarity between two arc content strings.
- * Used to detect near-duplicate arcs with different phrasing.
+ * Retained as the fallback when embeddings are unavailable.
  * @param {string} a
  * @param {string} b
  * @returns {number} Similarity in [0, 1].
@@ -73,17 +75,57 @@ function arcJaccard(a, b) {
 }
 
 /**
- * Removes duplicate entries from an arc array, keeping the first occurrence
- * when two arcs exceed the similarity threshold.
- * @param {Array<{content: string}>} arcs
- * @param {number} threshold - Jaccard threshold above which arcs are considered duplicates.
- * @returns {Array<{content: string}>} Deduplicated arc array.
+ * Returns the semantic similarity between two arc strings.
+ * Uses cosine similarity on embeddings when available, falling back to Jaccard.
+ * Arc descriptions are full sentences with rich narrative content, making
+ * semantic similarity substantially more reliable than word overlap alone.
+ * @param {string} a
+ * @param {string} b
+ * @returns {Promise<{score: number, semantic: boolean}>}
  */
-function deduplicateArcs(arcs, threshold = 0.4) {
-  return arcs.filter(
-    (arc, idx) =>
-      !arcs.slice(0, idx).some((prev) => arcJaccard(arc.content, prev.content) >= threshold),
-  );
+async function arcSimilarity(a, b) {
+  const aKey = a.toLowerCase().trim();
+  const bKey = b.toLowerCase().trim();
+  const vectorMap = await getEmbeddingBatch([aKey, bKey]);
+  const aVec = vectorMap.get(aKey);
+  const bVec = vectorMap.get(bKey);
+  if (aVec && bVec) {
+    return { score: cosineSimilarity(aVec, bVec), semantic: true };
+  }
+  return { score: arcJaccard(a, b), semantic: false };
+}
+
+/**
+ * Returns true when two arc strings are similar enough to be considered
+ * duplicates. Cosine threshold 0.82 for semantic, 0.4 for Jaccard fallback.
+ * @param {string} a
+ * @param {string} b
+ * @returns {Promise<boolean>}
+ */
+async function arcIsDuplicate(a, b) {
+  const { score, semantic } = await arcSimilarity(a, b);
+  return score >= (semantic ? 0.82 : 0.4);
+}
+
+/**
+ * Removes duplicate entries from an arc array, keeping the first occurrence
+ * when two arcs are flagged as duplicates by arcIsDuplicate.
+ * @param {Array<{content: string}>} arcs
+ * @returns {Promise<Array<{content: string}>>} Deduplicated arc array.
+ */
+async function deduplicateArcs(arcs) {
+  const result = [];
+  for (const arc of arcs) {
+    let isDup = false;
+    for (const prev of result) {
+      if (await arcIsDuplicate(arc.content, prev.content)) {
+        isDup = true;
+        break;
+      }
+    }
+    if (!isDup) result.push(arc);
+  }
+  return result;
 }
 
 // ---- Storage ------------------------------------------------------------
@@ -123,7 +165,10 @@ export async function deleteArc(index, characterName = null) {
 
   if (arc.persistent && characterName) {
     const persistent = loadPersistentArcs(characterName);
-    const filtered = persistent.filter((p) => arcJaccard(p.content, arc.content) < 0.4);
+    const filtered = [];
+    for (const p of persistent) {
+      if (!(await arcIsDuplicate(p.content, arc.content))) filtered.push(p);
+    }
     if (filtered.length !== persistent.length) {
       savePersistentArcs(characterName, filtered);
     }
@@ -221,9 +266,17 @@ export async function mergePersistentArcs(characterName) {
   if (persistent.length === 0) return;
 
   const existing = loadArcs();
-  const toAdd = persistent.filter(
-    (p) => !existing.some((e) => arcJaccard(p.content, e.content) >= 0.4),
-  );
+  const toAdd = [];
+  for (const p of persistent) {
+    let found = false;
+    for (const e of existing) {
+      if (await arcIsDuplicate(p.content, e.content)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) toAdd.push(p);
+  }
   if (toAdd.length === 0) return;
 
   const merged = [...existing, ...toAdd.map((a) => ({ ...a, persistent: true }))];
@@ -244,7 +297,13 @@ export async function promoteArc(index, characterName) {
   await saveArcs(arcs);
 
   const persistent = loadPersistentArcs(characterName);
-  const already = persistent.some((p) => arcJaccard(p.content, arcs[index].content) >= 0.4);
+  let already = false;
+  for (const p of persistent) {
+    if (await arcIsDuplicate(p.content, arcs[index].content)) {
+      already = true;
+      break;
+    }
+  }
   if (!already) {
     persistent.push({
       content: arcs[index].content,
@@ -270,7 +329,10 @@ export async function demoteArc(index, characterName) {
   await saveArcs(arcs);
 
   const persistent = loadPersistentArcs(characterName);
-  const filtered = persistent.filter((p) => arcJaccard(p.content, content) < 0.4);
+  const filtered = [];
+  for (const p of persistent) {
+    if (!(await arcIsDuplicate(p.content, content))) filtered.push(p);
+  }
   if (filtered.length !== persistent.length) {
     savePersistentArcs(characterName, filtered);
   }
@@ -392,9 +454,11 @@ export async function extractArcs(messages, characterName = null) {
       if (persistentToRemove.length > 0) {
         let charPersistent = loadPersistentArcs(characterName);
         for (const resolved of persistentToRemove) {
-          charPersistent = charPersistent.filter(
-            (p) => arcJaccard(p.content, resolved.content) < 0.4,
-          );
+          const kept = [];
+          for (const p of charPersistent) {
+            if (!(await arcIsDuplicate(p.content, resolved.content))) kept.push(p);
+          }
+          charPersistent = kept;
         }
         savePersistentArcs(characterName, charPersistent);
       }
@@ -404,20 +468,28 @@ export async function extractArcs(messages, characterName = null) {
     let afterResolve = existing.filter((_, i) => !resolve.includes(i));
 
     // Clean up any duplicates that accumulated in storage from previous passes.
-    afterResolve = deduplicateArcs(afterResolve);
+    afterResolve = await deduplicateArcs(afterResolve);
 
     // Drop new arcs that are semantically redundant with what remains.
-    // 0.4 is intentionally lower than the scene dedup threshold (0.5) - arc
-    // content is longer narrative text where Jaccard overlap is naturally
-    // sparser, so a lower bar is needed to catch genuine paraphrases.
-    const ARC_DEDUP_THRESHOLD = 0.4;
-    const dedupedAdd = add.filter(
-      (newArc, idx) =>
-        !afterResolve.some((ex) => arcJaccard(newArc.content, ex.content) >= ARC_DEDUP_THRESHOLD) &&
-        !add
-          .slice(0, idx)
-          .some((prev) => arcJaccard(newArc.content, prev.content) >= ARC_DEDUP_THRESHOLD),
-    );
+    const dedupedAdd = [];
+    for (const newArc of add) {
+      let isDup = false;
+      for (const ex of afterResolve) {
+        if (await arcIsDuplicate(newArc.content, ex.content)) {
+          isDup = true;
+          break;
+        }
+      }
+      if (!isDup) {
+        for (const prev of dedupedAdd) {
+          if (await arcIsDuplicate(newArc.content, prev.content)) {
+            isDup = true;
+            break;
+          }
+        }
+      }
+      if (!isDup) dedupedAdd.push(newArc);
+    }
 
     const max = settings.arcs_max ?? 10;
     // slice(-max) keeps the most recent arcs when over the limit.

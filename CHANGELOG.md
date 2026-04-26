@@ -85,6 +85,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Arc dedup now uses semantic embeddings**: arc deduplication previously used
+  only Jaccard word overlap (threshold 0.4). Arc descriptions are full narrative
+  sentences where different phrasing can describe the same unresolved thread -
+  Jaccard misses these. Arc similarity now uses cosine similarity on embeddings
+  (threshold 0.82) with Jaccard as fallback, matching the scene and session
+  strategies. All arc operations (extraction, merge, promote, demote, delete)
+  use the same semantic check.
+
 - **Session dedup now uses semantic embeddings**: session memory deduplication
   previously used only a word-overlap ratio (intersection / max word count),
   which missed duplicate memories expressed with different phrasing. The
