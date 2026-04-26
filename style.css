@@ -1430,6 +1430,7 @@
 
 /* Read-only mode: hide the "Delete messages" context menu option while
    active so message deletions cannot shift the ghosting range index. */
-body.sm-read-only #option_delete_mes {
+body.sm-read-only #option_delete_mes,
+body.sm-read-only .mes_edit_delete {
   display: none !important;
 }
