@@ -85,6 +85,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Session dedup now uses semantic embeddings**: session memory deduplication
+  previously used only a word-overlap ratio (intersection / max word count),
+  which missed duplicate memories expressed with different phrasing. The
+  primary check is now cosine similarity on embeddings (threshold 0.82),
+  matching the scene dedup strategy. The word-overlap ratio is retained as a
+  fallback when embeddings are unavailable. All texts are batched in a single
+  embedding call so the overhead per extraction pass remains one request.
+
+- **Session entity registry renamed from `entities` to `sessionEntities`**:
+  the chat-scoped entity registry was stored as `chatMetadata.smartMemory.entities`,
+  which was visually ambiguous next to the character-level `entities` field in
+  extension_settings. It is now stored as `sessionEntities` to match the
+  `sessionMemories` naming convention. Existing chats are migrated automatically
+  on load (schema version 4 -> 5).
+
+- **Confirmation dialogs now use SillyTavern's popup system**: all destructive
+  action dialogs (Clear memories, Fresh Start, Clear session/scenes/arcs, Memorize
+  Chat, Clear chat context, Read-only commit/discard) previously used the browser's
+  native `confirm()`, which appears outside ST's overlay stack and ignores ST's
+  theme. All dialogs now use `callGenericPopup` so they are styled consistently
+  with the rest of ST's UI.
+
 - **Unified injection cache leaked across chat changes**: switching chats while
   unified injection was enabled could carry stale tier content from the previous
   chat into the new one. The content cache is now cleared at the start of every

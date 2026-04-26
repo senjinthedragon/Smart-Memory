@@ -57,7 +57,12 @@ import {
 } from './graph-migration.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import { parseSessionOutput } from './parsers.js';
-import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
+import {
+  batchVerify,
+  getEmbeddingBatch,
+  cosineSimilarity,
+  getHardwareProfile,
+} from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
@@ -208,34 +213,53 @@ export async function purgeSessionMemoriesSince(since) {
  * Merges new session memories into the existing set, skipping near-duplicates
  * and trimming to the configured maximum.
  *
- * Uses a word-overlap ratio: if the intersection of words between a new item
- * and any existing item exceeds 65% of the larger set's word count, the new
- * item is treated as a duplicate. This threshold is slightly looser than
- * long-term (70%) since session details tend to be more specific and verbose.
- *
- * When over the limit, the oldest entries are dropped from the front.
+ * Primary: cosine similarity on embeddings (threshold 0.82), matching the
+ * scene dedup strategy. Falls back to a word-overlap ratio when embeddings
+ * are unavailable: intersection / max(|A|, |B|) > 0.65. The asymmetric
+ * denominator avoids short strings over-matching against long ones.
  *
  * @param {Array} existing - Currently stored session memories.
  * @param {Array} incoming - Newly extracted items to merge in.
  * @param {number} max - Hard cap on total session memories.
- * @returns {Array} The merged array.
+ * @returns {Promise<Array>} The merged array.
  */
-function deduplicateSession(existing, incoming, max) {
+async function deduplicateSession(existing, incoming, max) {
   const merged = [...existing];
+
+  // Batch all texts up front so comparisons are O(1) per pair.
+  const allTexts = [
+    ...existing.map((m) => m.content.toLowerCase().trim()),
+    ...incoming.map((m) => m.content.toLowerCase().trim()),
+  ];
+  let vectorMap = null;
+  try {
+    vectorMap = await getEmbeddingBatch(allTexts);
+  } catch {
+    // embedding service unavailable - fall through to word-overlap
+  }
+
   for (const mem of incoming) {
-    const words = new Set(mem.content.toLowerCase().split(/\s+/));
+    const memKey = mem.content.toLowerCase().trim();
+    const memVec = vectorMap?.get(memKey);
+
     const isDuplicate = merged.some((ex) => {
       if (ex.type !== mem.type) return false;
+
+      if (memVec) {
+        const exVec = vectorMap.get(ex.content.toLowerCase().trim());
+        if (exVec) return cosineSimilarity(memVec, exVec) > 0.82;
+      }
+
+      // Word-overlap fallback.
+      const words = new Set(mem.content.toLowerCase().split(/\s+/));
       const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
       const intersection = [...words].filter((w) => exWords.has(w)).length;
-      // Normalise against the larger set to avoid short strings
-      // matching too aggressively against long ones.
       return intersection / Math.max(words.size, exWords.size) > 0.65;
     });
     if (!isDuplicate) merged.push(mem);
   }
-  // When over the cap, drop the least valuable entries first:
-  // sort by expiration/importance/keyword recurrence/age, remove from the tail.
+
+  // When over the cap, drop the least valuable entries first.
   if (merged.length > max) {
     const prioritized = prioritizeMemories(merged);
     merged.splice(0, merged.length, ...prioritized);
@@ -301,7 +325,7 @@ export async function extractSessionMemories(recentMessages) {
     if (incoming.length === 0) return 0;
 
     const max = settings.session_max_memories ?? 30;
-    const merged = deduplicateSession(existing, incoming, max);
+    const merged = await deduplicateSession(existing, incoming, max);
 
     // Apply supersession links. For each candidate that supersedes an existing
     // memory: mark the old memory as retired (superseded_by + valid_to) and

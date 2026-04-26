@@ -131,7 +131,7 @@ export function saveCharacterEntityRegistry(characterName, entities) {
  */
 export function loadSessionEntityRegistry() {
   const context = getContext();
-  return context.chatMetadata?.[META_KEY]?.entities ?? [];
+  return context.chatMetadata?.[META_KEY]?.sessionEntities ?? [];
 }
 
 /**
@@ -145,7 +145,7 @@ export async function saveSessionEntityRegistry(entities) {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-  context.chatMetadata[META_KEY].entities = entities;
+  context.chatMetadata[META_KEY].sessionEntities = entities;
   await context.saveMetadata();
 }
 
@@ -157,7 +157,7 @@ export async function saveSessionEntityRegistry(entities) {
 export async function clearSessionEntityRegistry() {
   const context = getContext();
   if (context.chatMetadata?.[META_KEY]) {
-    context.chatMetadata[META_KEY].entities = [];
+    context.chatMetadata[META_KEY].sessionEntities = [];
     await context.saveMetadata();
   }
 }
@@ -644,6 +644,7 @@ function migrateCharacter_v1(charData) {
  */
 function migrateChat_v1(chatMeta) {
   const sessionMemories = (chatMeta.sessionMemories ?? []).map(applyGraphDefaults);
+  // Write to entities for now; migrateChat_v5 renames entities -> sessionEntities.
   const entities = Array.isArray(chatMeta.entities) ? chatMeta.entities : [];
   return { ...chatMeta, sessionMemories, entities };
 }
@@ -707,6 +708,28 @@ function migrateCharacter_v4(charData) {
   return { ...charData, persistent_arcs: charData.persistent_arcs ?? [] };
 }
 
+/**
+ * CHAT migration: version 4 -> 5
+ *
+ * Renames the session-scoped entity registry from `entities` to
+ * `sessionEntities` to match the naming convention used by sessionMemories
+ * and to distinguish it clearly from the character-level `entities` field
+ * in extension_settings.
+ *
+ * @param {Object} chatMeta - chatMetadata[META_KEY] block.
+ * @returns {Object} Updated chat meta block with schema_version NOT yet set.
+ */
+function migrateChat_v5(chatMeta) {
+  const sessionEntities = Array.isArray(chatMeta.sessionEntities)
+    ? chatMeta.sessionEntities
+    : Array.isArray(chatMeta.entities)
+      ? chatMeta.entities
+      : [];
+  const updated = { ...chatMeta, sessionEntities };
+  delete updated.entities;
+  return updated;
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn | { fn, deletePaths }> - add new entries here when
 // SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
@@ -723,6 +746,8 @@ const CHAT_MIGRATIONS = new Map([
   [2, migrateChat_v2],
   // v3 drops the old flat profiles cache - regenerable, not user data.
   [3, { fn: migrateChat_v3, deletePaths: ['profiles'] }],
+  // v5 renames entities -> sessionEntities.
+  [5, { fn: migrateChat_v5, deletePaths: ['entities'] }],
 ]);
 
 // ---- Migration runner -------------------------------------------------------

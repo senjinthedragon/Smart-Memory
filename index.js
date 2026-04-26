@@ -3505,10 +3505,11 @@ function bindSettingsUI() {
       const hasWindow = startIndex !== null && endIndex >= startIndex;
 
       const commit = hasWindow
-        ? confirm(
+        ? await callGenericPopup(
             'Commit memories from this read-only session?\n\n' +
               'OK - Keep session memories and extract long-term memories from this window.\n' +
               'Cancel - Discard all memories and hide messages from this window.',
+            POPUP_TYPE.CONFIRM,
           )
         : false;
 
@@ -3565,11 +3566,12 @@ function bindSettingsUI() {
     }
   });
 
-  $('#sm_clear_memories').on('click', function () {
+  $('#sm_clear_memories').on('click', async function () {
     if (isCatchUpRunning()) return;
     const characterName = getSelectedCharacterName();
     if (!characterName) return;
-    if (!confirm(`Clear all memories for "${characterName}"?`)) return;
+    if (!(await callGenericPopup(`Clear all memories for "${characterName}"?`, POPUP_TYPE.CONFIRM)))
+      return;
     clearCharacterMemories(characterName);
     clearCanon(characterName);
     saveSettingsDebounced();
@@ -3672,7 +3674,8 @@ function bindSettingsUI() {
 
   $('#sm_clear_session').on('click', async function () {
     if (isCatchUpRunning()) return;
-    if (!confirm('Clear all session memories for this chat?')) return;
+    if (!(await callGenericPopup('Clear all session memories for this chat?', POPUP_TYPE.CONFIRM)))
+      return;
     await clearSessionMemories();
     await clearSessionEntityRegistry();
     injectSessionMemories();
@@ -3772,7 +3775,8 @@ function bindSettingsUI() {
 
   $('#sm_clear_scenes').on('click', async function () {
     if (isCatchUpRunning()) return;
-    if (!confirm('Clear all scene history for this chat?')) return;
+    if (!(await callGenericPopup('Clear all scene history for this chat?', POPUP_TYPE.CONFIRM)))
+      return;
     await clearSceneHistory();
     injectSceneHistory();
     updateScenesUI();
@@ -3851,7 +3855,8 @@ function bindSettingsUI() {
 
   $('#sm_clear_arcs').on('click', async function () {
     if (isCatchUpRunning()) return;
-    if (!confirm('Clear all story arcs for this chat?')) return;
+    if (!(await callGenericPopup('Clear all story arcs for this chat?', POPUP_TYPE.CONFIRM)))
+      return;
     await clearArcs();
     injectArcs();
     updateArcsUI();
@@ -3935,9 +3940,10 @@ function bindSettingsUI() {
     );
     if (existingMemories) {
       if (
-        !confirm(
+        !(await callGenericPopup(
           'Memories already exist for one or more characters. Running Memorize Chat again may add near-duplicate entries on top of existing ones.\n\nContinue?',
-        )
+          POPUP_TYPE.CONFIRM,
+        ))
       )
         return;
     }
@@ -4238,9 +4244,10 @@ function bindSettingsUI() {
   $('#sm_clear_chat_context').on('click', async function () {
     if (isCatchUpRunning()) return;
     if (
-      !confirm(
+      !(await callGenericPopup(
         'Clear all Smart Memory context for this chat?\n\nThis will erase the summary, session memories, scene history, and story arcs. Long-term memories are not affected.',
-      )
+        POPUP_TYPE.CONFIRM,
+      ))
     )
       return;
 
@@ -4287,9 +4294,10 @@ function bindSettingsUI() {
     const characterName = getSelectedCharacterName();
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
-      !confirm(
+      !(await callGenericPopup(
         `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nThis cannot be undone. Continue?`,
-      )
+        POPUP_TYPE.CONFIRM,
+      ))
     )
       return;
 
