@@ -29,6 +29,20 @@
   margin-bottom: 8px;
 }
 
+/* ── Button rows ─────────────────────────────────────────────────────────── */
+
+/* Flex row where every direct .menu_button child stretches to an equal share
+ * of the available width. Single buttons go full-width; two buttons are 50/50;
+ * three buttons are 33/33/33, etc. */
+#smart_memory_settings .sm-btn-row {
+  display: flex;
+  gap: 6px;
+}
+
+#smart_memory_settings .sm-btn-row > .menu_button {
+  flex: 1;
+}
+
 /* ── Sub-section titles ──────────────────────────────────────────────────── */
 
 /*

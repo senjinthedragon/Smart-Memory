@@ -33,8 +33,8 @@
 
       <!-- Memorize / reset buttons -->
       <div class="sm-block" style="display: flex; flex-direction: column; gap: 6px">
-        <div style="display: flex; gap: 6px; align-items: center">
-          <button id="sm_catch_up" class="menu_button menu_button_icon" style="flex: 1">
+        <div class="sm-btn-row" style="align-items: center">
+          <button id="sm_catch_up" class="menu_button menu_button_icon">
             <i class="fa-solid fa-forward-fast"></i>
             <span>
               Memorize Chat
@@ -54,8 +54,8 @@
             <span>Cancel</span>
           </button>
         </div>
-        <div style="display: flex; gap: 6px">
-          <button id="sm_clear_chat_context" class="menu_button menu_button_icon" style="flex: 1">
+        <div class="sm-btn-row">
+          <button id="sm_clear_chat_context" class="menu_button menu_button_icon">
             <i class="fa-solid fa-broom"></i>
             <span>
               Forget This Chat
@@ -66,7 +66,7 @@
               >
             </span>
           </button>
-          <button id="sm_fresh_start_button" class="menu_button menu_button_icon" style="flex: 1">
+          <button id="sm_fresh_start_button" class="menu_button menu_button_icon">
             <i class="fa-solid fa-rotate-left"></i>
             <span>
               Fresh Start
@@ -146,7 +146,7 @@
         <div class="sm-section-content">
           <p class="sm-section-title">Memories for Current Character</p>
           <div id="sm_memories_list" class="sm_memories_list"></div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+          <div class="sm-block sm-btn-row" style="margin-top: 6px">
             <button id="sm_extract_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
@@ -270,7 +270,7 @@
         <div class="sm-section-content">
           <p class="sm-section-title">Memories for Current Session</p>
           <div id="sm_session_list" class="sm_memories_list"></div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+          <div class="sm-block sm-btn-row" style="margin-top: 6px">
             <button id="sm_extract_session_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
@@ -406,7 +406,7 @@
               placeholder="No summary yet. One will be generated automatically when the context threshold is reached."
             ></textarea>
           </div>
-          <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap">
+          <div class="sm-block sm-btn-row">
             <button id="sm_summarize_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-brain"></i>
               <span>Summarize Now</span>
@@ -515,7 +515,7 @@
           <div id="sm_scenes_list" class="sm_scenes_list">
             <div class="sm_no_char">No scenes recorded yet.</div>
           </div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+          <div class="sm-block sm-btn-row" style="margin-top: 6px">
             <button id="sm_extract_scenes_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
@@ -626,7 +626,7 @@
           <div id="sm_arcs_list" class="sm_arcs_list">
             <div class="sm_no_char">No open story threads.</div>
           </div>
-          <div class="sm-block" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+          <div class="sm-block sm-btn-row" style="margin-top: 6px">
             <button id="sm_extract_arcs_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>
@@ -878,7 +878,7 @@
               placeholder="No canon yet. Generate one below once you have at least one resolved arc summary."
             ></textarea>
           </div>
-          <div class="sm-block" style="display: flex; gap: 6px; flex-wrap: wrap">
+          <div class="sm-block sm-btn-row">
             <button
               id="sm_generate_canon"
               class="menu_button menu_button_icon"
@@ -969,7 +969,7 @@
           <div id="sm_profiles_display" class="sm_profiles_display">
             <span class="sm-muted">No profiles generated yet.</span>
           </div>
-          <div class="sm-block" style="margin-top: 4px">
+          <div class="sm-block sm-btn-row" style="margin-top: 4px">
             <button id="sm_profiles_regenerate" class="menu_button menu_button_icon">
               <i class="fa-solid fa-rotate"></i>
               <span>Regenerate Profiles Now</span>
@@ -1070,7 +1070,7 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block" style="margin-top: 4px">
+          <div class="sm-block sm-btn-row" style="margin-top: 4px">
             <button id="sm_recap_now" class="menu_button menu_button_icon">
               <i class="fa-solid fa-clock-rotate-left"></i>
               <span>Generate Recap Now</span>
@@ -1106,7 +1106,7 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-row sm-row-right" style="margin-bottom: 6px">
+          <div class="sm-block sm-btn-row" style="margin-bottom: 6px">
             <button
               id="sm_open_graph_btn"
               class="menu_button"
@@ -1133,7 +1133,7 @@
           >
         </summary>
         <div class="sm-section-content">
-          <div class="sm-block">
+          <div class="sm-block sm-btn-row">
             <button id="sm_check_continuity" class="menu_button menu_button_icon">
               <i class="fa-solid fa-scale-balanced"></i>
               <span>Check Last Response</span>
@@ -1362,13 +1362,6 @@
               </span>
             </label>
           </div>
-          <div class="sm-block" id="sm_embedding_test_row">
-            <button id="sm_embedding_test" class="menu_button menu_button_icon">
-              <i class="fa-solid fa-plug"></i>
-              <span>Test connection</span>
-            </button>
-            <span id="sm_embedding_test_result"></span>
-          </div>
           <div id="sm_embedding_config">
             <div class="sm-block">
               <label>
@@ -1410,6 +1403,15 @@
                   >Keep model in memory</span
                 >
               </label>
+            </div>
+            <div class="sm-block" id="sm_embedding_test_row">
+              <div class="sm-btn-row">
+                <button id="sm_embedding_test" class="menu_button menu_button_icon">
+                  <i class="fa-solid fa-plug"></i>
+                  <span>Test connection</span>
+                </button>
+              </div>
+              <span id="sm_embedding_test_result"></span>
             </div>
             <div class="sm-block">
               <i
@@ -1465,7 +1467,7 @@
       <hr class="sysHR" />
 
       <!-- About -->
-      <div class="sm-block" style="display: flex; justify-content: center">
+      <div class="sm-block sm-btn-row">
         <button id="sm_about" class="menu_button menu_button_icon">
           <i class="fa-solid fa-circle-info"></i>
           <span>About</span>
