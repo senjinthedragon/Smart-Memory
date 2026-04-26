@@ -84,6 +84,7 @@ import {
   setFreshStart,
   getReadOnlyStartIndex,
   setReadOnlyStartIndex,
+  getReadOnlyStartTime,
 } from './longterm.js';
 import { hideChatMessageRange } from '../../../../scripts/chats.js';
 import { updateLastActive, getAwayHours, generateRecap, displayRecap } from './recap.js';
@@ -94,6 +95,7 @@ import {
   loadSessionMemories,
   saveSessionMemories,
   clearSessionMemories,
+  purgeSessionMemoriesSince,
 } from './session.js';
 import {
   processSceneBreak,
@@ -731,7 +733,7 @@ async function onCharacterMessageRendered() {
         settings.arcs_inject_budget = budgets.arcs;
         settings.profiles_inject_budget = budgets.profiles;
 
-        if (settings.session_enabled && sessionWindow.length > 0) {
+        if (settings.session_enabled && sessionWindow.length > 0 && !isFreshStart()) {
           // Snapshot existing memory ids before extraction so we can identify
           // which memories are new and link them to the current scene.
           const priorSessionIds = new Set(
@@ -1373,7 +1375,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           settings.profiles_inject_budget = budgets.profiles;
 
           // Session extraction is chat-wide - all characters share one session store.
-          if (settings.session_enabled && sessionWindow.length > 0) {
+          if (settings.session_enabled && sessionWindow.length > 0 && !isFreshStart()) {
             const priorSessionIds = new Set(
               loadSessionMemories()
                 .map((m) => m.id)
@@ -3409,11 +3411,21 @@ function bindSettingsUI() {
 
     if (val) {
       // Record where this read-only window starts so we know which messages
-      // to ghost if the user disables it later.
+      // to ghost if the user disables it later. setReadOnlyStartIndex also
+      // records the current timestamp for session memory purging.
       const context = getContext();
       await setReadOnlyStartIndex(context.chat?.length ?? 0);
       $('body').addClass('sm-read-only');
     } else {
+      // Purge any session memories that accumulated during the read-only window
+      // before they can feed into profiles or the entity registry.
+      const startTime = getReadOnlyStartTime();
+      if (startTime !== null) {
+        await purgeSessionMemoriesSince(startTime).catch((err) =>
+          console.error('[SmartMemory] Session memory purge failed:', err),
+        );
+      }
+
       // Ghost all messages generated during the read-only window so they
       // are excluded from context and future extraction passes.
       const startIndex = getReadOnlyStartIndex();
@@ -3427,6 +3439,8 @@ function bindSettingsUI() {
     }
 
     await injectMemories(getSelectedCharacterName());
+    await injectSessionMemories();
+    updateSessionUI();
   });
 
   $('#sm_extract_now').on('click', async function () {
@@ -3539,6 +3553,7 @@ function bindSettingsUI() {
 
   $('#sm_extract_session_now').on('click', async function () {
     if (isCatchUpRunning()) return;
+    if (isFreshStart()) return;
     $(this).prop('disabled', true);
     setStatusMessage('Extracting session memories...');
     try {
@@ -3914,7 +3929,7 @@ function bindSettingsUI() {
             }
           }
         }
-        if (settings.session_enabled) {
+        if (settings.session_enabled && !isFreshStart()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - extracting session)`);
           await extractSessionMemories(chunk).catch((err) => {
             console.error('[SmartMemory] Catch-up session extraction error (chunk):', err);
@@ -4589,8 +4604,8 @@ jQuery(async function () {
           if (!isFreshStart()) {
             await extractAndStoreMemories(characterName, recentLongTerm);
             await extractArcs(recentArcs);
+            await extractSessionMemories(recentSession);
           }
-          await extractSessionMemories(recentSession);
           await injectMemories(characterName);
           await injectSessionMemories();
           injectArcs();

@@ -85,6 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Session memories leaked from read-only sessions**: session extraction was
+  not gated by read-only mode, so memories extracted during a read-only window
+  were accumulating in session memory and feeding into character profiles and
+  the entity registry. Session extraction is now suppressed while read-only
+  mode is active (matching the existing long-term, arc, and profile gates).
+  When read-only mode is disabled, any session memories that accumulated during
+  the window (identified by timestamp) are purged before they can propagate
+  further. The session entity registry is repaired in the same pass.
+
 - **Read-only mode ghosts messages on disable**: when read-only mode is turned
   off, all messages generated during that window are automatically marked as
   hidden (`is_system`) so they are excluded from context and can never be

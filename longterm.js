@@ -34,7 +34,8 @@
  * isFreshStart             - returns whether the current chat has fresh-start enabled
  * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
  * getReadOnlyStartIndex    - returns the chat index at which read-only mode was last enabled
- * setReadOnlyStartIndex    - stores or clears the read-only window start index
+ * setReadOnlyStartIndex    - stores or clears the read-only window start index (also stores/clears readOnlyStartTime)
+ * getReadOnlyStartTime     - returns the Unix ms timestamp at which read-only mode was last enabled
  */
 
 import {
@@ -781,7 +782,9 @@ export function getReadOnlyStartIndex() {
 
 /**
  * Stores or clears the read-only window start index.
- * Pass a number to record where the current window begins; pass null to clear.
+ * When enabling (index is a number), also records the current Unix ms timestamp
+ * so session memories accumulated during the window can be purged by time on disable.
+ * When disabling (index is null), clears both the index and the timestamp.
  * @param {number|null} index
  */
 export async function setReadOnlyStartIndex(index) {
@@ -790,8 +793,22 @@ export async function setReadOnlyStartIndex(index) {
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   if (index === null) {
     delete context.chatMetadata[META_KEY].readOnlyStartIndex;
+    delete context.chatMetadata[META_KEY].readOnlyStartTime;
   } else {
     context.chatMetadata[META_KEY].readOnlyStartIndex = index;
+    context.chatMetadata[META_KEY].readOnlyStartTime = Date.now();
   }
   await context.saveMetadata();
+}
+
+/**
+ * Returns the Unix ms timestamp at which read-only mode was last enabled,
+ * or null if not set. Used to purge session memories that leaked in during
+ * a read-only window when the mode is disabled.
+ * @returns {number|null}
+ */
+export function getReadOnlyStartTime() {
+  const context = getContext();
+  const val = context.chatMetadata?.[META_KEY]?.readOnlyStartTime;
+  return typeof val === 'number' ? val : null;
 }

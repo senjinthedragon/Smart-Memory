@@ -28,6 +28,7 @@
  * loadSessionMemories        - returns the current session memory array
  * saveSessionMemories        - persists the session memory array to chatMetadata
  * clearSessionMemories       - empties session memories for the current chat
+ * purgeSessionMemoriesSince  - deletes all session memories with ts >= a given timestamp and repairs the entity registry
  * extractSessionMemories     - runs extraction against recent messages and merges results
  * consolidateSessionMemories - evaluates unprocessed entries against the consolidated base per type
  * injectSessionMemories      - pushes session memories into the prompt via setExtensionPrompt
@@ -169,6 +170,36 @@ export async function clearSessionMemories() {
     context.chatMetadata[META_KEY].sessionMemories = [];
     await context.saveMetadata();
   }
+}
+
+/**
+ * Removes all session memories whose ts field is >= the given timestamp,
+ * then repairs the session entity registry to remove stale memory_ids.
+ *
+ * Used when read-only mode is disabled to purge memories that were extracted
+ * during a read-only window before they can contaminate profiles or the entity
+ * registry. Memories without a ts field are treated as pre-existing and kept.
+ *
+ * @param {number} since - Unix ms timestamp. Memories at or after this time are deleted.
+ * @returns {Promise<number>} Number of memories removed.
+ */
+export async function purgeSessionMemoriesSince(since) {
+  const all = loadSessionMemories();
+  const kept = all.filter((m) => typeof m.ts !== 'number' || m.ts < since);
+  const removed = all.length - kept.length;
+  if (removed === 0) return 0;
+
+  // Repair entity registry - reconcileEntityRegistry prunes stale memory_ids
+  // left behind by the deleted memories and re-links by name match.
+  const entityRegistry = loadSessionEntityRegistry();
+  if (entityRegistry.length > 0) {
+    reconcileEntityRegistry(entityRegistry, kept);
+    await saveSessionEntityRegistry(entityRegistry);
+  }
+
+  await saveSessionMemories(kept);
+  smLog(`[SmartMemory] Purged ${removed} session memories from read-only window.`);
+  return removed;
 }
 
 // ---- Parsing ------------------------------------------------------------
