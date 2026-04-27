@@ -83,7 +83,7 @@ import {
   saveSessionEntityRegistry,
   setEntityType,
   deleteEntityById,
-  mergeEntitiesByName,
+  mergeEntitiesById,
 } from './graph-migration.js';
 import { getUnifiedTierBreakdown } from './unified-inject.js';
 import { hasEmbeddingFailed } from './embeddings.js';
@@ -985,16 +985,17 @@ export function updateEntityPanel(characterName) {
       e.stopPropagation();
       $panel.find('.sm_entity_type_picker').remove();
 
-      const otherNames = entities.filter((en) => en.id !== entity.id).map((en) => en.name);
-      if (otherNames.length === 0) return;
+      const otherEntities = entities.filter((en) => en.id !== entity.id);
+      if (otherEntities.length === 0) return;
 
       const $picker = $('<div class="sm_entity_type_picker">');
       $picker.append(
         $('<div style="font-size:0.75em;opacity:0.6;padding:2px 8px 4px;">Merge into:</div>'),
       );
-      for (const targetName of otherNames) {
-        const safeTarget = $('<div>').text(targetName).html();
-        const $opt = $(`<div class="sm_entity_type_option">${safeTarget}</div>`);
+      for (const target of otherEntities) {
+        const label = target.name + (target.type !== 'unknown' ? ` (${target.type})` : '');
+        const safeLabel = $('<div>').text(label).html();
+        const $opt = $(`<div class="sm_entity_type_option">${safeLabel}</div>`);
         $opt.on('click', async (ev) => {
           ev.stopPropagation();
           $picker.remove();
@@ -1002,7 +1003,7 @@ export function updateEntityPanel(characterName) {
           const ltMems = characterName ? loadCharacterMemories(characterName) : [];
           const sessReg = loadSessionEntityRegistry();
           const sessMems = loadSessionMemories();
-          mergeEntitiesByName(entity.name, targetName, ltReg, ltMems, sessReg, sessMems);
+          mergeEntitiesById(entity.id, target.id, ltReg, ltMems, sessReg, sessMems);
           if (characterName) {
             saveCharacterEntityRegistry(characterName, ltReg);
             saveCharacterMemories(characterName, ltMems);

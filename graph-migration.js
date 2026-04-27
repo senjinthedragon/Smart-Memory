@@ -522,6 +522,35 @@ function mergeInRegistry(sourceId, targetId, registry, memories) {
  * @param {Array<Object>} sessionRegistry  - Session entity registry (mutated).
  * @param {Array<Object>} sessionMemories  - Session memory array (mutated).
  */
+
+/**
+ * Merges a source entity into a target entity across both registries, identified
+ * by their IDs rather than names. Safe to use when two entities share the same
+ * name (which would cause mergeEntitiesByName to return early).
+ *
+ * @param {string} sourceId - ID of the entity to remove.
+ * @param {string} targetId - ID of the entity to keep.
+ * @param {Array<Object>} ltRegistry
+ * @param {Array<Object>} ltMemories
+ * @param {Array<Object>} sessionRegistry
+ * @param {Array<Object>} sessionMemories
+ */
+export function mergeEntitiesById(
+  sourceId,
+  targetId,
+  ltRegistry,
+  ltMemories,
+  sessionRegistry,
+  sessionMemories,
+) {
+  if (sourceId === targetId) return;
+  for (const [registry, memories] of [
+    [ltRegistry, ltMemories],
+    [sessionRegistry, sessionMemories],
+  ]) {
+    mergeInRegistry(sourceId, targetId, registry, memories);
+  }
+}
 export function mergeEntitiesByName(
   sourceName,
   targetName,
