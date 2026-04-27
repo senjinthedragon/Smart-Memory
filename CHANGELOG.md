@@ -423,6 +423,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entity's name and aliases into the target, rewriting memory refs, and
   removing the source from its registry.
 
+- **Model-confirmed supersession (method B)**: patterns alone cannot cover every
+  way a fact can change in natural language ("confiscated", "hijacked",
+  "embezzled", etc.). After pattern matching, any candidate that scored above
+  the same-topic similarity threshold against an existing memory but had no
+  pattern match is now sent to a narrow binary model prompt ("UPDATE or
+  INDEPENDENT?"). The model makes the semantic judgment with minimal context -
+  two sentences in, one word out - catching supersessions that patterns miss.
+  B runs sequentially after the embedding pass and only fires when a suspicious
+  pair exists; quiet extraction passes add zero extra model calls. Patterns
+  remain as a no-cost first pass so B is not called for cases the patterns
+  already resolve. Tested against five change categories (relationship, belief,
+  physical, possession, allegiance) with all passing.
+
 - **Supersession rarely firing for evolved facts**: two separate gaps prevented
   supersession from working in practice. First, the extraction prompts told the
   model not to duplicate existing memories but gave no guidance on how to

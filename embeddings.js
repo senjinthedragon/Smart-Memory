@@ -33,7 +33,8 @@
  * getEmbeddingBatch      - fetches vectors for multiple texts in one API call
  * cosineSimilarity       - re-exported from similarity.js for callers that import here
  * batchVerify            - compares candidates against existing memories; returns
- *                          passed (new), superseded (state-change updates), and
+ *                          passed (new), superseded (pattern-confirmed updates),
+ *                          uncertain (same-topic pairs for model confirmation), and
  *                          rejected (duplicates)
  * clearEmbeddingCache    - clears the in-session cache (call on chat change)
  * hasEmbeddingFailed     - returns true when an embedding call has failed this session
@@ -202,20 +203,25 @@ export function getHardwareProfile() {
  *
  * @param {Array<{content: string, type: string, id?: string}>} candidates
  * @param {Array<{content: string, type: string, id?: string}>} existing
- * @returns {Promise<{passed: Set<string>, superseded: Map<string, string>, confirmed: Set<string>, semantic: boolean}>}
+ * @returns {Promise<{passed: Set<string>, superseded: Map<string, string>, confirmed: Set<string>, uncertain: Array, semantic: boolean}>}
  *   passed     - Set of candidate content strings (lowercase) that are new
  *   superseded - Map from candidate content string to the id of the existing
  *                memory it replaces (only present when ex.id is available)
  *   confirmed  - Set of existing memory ids that were re-extracted this pass
  *                (duplicate candidate matched them, confirming they are still true)
+ *   uncertain  - Pairs that scored above the same-topic threshold but had no
+ *                state-change pattern; the caller should run a model confirmation
+ *                call (method B) for each before deciding
+ *                Each entry: { candText, candObj, existingId, existingContent, score }
  *   semantic   - true if cosine similarity was used, false if Jaccard
  */
 export async function batchVerify(candidates, existing) {
   const passed = new Set();
   const superseded = new Map(); // candContent -> existingId
   const confirmed = new Set(); // existingId -> confirmed this extraction pass
+  const uncertain = []; // pairs for model confirmation (B)
   if (!candidates || candidates.length === 0)
-    return { passed, superseded, confirmed, semantic: false };
+    return { passed, superseded, confirmed, uncertain, semantic: false };
 
   // Embed all unique texts in one call.
   const allTexts = [
@@ -248,6 +254,11 @@ export async function batchVerify(candidates, existing) {
     let confirmedId = null; // id of the existing memory being confirmed by this duplicate
     let bestSupersessionScore = 0;
     let bestSupersessionId = null;
+    // Best same-type pair above the same-topic threshold that had no pattern match.
+    // Collected so the caller can run a model confirmation call (B) if needed.
+    let bestUncertainScore = 0;
+    let bestUncertainId = null;
+    let bestUncertainContent = null;
 
     for (const ex of existing) {
       const exText = String(ex.content || '')
@@ -295,20 +306,31 @@ export async function batchVerify(candidates, existing) {
       if (score >= effectiveDupThreshold) {
         // High similarity: would normally be a duplicate. If the candidate
         // contains a state-change marker it is superseding this fact instead.
-        if (isSameType && candHasStateChange && ex.id && score > bestSupersessionScore) {
-          bestSupersessionScore = score;
-          bestSupersessionId = ex.id;
+        // Without a pattern, mark as uncertain so B can make the call.
+        if (isSameType && ex.id) {
+          if (candHasStateChange && score > bestSupersessionScore) {
+            bestSupersessionScore = score;
+            bestSupersessionId = ex.id;
+          } else if (!candHasStateChange && score > bestUncertainScore) {
+            bestUncertainScore = score;
+            bestUncertainId = ex.id;
+            bestUncertainContent = ex.content;
+          }
         } else {
           isDuplicate = true;
           confirmedId = ex.id ?? null;
           break;
         }
-      } else if (isSameType && score >= sameTopicThreshold && candHasStateChange && ex.id) {
-        // Medium similarity on same topic + state-change marker: likely supersession
-        // even though the wording has changed enough that it didn't hit the dup threshold.
-        if (score > bestSupersessionScore) {
+      } else if (isSameType && score >= sameTopicThreshold && ex.id) {
+        if (candHasStateChange && score > bestSupersessionScore) {
+          // Medium similarity on same topic + state-change marker: likely supersession.
           bestSupersessionScore = score;
           bestSupersessionId = ex.id;
+        } else if (!candHasStateChange && score > bestUncertainScore) {
+          // Same topic, no pattern - let B decide.
+          bestUncertainScore = score;
+          bestUncertainId = ex.id;
+          bestUncertainContent = ex.content;
         }
       }
     }
@@ -320,15 +342,25 @@ export async function batchVerify(candidates, existing) {
     }
 
     if (bestSupersessionId !== null) {
-      // Supersession: candidate replaces an existing memory.
+      // Pattern confirmed supersession.
       superseded.set(candText, bestSupersessionId);
-      passed.add(candText); // still added to the store, just linked
+      passed.add(candText);
     } else {
       passed.add(candText);
+      // Queue for model confirmation if there was a same-topic pair with no pattern.
+      if (bestUncertainId !== null) {
+        uncertain.push({
+          candText,
+          candObj: cand,
+          existingId: bestUncertainId,
+          existingContent: bestUncertainContent,
+          score: bestUncertainScore,
+        });
+      }
     }
   }
 
-  return { passed, superseded, confirmed, semantic: anyEmbeddings };
+  return { passed, superseded, confirmed, uncertain, semantic: anyEmbeddings };
 }
 
 /**

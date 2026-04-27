@@ -60,7 +60,11 @@ import {
   resolveEntityNames,
   reconcileEntityRegistry,
 } from './graph-migration.js';
-import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
+import {
+  buildExtractionPrompt,
+  buildLongtermConsolidationPrompt,
+  buildSupersessionConfirmPrompt,
+} from './prompts.js';
 import { parseExtractionOutput } from './parsers.js';
 import {
   prioritizeMemories,
@@ -134,7 +138,36 @@ async function verifyLongtermCandidates(candidates, existing) {
   if (filtered.length === 0) return { verified: [], superseded: new Map(), confirmed: new Set() };
 
   // Batch-embed all candidates and existing memories in one API call.
-  const { passed, superseded, confirmed } = await batchVerify(filtered, existing);
+  const { passed, superseded, confirmed, uncertain } = await batchVerify(filtered, existing);
+
+  // Method B: for pairs that scored above the same-topic threshold but had no
+  // state-change pattern, ask the model directly. Runs sequentially - Ollama
+  // serializes requests anyway and parallel calls risk OOM on 8GB VRAM.
+  for (const pair of uncertain) {
+    // Skip if a pattern already resolved this candidate as a supersession.
+    if (superseded.has(pair.candText)) continue;
+    try {
+      const prompt = buildSupersessionConfirmPrompt(pair.candObj.content, pair.existingContent);
+      const raw = await generateMemoryExtract(prompt, { responseLength: 20 });
+      const answer = raw
+        .trim()
+        .toUpperCase()
+        .split(/\s/)[0]
+        .replace(/[^A-Z]/g, '');
+      if (answer === 'UPDATE') {
+        superseded.set(pair.candText, pair.existingId);
+        smLog(
+          `[SmartMemory] Method B supersession: "${pair.candObj.content.slice(0, 60)}" replaces id ${pair.existingId}`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal: if B fails, the candidate is treated as a new independent memory.
+      smLog(
+        `[SmartMemory] Method B confirmation failed for "${pair.candText.slice(0, 60)}": ${err.message}`,
+      );
+    }
+  }
+
   const verified = filtered.filter((m) =>
     passed.has(
       String(m.content || '')

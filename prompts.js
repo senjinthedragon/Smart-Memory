@@ -38,6 +38,7 @@
  * buildSessionConsolidationPrompt  - same as above but for session memory types (scene, revelation, development, detail)
  * buildProfileGenerationPrompt     - generates character_state, world_state, and relationship_matrix from stored memories
  * buildCanonSummaryPrompt          - generates a stable per-character canon narrative from arc summaries and memories
+ * buildSupersessionConfirmPrompt   - binary UPDATE/INDEPENDENT prompt for model-confirmed supersession (method B)
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -626,6 +627,33 @@ Output ONLY one memory per line using this exact format (nothing else):
 
 FINAL RULE: Output ONLY [type:score:expiration] or [type:score:expiration:entity=...] lines. No headers. No intros. No explanations.
 If there is nothing new worth preserving, output exactly: NONE`
+  );
+}
+
+// ---- Supersession confirmation (method B) --------------------------------
+
+/**
+ * Builds the narrow binary prompt used to confirm whether a new memory
+ * updates/replaces an existing one (UPDATE) or is independently true (INDEPENDENT).
+ * Called only for pairs that scored above the same-topic similarity threshold
+ * but had no state-change pattern - i.e. the cheap checks were inconclusive.
+ *
+ * Intentionally minimal: two sentences in, one word out. Short context means
+ * even weak local models answer reliably.
+ *
+ * @param {string} newMemory      - Content of the newly extracted memory.
+ * @param {string} existingMemory - Content of the existing stored memory.
+ * @returns {string} The complete prompt string.
+ */
+export function buildSupersessionConfirmPrompt(newMemory, existingMemory) {
+  return (
+    `[MEMORY CLASSIFICATION - Output one word only: UPDATE or INDEPENDENT]\n\n` +
+    `Existing memory: ${existingMemory}\n` +
+    `New memory:      ${newMemory}\n\n` +
+    `Does the new memory UPDATE or REPLACE the existing memory, making it ` +
+    `outdated or no longer fully accurate?\n` +
+    `Or are both memories INDEPENDENTLY TRUE at the same time?\n\n` +
+    `Output exactly one word: UPDATE or INDEPENDENT`
   );
 }
 
