@@ -1280,6 +1280,7 @@
   cursor: pointer;
   opacity: 0.75;
   user-select: none;
+  white-space: nowrap;
 }
 
 .sm_graph_toggle:hover {
