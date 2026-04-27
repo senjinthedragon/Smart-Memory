@@ -1040,8 +1040,8 @@ export function bindSettingsUI(ctrl) {
       const commit = hasWindow
         ? await callGenericPopup(
             'Commit memories from this read-only session?\n\n' +
-              'OK - Keep session memories and extract long-term memories from this window.\n' +
-              'Cancel - Discard all memories and hide messages from this window.',
+              'Yes - Keep session memories and extract long-term memories from this window.\n' +
+              'No - Discard all memories and hide messages from this window.',
             POPUP_TYPE.CONFIRM,
           )
         : false;
