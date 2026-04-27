@@ -389,6 +389,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needed - hover entering a node, selection click, scroll zoom, filter toggle,
   or reset. This eliminates idle GPU usage on battery-powered machines.
 
+- **Wrong import source for `loadArcSummaries` in `ui.js`**: the refactor
+  accidentally imported `loadArcSummaries` from `canon.js` instead of
+  `arcs.js`, causing a module load error on startup.
+
+- **Top token bar not updating when switching group characters**: the bar
+  stayed frozen at whoever last responded because the group character selector
+  change handler did not call `maybeInjectUnified` after re-injecting
+  character-specific tiers. In unified injection mode `updateTokenDisplay`
+  reads a cached breakdown that is only refreshed by `injectUnified`, so the
+  bar reflected stale data until the next message.
+
+- **Entity merge and delete not persisting registry changes**: `persistAndRefresh`
+  reloaded fresh copies from storage before saving, silently discarding the
+  in-memory mutations made by `mergeEntitiesByName` and `deleteEntityById`.
+  Both handlers now explicitly save the mutated registries and memory arrays to
+  storage before `persistAndRefresh` runs.
+
+- **Entity merge failing for same-name entities**: `mergeEntitiesByName`
+  returned early when source and target names matched case-insensitively,
+  blocking valid merges between two distinct entities that share a name but
+  have different types (e.g. two "Whisperwood" entries - one Unknown, one
+  Place). A new `mergeEntitiesById` function bypasses name lookup entirely and
+  calls `mergeInRegistry` directly with entity IDs. The merge picker now also
+  shows the entity type alongside the name so same-name targets are
+  distinguishable.
+
+- **Entity merge silently failing for cross-registry entity pairs**: when the
+  source entity lived in the long-term registry and the target lived only in
+  the session registry (or vice versa), both `mergeInRegistry` passes returned
+  early because neither single registry contained both IDs. `mergeEntitiesById`
+  now detects the cross-registry case and handles it by absorbing the source
+  entity's name and aliases into the target, rewriting memory refs, and
+  removing the source from its registry.
+
 ## [1.5.1] - 2026-04-24
 
 ### Fixed
