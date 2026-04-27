@@ -549,6 +549,7 @@ export function bindSettingsUI(ctrl) {
     await injectSessionMemories();
     injectCanon(selection);
     injectProfiles(selection);
+    maybeInjectUnified();
     updateTokenDisplay();
   });
 
