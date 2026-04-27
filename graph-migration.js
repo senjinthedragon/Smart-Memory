@@ -544,11 +544,62 @@ export function mergeEntitiesById(
   sessionMemories,
 ) {
   if (sourceId === targetId) return;
-  for (const [registry, memories] of [
-    [ltRegistry, ltMemories],
-    [sessionRegistry, sessionMemories],
-  ]) {
-    mergeInRegistry(sourceId, targetId, registry, memories);
+
+  // Same-registry merges: both source and target exist in the same store.
+  mergeInRegistry(sourceId, targetId, ltRegistry, ltMemories);
+  mergeInRegistry(sourceId, targetId, sessionRegistry, sessionMemories);
+
+  // Cross-registry: source in LT, target in session (or vice versa).
+  // mergeInRegistry returns early when it cannot find both IDs in one
+  // registry, so we handle cross-registry cases here by absorbing the source
+  // entity's name/aliases into the target and removing the source.
+  const ltSource = ltRegistry.find((e) => e.id === sourceId);
+  const ltTarget = ltRegistry.find((e) => e.id === targetId);
+  const sessSource = sessionRegistry.find((e) => e.id === sourceId);
+  const sessTarget = sessionRegistry.find((e) => e.id === targetId);
+
+  // Helper: add name + aliases from `from` into `to` without creating duplicates.
+  const absorbAliases = (from, to) => {
+    if (!Array.isArray(to.aliases)) to.aliases = [];
+    for (const alias of [from.name, ...(from.aliases ?? [])]) {
+      const lower = alias.toLowerCase().trim();
+      const known =
+        to.name.toLowerCase() === lower || to.aliases.some((a) => a.toLowerCase().trim() === lower);
+      if (!known) to.aliases.push(alias);
+    }
+  };
+
+  if (ltSource && !ltTarget && sessTarget) {
+    // Source only in LT, target only in session: absorb into session target
+    // and rewrite any LT memory refs, then remove source from LT.
+    absorbAliases(ltSource, sessTarget);
+    for (const mem of ltMemories) {
+      if (!Array.isArray(mem.entities)) continue;
+      const idx = mem.entities.indexOf(sourceId);
+      if (idx >= 0) mem.entities.splice(idx, 1);
+    }
+    ltRegistry.splice(
+      ltRegistry.findIndex((e) => e.id === sourceId),
+      1,
+    );
+  }
+
+  if (sessSource && !sessTarget && ltTarget) {
+    // Source only in session, target only in LT: absorb into LT target,
+    // rewrite session memory refs, then remove source from session.
+    absorbAliases(sessSource, ltTarget);
+    for (const mem of sessionMemories) {
+      if (!Array.isArray(mem.entities)) continue;
+      const idx = mem.entities.indexOf(sourceId);
+      if (idx >= 0) {
+        mem.entities.splice(idx, 1);
+        if (!mem.entities.includes(targetId)) mem.entities.push(targetId);
+      }
+    }
+    sessionRegistry.splice(
+      sessionRegistry.findIndex((e) => e.id === sourceId),
+      1,
+    );
   }
 }
 export function mergeEntitiesByName(
