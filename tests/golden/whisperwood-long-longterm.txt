@@ -1,0 +1,12 @@
+[fact:2:permanent:entity=Finn/character] Finn's amber eyes glow faintly in the dark, revealing his deep connection to the Whisperwood's magic.
+[preference:2:session:entity=Finn/character] Finn enjoys carving wooden spirits, as it helps him meditate on the forest's secrets and find inner peace.
+[fact:2:permanent:entity=Senjin/character] Senjin’s shadow magic manifests as swirling darkness that can tether or immobilize spirits or creatures.
+[relationship:2:session:entity=Senjin/character,Finn/character] Senjin trusts Finn deeply, even though he remains skeptical of the forest's whispers and the Unbound.
+[relationship:2:session:entity=Alex/character,Finn/character] Alex has shown growing trust in Finn's guidance, aligning with his belief that the Whisperwood can be understood through listening.
+[fact:2:permanent:entity=Miren/character] Miren can materialize into a visible form, her emerald wings emitting a faint, glowing light.
+[fact:3:permanent:entity=Finn/character] Finn identifies as a guardian whose magic is deeply entwined with the Whisperwood’s natural rhythms, not merely a protector.
+[event:3:permanent:entity=Finn/character,Senjin/character] The trio witnessed a mysterious presence in the woods — Miren fled, and Senjin demanded to know if it was an Unbound, triggering an immediate quest to follow it.
+[preference:2:session] The user prefers tense, emotionally grounded scenes with subtle magic, where characters' vulnerabilities reveal meaningful truths.
+[fact:2:permanent:entity=Senjin/character] Senjin has a strong distrust of spirits that claim hosts without permission — he believes they perform theft, not gift, of self.
+[fact:2:permanent:entity=Alex/character] Alex is deeply intuitive and sensitive to the forest’s mood shifts, especially when influenced by the night or Miren’s guidance.
+[preference:2:session] The user appreciates narrative momentum and character-driven stakes, especially when rooted in emotional or spiritual conflict.

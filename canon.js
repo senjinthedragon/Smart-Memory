@@ -47,6 +47,7 @@ import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadArcSummaries } from './arcs.js';
 import { smLog } from './logging.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 // ---- Storage ------------------------------------------------------------
 
@@ -94,6 +95,7 @@ export function clearCanon(characterName) {
     saveSettingsDebounced();
   }
   setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+  invalidateUnifiedCache(PROMPT_KEY_CANON);
 }
 
 // ---- Generation ---------------------------------------------------------
@@ -155,16 +157,23 @@ export async function generateCanon(characterName) {
 export function injectCanon(characterName) {
   const settings = extension_settings[MODULE_NAME];
 
+  if (!(settings.canon_enabled ?? true)) {
+    setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_CANON);
+    return;
+  }
+
   const canon = loadCanon(characterName);
   if (!canon) {
     setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_CANON);
     return;
   }
 
   // Trim to the canon token budget.
   const budget = settings.canon_inject_budget ?? 800;
   let text = canon.text;
-  while (estimateTokens(text) > budget && text.length > 100) {
+  while (estimateTokens(text) > budget) {
     const lastPeriod = text.lastIndexOf('.', text.length - 2);
     if (lastPeriod < 0) {
       // No sentence boundary found (e.g. bullet-only canon) - hard-truncate

@@ -5,6 +5,507 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-04-27
+
+### Added
+
+- **Unified injection mode (experimental)**: a new toggle in the Developer
+  section merges all active memory tiers into a single IN_PROMPT block instead
+  of injecting each tier into its own named slot at different depths and
+  positions. Content is ordered most-stable-first (canon, profiles, long-term,
+  short-term, scenes) to most-immediate-last (session, arcs) so the model sees
+  active goals closest to its response via recency bias. The token usage bar
+  continues to show per-tier colour breakdowns even in unified mode. The
+  setting is off by default.
+
+- **Canon enabled/disabled toggle**: the Canon section now has an enable
+  checkbox matching the other memory tiers. Disabling canon suppresses both
+  injection and auto-regeneration on Profile B.
+
+- **Group chat memory comparison in token display**: the token usage bar now
+  shows a compact per-character row for every group member beneath the main
+  bar. Each row shows that character's stored personal memory footprint
+  (long-term, canon, and profiles) as a mini colour-coded bar with a token
+  count. Shared tiers (session, scenes, arcs, short-term) are the same for
+  all members and stay in the main bar only. The active character is
+  highlighted; inactive members are dimmed. The text legend that previously
+  appeared below the main bar has been removed - tier breakdowns are now on
+  hover tooltips on each bar segment.
+
+- **Extraction frequency dropdown**: simple mode gains an Extraction frequency
+  selector (Low / Medium / High, mapping to every 5 / 3 / 1 messages) placed
+  below the hardware profile. The individual per-tier extract-every sliders
+  move to advanced mode only.
+
+- **Consolidation settings panel**: all consolidation settings are now grouped
+  into a single root-level Consolidation section (visible in advanced mode
+  only - hidden in simple mode, where consolidation runs on with sensible
+  defaults). The section toggle enables or disables consolidation across both
+  long-term and session memory. Session memory now has per-type consolidation
+  thresholds matching the long-term tier (scene, revelation, development,
+  detail), replacing the previous single shared slider.
+
+- **Simple and advanced settings mode**: the settings panel now defaults to a
+  simplified view exposing only the most commonly adjusted controls. Advanced
+  mode restores the full set of per-tier budgets, injection positions, depths,
+  roles, templates, extraction frequencies, and compaction tuning knobs for
+  users who want manual control.
+
+- **Persistent story arcs**: a pin button on each arc in the Story Threads
+  panel lets you mark an arc as persistent. Persistent arcs are stored at the
+  character level and automatically appear in every new chat with that
+  character, so long-running plot threads survive chapter breaks without
+  requiring you to re-enter them. Unpinning an arc returns it to chat-local
+  scope. Resolving a pinned arc (manually or via extraction) removes it from
+  future chats automatically. Persistent arcs are visually distinguished by a
+  gold left border and a highlighted pin icon. This feature is solo-chat only
+  (arcs in group chats are chat-local).
+
+- **Memory graph visualization**: a new "View Graph" button in the Entity
+  Registry panel opens a full-screen force-directed canvas graph of the current
+  character's entities and memories. Entity nodes (larger, coloured by type)
+  are linked to their associated memory nodes (smaller, coloured by memory
+  type). Supersession chains are shown as directed orange arrows. Supports
+  pan (drag background), zoom (scroll wheel), node drag, click-to-highlight
+  neighbours, and hover tooltips showing full memory content. Filters for
+  session memories and retired memories can be toggled live without closing
+  the graph.
+
+### Removed
+
+- **Hide summarized messages**: the "Hide summarized messages" checkbox
+  introduced in v1.5.1 has been removed. The feature used SillyTavern's
+  `hideChatMessageRange` which sets `is_system` on messages, excluding them
+  from the LLM context window as well as hiding them visually. In practice
+  this broke scene continuity - the summary captures broad strokes but loses
+  immediate detail, causing the model to lose track of what just happened in
+  the current scene. Users wanting a tidy chat history can use SillyTavern's
+  Message Limit extension instead, which keeps a configurable number of recent
+  messages without touching context.
+
+### Fixed
+
+- **Graph node drag causing orbital spin**: dragging a node and releasing it
+  would send the graph into a sustained spinning orbit that took many seconds to
+  settle. DAMPING raised from 0.88 to 0.90 and the reheat on drag-end lowered
+  from 0.25 to 0.10 so the graph settles quickly after a drag without continuing
+  to orbit.
+
+- **XSS in Ollama model dropdown**: the model name dropdown for the memory LLM
+  source was built via string interpolation into innerHTML, allowing a crafted
+  model name returned by the Ollama API to inject markup. The list is now built
+  using jQuery DOM construction so model names are always treated as text.
+
+- **Retired memories included in continuity checker and compaction digest**:
+  superseded memories were fed into the continuity checker's established-facts
+  block and the compaction cross-tier digest without filtering. The checker could
+  then flag contradictions against facts that had already been retired, and the
+  compaction digest wasted token budget on outdated content. Both now filter by
+  `!m.superseded_by` before including memories.
+
+- **Null guard missing in `injectRepair`**: `injectRepair` wrote to
+  `chatMetadata[META_KEY]` without first checking whether `chatMetadata` itself
+  was set. In any context where chatMetadata had not yet been initialised the
+  function would throw. A guard now returns early if `chatMetadata` is absent.
+
+- **Arc-resolution race: stale indices after async model call**: the arc
+  extraction loop captured integer indices into the `existing` arcs array to
+  identify arcs to resolve, then performed async model calls. By the time the
+  loop came to act on those indices, the array could have changed (e.g. a new arc
+  was added from a parallel path), making the stored indices point at the wrong
+  arcs. Resolution targets are now captured as arc objects before any awaits, and
+  the arc list is re-fetched after async work completes with matching done by
+  content rather than by index.
+
+- **Cross-chat state corruption during extraction**: if the user switched chats
+  while a multi-tier extraction pass was in progress, later tiers and metadata
+  saves still completed against the original chat's data - writing session
+  memories, arc updates, and summaries into the new chat's store. A
+  `CHAT_SWITCHED` sentinel and `chatLoadId` capture now abort the extraction pass
+  at each tier boundary and before any chatMetadata write if the chat has changed
+  since extraction began. The same guard covers the group chat extraction path.
+
+- **Unhandled rejections from fire-and-forget `updateLastActive` calls**: the
+  three `updateLastActive()` call sites in the event handlers did not observe the
+  returned promise. If `saveMetadata()` rejected (e.g. on a transient write
+  error), the rejection was silently swallowed in some environments and surfaced
+  as an unhandled-rejection warning in others. All three sites now attach
+  `.catch(console.error)`.
+
+- **`respondedThisRound` race in group chat wrapper**: `onGroupWrapperFinished`
+  read `respondedThisRound` after its first `await`, by which point other group
+  members' draft events could have already started mutating the set for the next
+  round. The participant set is now snapshotted into `roundResponders` at the
+  very start of the handler before any awaits, and all internal references use the
+  snapshot.
+
+- **Persistent arcs not cleaned from character store after group round**:
+  when an arc resolved during a group round, it was removed from the chat-local
+  arc list but the per-character persistent arc store was never updated, leaving
+  the resolved arc to reappear in the next chat. After arc extraction completes in
+  the group path, all responding characters' persistent arc stores are now pruned
+  against the current arc content set.
+
+- **Continuity repair injected to every character in a group round**: when
+  auto-repair was enabled and a repair note was queued, `loadAndInjectRepair` was
+  called for every character that drafted in the round, re-injecting the repair
+  prompt for each one. The note is now injected only for the first character to
+  draft in a round; subsequent characters call `clearRepair` instead so the
+  one-shot note fires exactly once per round.
+
+- **Group character selector staleness race**: the `change` handler on the group
+  character selector called `injectMemories` and then `injectSessionMemories`
+  across two awaits. If the user changed the selector again before the first await
+  resolved, the second inject ran with stale selector state, clobbering the
+  injection from the newer selection. The handler now captures the selected value
+  at entry and bails after the first await if the selection has since changed.
+
+- **Unified injection stale tier content after memory deletion**: when all
+  memories of a tier were deleted or a tier was disabled, `injectUnified` still
+  injected the previous content from its internal cache on subsequent passes.
+  The cache was only updated when an injector wrote non-empty content, so
+  intentional clears were silently ignored. Each tier injector now calls
+  `invalidateUnifiedCache` alongside any empty `setExtensionPrompt` write,
+  ensuring the unified block reflects the actual current state.
+
+- **`/sm-search` named arguments silently ignored**: the slash command accepted
+  `k` (result count) and `min` (minimum similarity score) as named arguments in
+  its callback and help text, but the command definition omitted
+  `namedArgumentList`. SillyTavern never parsed them - they fell through as part
+  of the query string and defaults were always used regardless of what the user
+  passed. `namedArgumentList` now declares both parameters with correct types and
+  default values.
+
+- **Short-term summary injected when auto-summarization is disabled**: disabling
+  the compaction toggle suppressed new summary generation but did not clear the
+  injection slot, so an existing summary continued to appear in every prompt.
+  `injectSummary` and `loadAndInjectSummary` now clear the slot when
+  `compaction_enabled` is false, matching the behaviour of every other tier
+  toggle.
+
+- **Embedding inactive notice**: a persistent amber notice now appears at the
+  top of the Smart Memory settings panel whenever semantic embeddings are
+  inactive - either because the toggle is off, or because an API call failed
+  this session (meaning the model is enabled but unreachable). The notice
+  explains that deduplication falls back to keyword matching and includes a
+  "Set up embeddings" link that opens and scrolls to the deduplication section.
+  It disappears automatically once embeddings are working.
+
+- **Embedding test button**: a "Test connection" button in the Deduplication
+  settings fires a small test call to the configured Ollama endpoint and shows
+  an inline result - green "Connected" on success, or a descriptive error if
+  Ollama is not running or the model is not installed.
+
+- **Arc dedup now uses semantic embeddings**: arc deduplication previously used
+  only Jaccard word overlap (threshold 0.4). Arc descriptions are full narrative
+  sentences where different phrasing can describe the same unresolved thread -
+  Jaccard misses these. Arc similarity now uses cosine similarity on embeddings
+  (threshold 0.82) with Jaccard as fallback, matching the scene and session
+  strategies. All arc operations (extraction, merge, promote, demote, delete)
+  use the same semantic check.
+
+- **Session dedup now uses semantic embeddings**: session memory deduplication
+  previously used only a word-overlap ratio (intersection / max word count),
+  which missed duplicate memories expressed with different phrasing. The
+  primary check is now cosine similarity on embeddings (threshold 0.82),
+  matching the scene dedup strategy. The word-overlap ratio is retained as a
+  fallback when embeddings are unavailable. All texts are batched in a single
+  embedding call so the overhead per extraction pass remains one request.
+
+- **Session entity registry renamed from `entities` to `sessionEntities`**:
+  the chat-scoped entity registry was stored as `chatMetadata.smartMemory.entities`,
+  which was visually ambiguous next to the character-level `entities` field in
+  extension_settings. It is now stored as `sessionEntities` to match the
+  `sessionMemories` naming convention. Existing chats are migrated automatically
+  on load (schema version 4 -> 5).
+
+- **Confirmation dialogs now use SillyTavern's popup system**: all destructive
+  action dialogs (Clear memories, Fresh Start, Clear session/scenes/arcs, Memorize
+  Chat, Clear chat context, Read-only commit/discard) previously used the browser's
+  native `confirm()`, which appears outside ST's overlay stack and ignores ST's
+  theme. All dialogs now use `callGenericPopup` so they are styled consistently
+  with the rest of ST's UI.
+
+- **Unified injection cache leaked across chat changes**: switching chats while
+  unified injection was enabled could carry stale tier content from the previous
+  chat into the new one. The content cache is now cleared at the start of every
+  chat change.
+
+- **Session extraction biased toward one character in group chats**: session
+  extraction passed one group member's long-term memories to the model as a
+  deduplication hint, ignoring all other members. In group chats the hint is now
+  suppressed entirely, since there is no single authoritative character.
+
+- **Scene catch-up deduplication and minimum buffer**: the catch-up loop (used
+  when first running Smart Memory on an existing chat) now checks new scene
+  summaries against the last three stored scenes before appending, matching the
+  deduplication logic in normal scene processing. A minimum message buffer
+  (default 3, respecting `scene_min_messages`) is also enforced, preventing
+  trivially short fragments from being summarized as scenes. Scene entries
+  written by catch-up now include `source_memory_ids` for future traceability.
+
+- **Scene dedup checked only the most recent scene**: the normal scene break
+  path compared each new summary only against the immediately preceding scene.
+  It now checks the last three stored scenes, catching slow-paced sessions
+  where repeated descriptions accumulate without triggering a break.
+
+- **Graph tooltip XSS**: entity and memory node labels were injected into the
+  tooltip innerHTML without escaping, allowing a crafted memory content string
+  to inject markup. All tooltip fields are now HTML-escaped before insertion.
+
+- **Checkpoint and branch support via read-only mode**: Smart Memory now
+  warns when a checkpoint or branch is created without read-only mode active,
+  since long-term memories will continue forming and will not roll back if the
+  user later switches to the checkpoint or branch. When read-only mode is
+  disabled, a confirmation dialog asks whether to commit or discard the
+  session. Commit runs full extraction (long-term, arcs, profiles) on the
+  read-only window messages and keeps all session memories, treating the
+  window as if it had always been active. Discard purges session memories and
+  hides the window messages as before.
+
+- **Session memories leaked from read-only sessions**: session extraction was
+  not gated by read-only mode, so memories extracted during a read-only window
+  were accumulating in session memory and feeding into character profiles and
+  the entity registry. Session extraction is now suppressed while read-only
+  mode is active (matching the existing long-term, arc, and profile gates).
+  When read-only mode is disabled, any session memories that accumulated during
+  the window (identified by timestamp) are purged before they can propagate
+  further. The session entity registry is repaired in the same pass.
+
+- **Read-only mode ghosts messages on disable**: when read-only mode is turned
+  off, all messages generated during that window are automatically marked as
+  hidden (`is_system`) so they are excluded from context and can never be
+  picked up by future extraction passes. Multiple toggle cycles each ghost
+  their own window independently. The start index for each window is stored
+  in chatMetadata when read-only is enabled and cleared after ghosting.
+
+- **"Exclude from long-term memory" renamed to "Read-only mode"**: the option
+  is now described in terms of what you can do with it rather than its internal
+  mechanism. The character arrives with all their memories and behaves normally;
+  nothing from the chat is written back to their persistent state. Useful for
+  trying out a risky scene before committing it, or for a consequence-free
+  session that leaves the character's history untouched. The underlying fix
+  (extraction suppressed, injection kept active) is described in the fix entry
+  below.
+
+- **Group character selector not updating on membership changes**: adding or
+  removing a character from a group chat mid-session did not update the group
+  character selector or token display until the next chat reload. Smart Memory
+  now listens to the `GROUP_UPDATED` event and rebuilds both immediately.
+
+- **Scene break heuristic tightened**: the sleep/wake pattern no longer fires
+  on brief naps mid-scene - only on waking language that implies overnight
+  passage (dawn/morning/light/sun variants). The time-skip pattern no longer
+  fires on `that evening/morning` which was too broad and matched incidental
+  references within the same scene.
+
+- **Scene dedup now uses semantic embeddings**: scene break deduplication
+  previously used only Jaccard word-overlap similarity, which failed to catch
+  duplicate summaries when the heuristic fired multiple times on the same
+  narrative event and the model described it with different wording each time.
+  Deduplication now uses cosine similarity on embeddings (threshold 0.82) with
+  Jaccard as a fallback when embeddings are unavailable (threshold raised to
+  0.55). A minimum buffer length check (default 5 non-system messages) now
+  also suppresses scene breaks that fire before the scene has had a chance to
+  develop, which was the root cause of the duplicates.
+
+- **Compaction summary reproducing injected memory context**: the compaction
+  model would sometimes copy canon, profiles, or other injected memory content
+  verbatim into the summary output, causing duplicate blocks in the prompt.
+  Both the full compaction prompt and the update prompt now explicitly instruct
+  the model to summarize only the actual roleplay exchanges and ignore any
+  injected memory context already stored at other tiers.
+
+- **Entity timeline timestamps showing "unknown"**: all memory entries in the
+  entity timeline displayed "unknown" instead of a date because the `when`
+  label only checked `valid_from` (message index, set only on superseding
+  memories). Timestamps now fall back to the `ts` field (Unix ms, set on
+  every memory at creation) formatted as a locale date/time string.
+
+- **`generateRepair` returning undefined instead of null on non-string model
+  output**: when the model returned a non-string value, `generateRepair` fell
+  through with an implicit `undefined` return instead of the documented `null`.
+  The return is now guarded with a `typeof note === 'string'` check so callers
+  always receive either a trimmed string or `null`.
+
+- **`savePersistentArcs` throwing when settings store is uninitialised**: if
+  `extension_settings[MODULE_NAME]` or its `characters` sub-object had not yet
+  been created, the function threw a TypeError on the first write. Both the
+  outer settings object and the characters map are now created on demand before
+  the write proceeds.
+
+- **Oversized single item not capped by arc and scene token budget loops**: the
+  `while (trimmed.length > 1)` budget loop in `injectArcs` and
+  `injectSceneHistory` would leave a single oversized item uncapped when it
+  alone exceeded the budget. Both functions now apply a hard proportional
+  truncation after the loop so the injected text is always within the configured
+  budget regardless of individual item size.
+
+- **Arc summaries including the full scene history**: `generateArcSummary` fed
+  all stored scene history into the summarisation prompt, causing bloated prompts
+  and unfocused summaries on long chats. The scene history is now capped to the
+  five most recent scenes.
+
+- **Last-write-wins data loss in concurrent arc extraction paths**: `extractArcs`
+  re-loaded the arc list once after the model call to avoid index-based races, but
+  the race window extended through the async deduplication phase. A second re-load
+  now occurs immediately before `saveArcs`, with a content-based merge so arcs
+  added by any overlapping extraction path are preserved rather than overwritten.
+
+### Changed
+
+- **All lone and paired buttons are now full-width in the settings panel**: any
+  button with nothing beside it, or two buttons side by side with nothing else,
+  now expand to fill the available panel width (50/50 split for pairs). Previously
+  buttons kept their intrinsic width, leaving large amounts of unused space to
+  their right. Implemented via a shared `sm-btn-row` flex class applied to all
+  affected button containers.
+
+- **Embedding test button moved inside the Deduplication config block**: the
+  "Test connection" button now sits below the "Keep model in memory" checkbox
+  inside the Deduplication settings block, rather than floating above it. The
+  result span now appears below the button as a sibling element rather than
+  inline to its right.
+
+- **Extraction prompts now explicitly prioritize physical anchors**: both the
+  long-term and session extraction prompts have been updated to treat physical
+  traits (appearance, scars, injuries, distinctive features, location layout,
+  notable objects) as first-class captures rather than skipping them as
+  transient. The long-term prompt adds physical traits to the prioritization
+  block with a note that they anchor the continuity checker. The session prompt
+  narrows its skip rule to genuinely transient state (wet sleeve, spilled food)
+  and adds a positive `DO capture` directive for persistent physical anchors.
+
+- **index.js split into three modules**: the 5000-line monolith has been split
+  into `ui.js` (display and render functions), `settings.js` (default values,
+  settings migration, and UI binding), and a trimmed `index.js` retaining only
+  state variables, event handlers, and the jQuery init block. No behaviour
+  changes; import graph is strictly one-way with no circular dependencies.
+
+- **Memory graph pauses rendering when idle**: the force simulation render loop
+  previously ran at 60 fps continuously while the graph overlay was open,
+  regardless of whether anything was moving. The loop now stops once the
+  simulation has settled and no interaction is in progress, resuming only when
+  needed - hover entering a node, selection click, scroll zoom, filter toggle,
+  or reset. This eliminates idle GPU usage on battery-powered machines.
+
+- **Wrong import source for `loadArcSummaries` in `ui.js`**: the refactor
+  accidentally imported `loadArcSummaries` from `canon.js` instead of
+  `arcs.js`, causing a module load error on startup.
+
+- **Top token bar not updating when switching group characters**: the bar
+  stayed frozen at whoever last responded because the group character selector
+  change handler did not call `maybeInjectUnified` after re-injecting
+  character-specific tiers. In unified injection mode `updateTokenDisplay`
+  reads a cached breakdown that is only refreshed by `injectUnified`, so the
+  bar reflected stale data until the next message.
+
+- **Entity merge and delete not persisting registry changes**: `persistAndRefresh`
+  reloaded fresh copies from storage before saving, silently discarding the
+  in-memory mutations made by `mergeEntitiesByName` and `deleteEntityById`.
+  Both handlers now explicitly save the mutated registries and memory arrays to
+  storage before `persistAndRefresh` runs.
+
+- **Entity merge failing for same-name entities**: `mergeEntitiesByName`
+  returned early when source and target names matched case-insensitively,
+  blocking valid merges between two distinct entities that share a name but
+  have different types (e.g. two "Whisperwood" entries - one Unknown, one
+  Place). A new `mergeEntitiesById` function bypasses name lookup entirely and
+  calls `mergeInRegistry` directly with entity IDs. The merge picker now also
+  shows the entity type alongside the name so same-name targets are
+  distinguishable.
+
+- **Entity merge silently failing for cross-registry entity pairs**: when the
+  source entity lived in the long-term registry and the target lived only in
+  the session registry (or vice versa), both `mergeInRegistry` passes returned
+  early because neither single registry contained both IDs. `mergeEntitiesById`
+  now detects the cross-registry case and handles it by absorbing the source
+  entity's name and aliases into the target, rewriting memory refs, and
+  removing the source from its registry.
+
+- **Model-confirmed supersession (method B)**: patterns alone cannot cover every
+  way a fact can change in natural language ("confiscated", "hijacked",
+  "embezzled", etc.). After pattern matching, any candidate that scored above
+  the same-topic similarity threshold against an existing memory but had no
+  pattern match is now sent to a narrow binary model prompt ("UPDATE or
+  INDEPENDENT?"). The model makes the semantic judgment with minimal context -
+  two sentences in, one word out - catching supersessions that patterns miss.
+  B runs sequentially after the embedding pass and only fires when a suspicious
+  pair exists; quiet extraction passes add zero extra model calls. Patterns
+  remain as a no-cost first pass so B is not called for cases the patterns
+  already resolve. Tested against five change categories (relationship, belief,
+  physical, possession, allegiance) with all passing.
+
+- **Supersession rarely firing for evolved facts**: two separate gaps prevented
+  supersession from working in practice. First, the extraction prompts told the
+  model not to duplicate existing memories but gave no guidance on how to
+  express an update - the model would write "Alex and Finn are now lovers"
+  rather than "Alex no longer distrusts Finn", so the detector never recognized
+  it as replacing the old entry and both accumulated together. Both the
+  long-term and session extraction prompts now explicitly instruct the model to
+  use state-change phrasing when a known fact has evolved. Second, the
+  state-change pattern list was too narrow - it required "now" to be followed
+  by one of four specific verbs (lives/works/is/has) and matched "formerly" but
+  not "former". Patterns now cover "are now / is now / can now / now \<any word\>",
+  "former(ly)", "has since", "once was/believed/feared/had", physical recovery
+  ("healed", "recovered"), possession loss ("lost his/her/the", "stole his/her",
+  "was stolen/destroyed"), allegiance changes ("joined the", "left the",
+  "defected", "abandoned"), and fate events ("was killed / captured / freed /
+  promoted / betrayed / exiled") so a broad range of fact-update phrasings are
+  correctly detected across relationship, belief, physical, possession, and
+  allegiance changes. All five change categories were verified by running test
+  prompts against the extraction model.
+
+- **Memory lists not sorted by timestamp**: long-term and session memory lists
+  in the Entity Registry panel displayed memories in insertion order (roughly
+  extraction time), which did not reflect story chronology and appeared random
+  when multiple extractions ran close together. Both lists now sort by the `ts`
+  field ascending before rendering.
+
+- **Short-term Extraction and Injection section headers visible in simple mode**:
+  two `<p class="sm-section-title">` headers in the Short-term Memory section
+  were missing the `sm-advanced-only` class, so they remained visible in simple
+  mode even though all their sibling controls were correctly hidden. Both headers
+  now carry `sm-advanced-only` and hide with the rest of the advanced controls.
+
+- **Profile B-only controls in Continuity Checker had no visible indication**:
+  the "Auto-check after each response" and "Auto-repair contradictions" checkboxes
+  were grayed out and non-interactive on Profile A but carried no label explaining
+  why. The "Also regenerate profiles every N messages" slider in the Profiles
+  section had the same issue. All three now display a small inline "Profile B"
+  badge so users immediately understand the controls are gated to the hosted
+  profile, without needing to hover the tooltip.
+
+- **Self-supersession chains in graph**: when a newly extracted memory had
+  nearly identical content to an existing one but also contained a state-change
+  marker, the supersession linker could produce a chain where a memory retired
+  itself - appearing as two identical nodes connected by an arrow in the graph.
+  Two guards added: `batchVerify` now treats identical-content pairs as
+  duplicates regardless of state-change markers, and the supersession linking
+  step verifies that the new and old memories are distinct objects with
+  different content before writing the chain.
+
+- **Read-only session commit dialog referenced wrong button labels**: the
+  confirmation popup described the choices as "OK" and "Cancel" but the
+  `POPUP_TYPE.CONFIRM` dialog renders "Yes" and "No" buttons.
+
+- **Force graph not following the active SillyTavern theme**: the canvas
+  renderer used fully hardcoded colors (`#12121e` background, `#ffffff`
+  labels, `#8899aa` link edges, `#d4905b` supersession arrows). A
+  `getGraphTheme()` helper now reads `--SmartThemeBlurTintColor`,
+  `--SmartThemeBodyColor`, `--SmartThemeEmColor`, and
+  `--SmartThemeQuoteColor` at render time so the graph matches any ST
+  theme without needing to reopen it. The card, toolbar, tooltip, and
+  legend borders were updated from hardcoded values to the same CSS
+  variables.
+
+- **Graph filter toggle labels and "Show retired memories" button
+  wrapping**: the "Session" and "Retired" filter toggles in the graph
+  toolbar, and the "Show retired memories" / "Hide retired memories"
+  button in the Long-term Memory panel, could wrap to multiple stacked
+  lines when the container was narrow. Both now have `white-space: nowrap`
+  to stay on a single line.
+
 ## [1.5.1] - 2026-04-24
 
 ### Fixed
@@ -67,13 +568,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Hide summarized messages**: new checkbox in the Short-term Memory section.
-  When enabled, all messages folded into the compaction summary are automatically
-  hidden after each compaction run. They remain in the chat file but are visually
-  collapsed and excluded from the LLM context window - the injected summary
-  already covers their content. The hidden state is persisted to disk so it
-  survives reloads. Toggling the checkbox on an existing chat with a summary
-  immediately hides or restores the affected messages. Off by default.
 - **Continuity auto-check toggle**: new checkbox in the Continuity Checker section
   to disable the automatic check that Profile B runs after every response. Previously
   the only way to stop it was to switch to Profile A entirely. The toggle defaults to

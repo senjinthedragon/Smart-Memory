@@ -25,20 +25,27 @@
  * stays oriented toward where the story is going, not just the last message.
  * Arcs can be marked resolved by the model or manually deleted by the user.
  *
- * loadArcs          - returns the stored arc array for the current chat
- * saveArcs          - persists the arc array to chatMetadata
- * deleteArc         - removes a single arc by index
- * clearArcs         - empties all arcs for the current chat
- * extractArcs       - runs extraction against the conversation, deduplicates, and updates the arc list
- * injectArcs        - pushes active arcs into the prompt via setExtensionPrompt
- * loadArcSummaries  - returns the stored arc summary array for the current chat
- * clearArcSummaries - empties all arc summaries for the current chat
+ * loadArcs               - returns the stored arc array for the current chat
+ * saveArcs               - persists the arc array to chatMetadata
+ * deleteArc              - removes a single arc by index
+ * clearArcs              - empties all arcs for the current chat
+ * arcSimilarity          - returns {score, semantic} between two arc strings (cosine primary, Jaccard fallback)
+ * extractArcs            - runs extraction against the conversation, deduplicates, and updates the arc list
+ * injectArcs             - pushes active arcs into the prompt via setExtensionPrompt
+ * loadArcSummaries       - returns the stored arc summary array for the current chat
+ * clearArcSummaries      - empties all arc summaries for the current chat
+ * loadPersistentArcs     - returns the character-level persistent arc array
+ * savePersistentArcs     - writes a persistent arc array to character-level storage
+ * mergePersistentArcs    - merges character-level persistent arcs into chatMetadata on chat open
+ * promoteArc             - marks a chat arc as persistent and saves it to character level
+ * demoteArc              - removes the persistent flag from an arc and cleans character level
  */
 
 import {
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
+  saveSettingsDebounced,
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
@@ -48,12 +55,14 @@ import { parseArcOutput } from './parsers.js';
 import { loadSceneHistory } from './scenes.js';
 import { loadSessionMemories } from './session.js';
 import { smLog } from './logging.js';
+import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 // ---- Deduplication ------------------------------------------------------
 
 /**
  * Jaccard word-overlap similarity between two arc content strings.
- * Used to detect near-duplicate arcs with different phrasing.
+ * Retained as the fallback when embeddings are unavailable.
  * @param {string} a
  * @param {string} b
  * @returns {number} Similarity in [0, 1].
@@ -68,17 +77,57 @@ function arcJaccard(a, b) {
 }
 
 /**
- * Removes duplicate entries from an arc array, keeping the first occurrence
- * when two arcs exceed the similarity threshold.
- * @param {Array<{content: string}>} arcs
- * @param {number} threshold - Jaccard threshold above which arcs are considered duplicates.
- * @returns {Array<{content: string}>} Deduplicated arc array.
+ * Returns the semantic similarity between two arc strings.
+ * Uses cosine similarity on embeddings when available, falling back to Jaccard.
+ * Arc descriptions are full sentences with rich narrative content, making
+ * semantic similarity substantially more reliable than word overlap alone.
+ * @param {string} a
+ * @param {string} b
+ * @returns {Promise<{score: number, semantic: boolean}>}
  */
-function deduplicateArcs(arcs, threshold = 0.4) {
-  return arcs.filter(
-    (arc, idx) =>
-      !arcs.slice(0, idx).some((prev) => arcJaccard(arc.content, prev.content) >= threshold),
-  );
+async function arcSimilarity(a, b) {
+  const aKey = a.toLowerCase().trim();
+  const bKey = b.toLowerCase().trim();
+  const vectorMap = await getEmbeddingBatch([aKey, bKey]);
+  const aVec = vectorMap.get(aKey);
+  const bVec = vectorMap.get(bKey);
+  if (aVec && bVec) {
+    return { score: cosineSimilarity(aVec, bVec), semantic: true };
+  }
+  return { score: arcJaccard(a, b), semantic: false };
+}
+
+/**
+ * Returns true when two arc strings are similar enough to be considered
+ * duplicates. Cosine threshold 0.82 for semantic, 0.4 for Jaccard fallback.
+ * @param {string} a
+ * @param {string} b
+ * @returns {Promise<boolean>}
+ */
+async function arcIsDuplicate(a, b) {
+  const { score, semantic } = await arcSimilarity(a, b);
+  return score >= (semantic ? 0.82 : 0.4);
+}
+
+/**
+ * Removes duplicate entries from an arc array, keeping the first occurrence
+ * when two arcs are flagged as duplicates by arcIsDuplicate.
+ * @param {Array<{content: string}>} arcs
+ * @returns {Promise<Array<{content: string}>>} Deduplicated arc array.
+ */
+async function deduplicateArcs(arcs) {
+  const result = [];
+  for (const arc of arcs) {
+    let isDup = false;
+    for (const prev of result) {
+      if (await arcIsDuplicate(arc.content, prev.content)) {
+        isDup = true;
+        break;
+      }
+    }
+    if (!isDup) result.push(arc);
+  }
+  return result;
 }
 
 // ---- Storage ------------------------------------------------------------
@@ -106,11 +155,27 @@ export async function saveArcs(arcs) {
 
 /**
  * Removes a single arc by its index in the arc array.
- * Called when the user manually resolves an arc via the UI.
+ * If the arc is persistent and characterName is provided, also removes it
+ * from character-level storage so it no longer appears in future chats.
  * @param {number} index
+ * @param {string|null} [characterName]
  */
-export async function deleteArc(index) {
+export async function deleteArc(index, characterName = null) {
   const arcs = loadArcs();
+  const arc = arcs[index];
+  if (!arc) return;
+
+  if (arc.persistent && characterName) {
+    const persistent = loadPersistentArcs(characterName);
+    const filtered = [];
+    for (const p of persistent) {
+      if (!(await arcIsDuplicate(p.content, arc.content))) filtered.push(p);
+    }
+    if (filtered.length !== persistent.length) {
+      savePersistentArcs(characterName, filtered);
+    }
+  }
+
   arcs.splice(index, 1);
   await saveArcs(arcs);
 }
@@ -162,6 +227,122 @@ export async function clearArcSummaries() {
   }
 }
 
+// ---- Persistent arcs (cross-chat) ----------------------------------------
+
+/**
+ * Returns the persistent arc array for the given character.
+ * Persistent arcs are stored at the character level so they survive
+ * across chats and are merged into new chats on load.
+ * @param {string} characterName
+ * @returns {Array<{content: string, ts: number, persistent: true}>}
+ */
+export function loadPersistentArcs(characterName) {
+  if (!characterName) return [];
+  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.persistent_arcs ?? [];
+}
+
+/**
+ * Overwrites the persistent arc array for the given character and persists it.
+ * @param {string} characterName
+ * @param {Array<{content: string, ts: number, persistent: true}>} arcs
+ */
+export function savePersistentArcs(characterName, arcs) {
+  if (!characterName) return;
+  if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
+  if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
+  if (!extension_settings[MODULE_NAME].characters[characterName])
+    extension_settings[MODULE_NAME].characters[characterName] = {};
+  extension_settings[MODULE_NAME].characters[characterName].persistent_arcs = arcs;
+  saveSettingsDebounced();
+}
+
+/**
+ * Merges character-level persistent arcs into the current chat's arc list.
+ * Called once on chat load so that injection and extraction see persistent
+ * arcs as part of the normal arc list without any special-casing elsewhere.
+ * Arcs already present in the chat (persistent or otherwise) are skipped.
+ * @param {string} characterName
+ */
+export async function mergePersistentArcs(characterName) {
+  if (!characterName) return;
+  const persistent = loadPersistentArcs(characterName);
+  if (persistent.length === 0) return;
+
+  const existing = loadArcs();
+  const toAdd = [];
+  for (const p of persistent) {
+    let found = false;
+    for (const e of existing) {
+      if (await arcIsDuplicate(p.content, e.content)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) toAdd.push(p);
+  }
+  if (toAdd.length === 0) return;
+
+  const merged = [...existing, ...toAdd.map((a) => ({ ...a, persistent: true }))];
+  await saveArcs(merged);
+}
+
+/**
+ * Marks an arc as persistent: saves it to the character level so it carries
+ * into future chats, and updates the persistent flag in the current chat.
+ * @param {number} index - Index in the current chat arc array.
+ * @param {string} characterName
+ */
+export async function promoteArc(index, characterName) {
+  if (!characterName) return;
+  const arcs = loadArcs();
+  if (!arcs[index]) return;
+  arcs[index].persistent = true;
+  await saveArcs(arcs);
+
+  const persistent = loadPersistentArcs(characterName);
+  let already = false;
+  for (const p of persistent) {
+    if (await arcIsDuplicate(p.content, arcs[index].content)) {
+      already = true;
+      break;
+    }
+  }
+  if (!already) {
+    persistent.push({
+      content: arcs[index].content,
+      ts: arcs[index].ts ?? Date.now(),
+      persistent: true,
+    });
+    savePersistentArcs(characterName, persistent);
+  }
+}
+
+/**
+ * Removes the persistent flag from an arc and cleans it from character-level
+ * storage. The arc stays in the current chat as a normal non-persistent arc.
+ * @param {number} index - Index in the current chat arc array.
+ * @param {string} characterName
+ */
+export async function demoteArc(index, characterName) {
+  if (!characterName) return;
+  const arcs = loadArcs();
+  if (!arcs[index]) return;
+  const content = arcs[index].content;
+  delete arcs[index].persistent;
+  await saveArcs(arcs);
+
+  const persistent = loadPersistentArcs(characterName);
+  const filtered = [];
+  for (const p of persistent) {
+    if (!(await arcIsDuplicate(p.content, content))) filtered.push(p);
+  }
+  if (filtered.length !== persistent.length) {
+    savePersistentArcs(characterName, filtered);
+  }
+}
+
+// ---- Extraction ---------------------------------------------------------
+
 /**
  * Generates a paragraph summary for a resolved arc. Collects scene summaries
  * and memory ids that were linked to scenes during the arc for context, and
@@ -177,12 +358,14 @@ export async function clearArcSummaries() {
 async function generateArcSummary(arcContent) {
   const settings = extension_settings[MODULE_NAME];
 
-  // Collect the last N scene summaries as context for the arc.
-  // Using all available scenes keeps the summary grounded without extra calls.
-  const sceneHistory = loadSceneHistory();
+  // Use only the most recent scenes as context. The arc being summarized was
+  // active and resolved in the recent portion of the chat; attributing it to
+  // scenes from much earlier in the chat inflates source provenance and adds
+  // noise to canon generation.
+  const sceneHistory = loadSceneHistory().slice(-5);
   const sceneSummaries = sceneHistory.map((s, i) => `Scene ${i + 1}: ${s.summary}`).join('\n');
 
-  // Gather source_memory_ids from all scenes (deduplicated) and fetch their content.
+  // Gather source_memory_ids from these scenes (deduplicated).
   const allMemoryIds = new Set(sceneHistory.flatMap((s) => s.source_memory_ids ?? []));
   const sessionMemories = loadSessionMemories();
   const linkedMemories = sessionMemories
@@ -210,9 +393,13 @@ async function generateArcSummary(arcContent) {
  * arcs the model flags as closed, and persists the updated arc list.
  * Returns the count of new arcs added.
  * @param {Array} messages - Full context.chat array.
+ * @param {string|null} [characterName] - Active character, used to clean persistent arcs when resolved.
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; if it returns true the function
+ *   bails out before any chatMetadata write. Used by the automatic extraction path to abort when
+ *   the user switches chats mid-extraction.
  * @returns {Promise<number>} Count of new arcs added (0 on failure or nothing found).
  */
-export async function extractArcs(messages) {
+export async function extractArcs(messages, characterName = null, abortCheck = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.arcs_enabled) return 0;
 
@@ -238,16 +425,17 @@ export async function extractArcs(messages) {
 
     const { add, resolve } = parseArcOutput(response, existing);
 
+    // Convert resolve indices to arc objects immediately, before any async work.
+    // Storing content rather than indices means subsequent loadArcs() re-fetches
+    // after async summarization can match by content instead of stale positions -
+    // safe against concurrent UI edits (delete, add) during the model call window.
+    const resolvedArcObjects = resolve.map((i) => existing[i]).filter(Boolean);
+
     // Generate arc summaries for each resolved arc before removing them.
     // Sequential calls - Ollama serializes anyway and parallel calls risk OOM.
-    if (resolve.length > 0) {
-      // `existing` is captured before this loop. A concurrent arc-delete via the
-      // UI during the model call could make existing[idx] stale, but the window
-      // is narrow enough in practice that we accept it here rather than re-fetching.
+    if (resolvedArcObjects.length > 0) {
       const arcSummaries = loadArcSummaries();
-      for (const idx of resolve) {
-        const resolved = existing[idx];
-        if (!resolved) continue;
+      for (const resolved of resolvedArcObjects) {
         try {
           const result = await generateArcSummary(resolved.content);
           if (result) {
@@ -265,32 +453,70 @@ export async function extractArcs(messages) {
           // Non-fatal - arc is still resolved even if summarization fails.
         }
       }
+      if (abortCheck?.()) return 0;
       await saveArcSummaries(arcSummaries);
     }
 
-    // Filter out resolved arcs.
-    let afterResolve = existing.filter((_, i) => !resolve.includes(i));
+    // For persistent arcs that were resolved, also clean them from character-level
+    // storage so they don't resurface in the next chat.
+    if (characterName && resolvedArcObjects.length > 0) {
+      const persistentToRemove = resolvedArcObjects.filter((a) => a?.persistent);
+      if (persistentToRemove.length > 0) {
+        let charPersistent = loadPersistentArcs(characterName);
+        for (const resolved of persistentToRemove) {
+          const kept = [];
+          for (const p of charPersistent) {
+            if (!(await arcIsDuplicate(p.content, resolved.content))) kept.push(p);
+          }
+          charPersistent = kept;
+        }
+        if (abortCheck?.()) return 0;
+        savePersistentArcs(characterName, charPersistent);
+      }
+    }
+
+    // Re-load the current arc list after all async summarization work. Matching
+    // by content (not stale indices) means any UI edits during the async window
+    // are reflected in what we keep.
+    const currentArcs = loadArcs();
+    const resolvedContentSet = new Set(resolvedArcObjects.map((a) => a.content));
+    let afterResolve = currentArcs.filter((a) => !resolvedContentSet.has(a.content));
 
     // Clean up any duplicates that accumulated in storage from previous passes.
-    afterResolve = deduplicateArcs(afterResolve);
+    afterResolve = await deduplicateArcs(afterResolve);
 
     // Drop new arcs that are semantically redundant with what remains.
-    // 0.4 is intentionally lower than the scene dedup threshold (0.5) - arc
-    // content is longer narrative text where Jaccard overlap is naturally
-    // sparser, so a lower bar is needed to catch genuine paraphrases.
-    const ARC_DEDUP_THRESHOLD = 0.4;
-    const dedupedAdd = add.filter(
-      (newArc, idx) =>
-        !afterResolve.some((ex) => arcJaccard(newArc.content, ex.content) >= ARC_DEDUP_THRESHOLD) &&
-        !add
-          .slice(0, idx)
-          .some((prev) => arcJaccard(newArc.content, prev.content) >= ARC_DEDUP_THRESHOLD),
-    );
+    const dedupedAdd = [];
+    for (const newArc of add) {
+      let isDup = false;
+      for (const ex of afterResolve) {
+        if (await arcIsDuplicate(newArc.content, ex.content)) {
+          isDup = true;
+          break;
+        }
+      }
+      if (!isDup) {
+        for (const prev of dedupedAdd) {
+          if (await arcIsDuplicate(newArc.content, prev.content)) {
+            isDup = true;
+            break;
+          }
+        }
+      }
+      if (!isDup) dedupedAdd.push(newArc);
+    }
 
     const max = settings.arcs_max ?? 10;
-    // slice(-max) keeps the most recent arcs when over the limit.
-    const merged = [...afterResolve, ...dedupedAdd].slice(-max);
 
+    // Re-load one final time just before saving. The async dedup phase above
+    // may have yielded long enough for a UI edit (delete, inline save) to write
+    // chatMetadata. Re-fetching here ensures those edits are not overwritten.
+    // Apply resolved removals and dedupedAdd on top of whatever is current.
+    const finalBase = loadArcs().filter((a) => !resolvedContentSet.has(a.content));
+    const finalNew = dedupedAdd.filter((n) => !finalBase.some((a) => a.content === n.content));
+    const merged = [...finalBase, ...finalNew].slice(-max);
+
+    if (abortCheck?.()) return 0;
     await saveArcs(merged);
     return dedupedAdd.length;
   } catch (err) {
@@ -309,16 +535,20 @@ export function injectArcs() {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.arcs_enabled) {
     setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_ARCS);
     return;
   }
 
   const arcs = loadArcs();
   if (arcs.length === 0) {
     setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_ARCS);
     return;
   }
 
   // Trim to token budget: drop oldest arcs (from the front) until we fit.
+  // If a single arc still exceeds the budget, hard-truncate its content so the
+  // injection is always within the cap regardless of individual entry length.
   const budget = settings.arcs_inject_budget ?? 400;
   const trimmed = [...arcs];
   while (trimmed.length > 1) {
@@ -327,7 +557,11 @@ export function injectArcs() {
     trimmed.shift();
   }
 
-  const text = trimmed.map((a) => `- ${a.content}`).join('\n');
+  let text = trimmed.map((a) => `- ${a.content}`).join('\n');
+  if (estimateTokens(text) > budget) {
+    const ratio = budget / estimateTokens(text);
+    text = text.slice(0, Math.floor(text.length * ratio)).trim();
+  }
   const content = `Active story threads:\n${text}`;
 
   setExtensionPrompt(

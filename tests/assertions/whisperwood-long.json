@@ -1,0 +1,37 @@
+{
+  "longterm": {
+    "min_count": 1,
+    "must_contain": [
+      {
+        "label": "Senjin has shadow magic",
+        "keywords": ["shadow", "magic", "draconic"]
+      }
+    ]
+  },
+  "session": {
+    "min_count": 2,
+    "must_contain": [
+      {
+        "label": "Miren reveals Unbound do not ask permission / take by force",
+        "keywords": ["unbound", "permission", "take", "possess", "spirit", "claim"]
+      },
+      {
+        "label": "Miren detects an unknown presence and flees into the woods",
+        "keywords": ["presence", "miren", "woods", "flee", "detect", "unidentified"]
+      },
+      {
+        "label": "Finn's wood carving hobby connected to his father",
+        "keywords": ["carv", "father", "wood", "bird"]
+      }
+    ]
+  },
+  "arcs": {
+    "min_count": 1,
+    "must_contain": [
+      {
+        "label": "unknown presence Miren sensed - unresolved threat",
+        "keywords": ["presence", "unknown", "miren", "threat", "unidentified"]
+      }
+    ]
+  }
+}

@@ -29,6 +29,20 @@
   margin-bottom: 8px;
 }
 
+/* ── Button rows ─────────────────────────────────────────────────────────── */
+
+/* Flex row where every direct .menu_button child stretches to an equal share
+ * of the available width. Single buttons go full-width; two buttons are 50/50;
+ * three buttons are 33/33/33, etc. */
+#smart_memory_settings .sm-btn-row {
+  display: flex;
+  gap: 6px;
+}
+
+#smart_memory_settings .sm-btn-row > .menu_button {
+  flex: 1;
+}
+
 /* ── Sub-section titles ──────────────────────────────────────────────────── */
 
 /*
@@ -49,6 +63,18 @@
 
 #smart_memory_settings .sm-section-content > .sm-section-title:first-child {
   margin-top: 4px;
+}
+
+/* ── Settings mode (simple / advanced) ──────────────────────────────────── */
+
+/* Hidden by default; shown when advanced mode is active (toggled via JS) */
+#smart_memory_settings .sm-advanced-only {
+  display: none;
+}
+
+/* Hidden by default; shown when simple mode is active (toggled via JS) */
+#smart_memory_settings .sm-simple-only {
+  display: none;
 }
 
 /* ── Section accordions ──────────────────────────────────────────────────── */
@@ -184,45 +210,67 @@
   transition: width 0.35s ease;
 }
 
-/* ── Token usage legend ──────────────────────────────────────────────────── */
+/* ── Token usage section (always visible, not an accordion) ─────────────── */
 
-#smart_memory_settings .sm-token-legend {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin: 4px 0 6px;
+#smart_memory_settings .sm-token-section {
+  margin: 2px 0 6px;
 }
 
-#smart_memory_settings .sm-token-legend-row {
+/* ── Per-character group memory rows ─────────────────────────────────────── */
+
+#smart_memory_settings .sm-token-group-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+#smart_memory_settings .sm-token-group-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.85em;
+  font-size: 0.82em;
+  opacity: 0.6;
 }
 
-#smart_memory_settings .sm-token-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+#smart_memory_settings .sm-token-group-row.sm-token-active {
+  opacity: 1;
+}
+
+#smart_memory_settings .sm-token-group-name {
+  min-width: 5em;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
-#smart_memory_settings .sm-token-tier-name {
-  flex: 1;
-  opacity: 0.8;
-}
-
-#smart_memory_settings .sm-token-count {
+#smart_memory_settings .sm-token-group-row.sm-token-active .sm-token-group-name {
   font-weight: 600;
-  min-width: 4em;
-  text-align: right;
 }
 
-#smart_memory_settings .sm-token-pct-col {
-  opacity: 0.5;
-  min-width: 3.5em;
+#smart_memory_settings .sm-token-mini-bar-wrap {
+  flex: 1;
+  height: 7px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.15);
+  overflow: hidden;
+}
+
+#smart_memory_settings .sm-token-mini-bar {
+  display: flex;
+  height: 100%;
+}
+
+#smart_memory_settings .sm-token-group-count {
+  min-width: 4.5em;
   text-align: right;
-  font-size: 0.9em;
+  flex-shrink: 0;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 #smart_memory_settings .sm-token-total {
@@ -235,6 +283,11 @@
 }
 
 /* ── Long-term memories list ─────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_toggle_retired {
+  white-space: nowrap;
+  align-self: flex-start;
+}
 
 #smart_memory_settings .sm_memories_list {
   display: flex;
@@ -289,6 +342,49 @@
   font-weight: bold;
   text-transform: uppercase;
   color: #fff;
+}
+
+#smart_memory_settings .sm_memory_importance {
+  flex-shrink: 0;
+  font-size: 0.65em;
+  letter-spacing: 1px;
+}
+
+#smart_memory_settings .sm_importance_1 {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+#smart_memory_settings .sm_importance_2 {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+#smart_memory_settings .sm_importance_3 {
+  color: #f0c060;
+}
+
+#smart_memory_settings .sm_memory_expiration {
+  flex-shrink: 0;
+  font-size: 0.7em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+#smart_memory_settings .sm_expiration_scene {
+  color: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#smart_memory_settings .sm_expiration_session {
+  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+#smart_memory_settings .sm_expiration_permanent {
+  color: #a0d4a0;
+  border: 1px solid rgba(160, 212, 160, 0.3);
 }
 
 #smart_memory_settings .sm_type_fact {
@@ -564,10 +660,34 @@
   font-size: 0.875em;
 }
 
+#smart_memory_settings .sm_arc_item.sm_arc_persistent {
+  border-left-color: #f0c060;
+}
+
 #smart_memory_settings .sm_arc_text {
   flex: 1;
   line-height: 1.4;
   word-break: break-word;
+}
+
+#smart_memory_settings .sm_pin_arc {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  color: rgba(255, 255, 255, 0.35);
+  opacity: 0.7;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
+}
+
+#smart_memory_settings .sm_pin_arc:hover {
+  opacity: 1;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+#smart_memory_settings .sm_pin_arc.sm_pin_active {
+  color: #f0c060;
+  opacity: 1;
 }
 
 /* ── Scene history list ──────────────────────────────────────────────────── */
@@ -1034,7 +1154,7 @@
 
 .sm_search_item {
   padding: 8px 0;
-  border-bottom: 1px solid var(--border-color-subtle, rgba(255, 255, 255, 0.07));
+  border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.07));
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -1100,6 +1220,174 @@
   background: #3a7a8e;
 }
 
+/* ── Memory graph overlay ──────────────────────────────────────────────────── */
+
+#sm_graph_overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+#sm_graph_card {
+  background: var(--SmartThemeBlurTintColor, #1a1a2e);
+  border: 1px solid var(--SmartThemeBorderColor, #444);
+  color: var(--SmartThemeBodyColor, #dcdcd2);
+  border-radius: 8px;
+  width: calc(100vw - 32px);
+  max-width: 1300px;
+  height: calc(100vh - 48px);
+  max-height: 860px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+}
+
+#sm_graph_toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.07));
+  flex-shrink: 0;
+}
+
+#sm_graph_title {
+  font-size: 0.95em;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+#sm_graph_controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#sm_graph_controls .menu_button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.sm_graph_toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8em;
+  cursor: pointer;
+  opacity: 0.75;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sm_graph_toggle:hover {
+  opacity: 1;
+}
+
+#sm_graph_canvas_wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+}
+
+#sm_graph_canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#sm_graph_tooltip {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  background: var(--SmartThemeBlurTintColor, rgba(18, 18, 30, 0.96));
+  color: var(--SmartThemeBodyColor, #dcdcd2);
+  border: 1px solid var(--SmartThemeBorderColor, #444);
+  border-radius: 5px;
+  padding: 8px 11px;
+  font-size: 0.78em;
+  max-width: 260px;
+  line-height: 1.5;
+  z-index: 10;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+#sm_graph_tooltip strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.sm_graph_tip_type {
+  display: block;
+  font-size: 0.85em;
+  opacity: 0.55;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sm_graph_tip_detail {
+  display: block;
+  opacity: 0.88;
+  word-break: break-word;
+}
+
+#sm_graph_legend {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-top: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.07));
+  font-size: 0.72em;
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+.sm_graph_legend_group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sm_graph_legend_item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sm_graph_legend_swatch {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sm_graph_legend_swatch_small {
+  width: 8px;
+  height: 8px;
+}
+
+.sm_graph_legend_edge_link {
+  opacity: 0.5;
+  font-size: 0.9em;
+}
+
+.sm_graph_legend_edge_supersedes {
+  color: var(--SmartThemeQuoteColor, #d4905b);
+}
+
 /* ── Away recap modal ──────────────────────────────────────────────────────── */
 
 /* flex-start + margin:auto on the card centers it when there is room, and lets
@@ -1160,4 +1448,61 @@
   opacity: 0.35;
   pointer-events: none;
   user-select: none;
+}
+
+/* Inline badge used to label Profile-B-only controls so users understand
+   why the option is unavailable without needing to hover the tooltip. */
+#smart_memory_settings .sm-profile-tag {
+  display: inline-block;
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--SmartColor, #7b68ee) 20%, transparent);
+  color: var(--SmartColor, #7b68ee);
+  border: 1px solid color-mix(in srgb, var(--SmartColor, #7b68ee) 40%, transparent);
+  vertical-align: middle;
+  margin-left: 5px;
+  white-space: nowrap;
+}
+
+/* Embedding inactive notice - shown at the top of the panel when semantic
+   embeddings are disabled or have failed this session. Amber tint without
+   hardcoding colors so it adapts to any ST theme. */
+#sm_embedding_notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(180, 130, 20, 0.12);
+  border: 1px solid rgba(180, 130, 20, 0.35);
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+#sm_embedding_notice i {
+  margin-top: 1px;
+  flex-shrink: 0;
+  color: rgb(200, 150, 40);
+}
+
+#sm_embedding_notice a {
+  color: inherit;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+/* Inline result shown next to the Test button after a connection check. */
+#sm_embedding_test_result {
+  font-size: 0.85em;
+  margin-left: 6px;
+}
+
+/* Read-only mode: hide the "Delete messages" context menu option while
+   active so message deletions cannot shift the ghosting range index. */
+body.sm-read-only #option_delete_mes,
+body.sm-read-only .mes_edit_delete {
+  display: none !important;
 }

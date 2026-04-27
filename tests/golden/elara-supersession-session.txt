@@ -1,0 +1,6 @@
+[revelation:3:session:entity=Elara/character] Elara reveals she sold the forge this morning.
+[development:3:session:entity=Elara/character,Senjin/character] Their working relationship shifts as Elara departs for Port Varen, leaving the forge sold and unspoken plans.
+[detail:2:session:entity=Port Varen/place] Port Varen is named as Elara’s destination.
+[detail:2:session:entity=Elara’s brother/character] Elara’s brother is ill and has no one else.
+[revelation:3:session:entity=Elara/character] Elara reveals she will write to Senjin once settled, not immediately.
+[detail:2:session:entity=forge/place] The forge is nearly empty and no longer resembles Elara’s workspace.

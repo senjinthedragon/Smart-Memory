@@ -38,6 +38,7 @@
  * buildSessionConsolidationPrompt  - same as above but for session memory types (scene, revelation, development, detail)
  * buildProfileGenerationPrompt     - generates character_state, world_state, and relationship_matrix from stored memories
  * buildCanonSummaryPrompt          - generates a stable per-character canon narrative from arc summaries and memories
+ * buildSupersessionConfirmPrompt   - binary UPDATE/INDEPENDENT prompt for model-confirmed supersession (method B)
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -73,6 +74,8 @@ export function buildSummaryPrompt(storedMemories = '') {
   return (
     NO_ACTION_PREAMBLE +
     `${storedSection}Your task is to write a detailed summary of the roleplay conversation so far. This summary will be injected at the top of context so the story can continue seamlessly after older messages fall out of the context window.
+
+IMPORTANT: Summarize only the actual roleplay exchanges between characters. Do NOT reproduce, restate, or copy any injected memory context that appears before the conversation - this includes character history, long-term memories, character profiles, scene history, session details, or story arcs. Those are already stored separately. Only the story events that happened in the chat messages belong in this summary.
 
 Write the summary inside <summary> tags. Cover all nine sections below - do not skip or abbreviate any of them.
 
@@ -114,6 +117,8 @@ export function buildUpdateSummaryPrompt(storedMemories = '') {
   return (
     NO_ACTION_PREAMBLE +
     `${storedSection}An existing story summary is provided below, followed by new events that occurred after it. Your task is to update the summary by incorporating the new events.
+
+IMPORTANT: Summarize only the actual roleplay exchanges between characters. Do NOT reproduce, restate, or copy any injected memory context - this includes character history, long-term memories, character profiles, scene history, session details, or story arcs. Those are already stored separately. Only story events from the chat messages belong in this summary.
 
 CRITICAL: You must reproduce every section in full. Do NOT write "Same as before", "Unchanged", "As previously noted", or any similar shorthand. The existing summary will not be available after this update - any section you omit or abbreviate is permanently lost.
 
@@ -168,7 +173,7 @@ export const RECAP_PROMPT =
  */
 export function buildSessionExtractionPrompt(chatHistory, existingSession, longtermMemories = '') {
   const existingSection = existingSession
-    ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\n`
+    ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\nIf something from this list has CHANGED, extract the updated version using explicit state-change language ("now", "no longer", "became", "stopped", etc.) so it can supersede the outdated entry rather than accumulating alongside it.\n\n`
     : '';
 
   const longtermSection = longtermMemories
@@ -185,15 +190,17 @@ ${longtermSection}${existingSection}RECENT EXCHANGES:\n${chatHistory}
 Extract NEW details worth remembering within this session. Focus on session-specific context: scene details, emotional beats, specific objects/names/places, and how things developed THIS session. Do not re-extract facts already in long-term memory.
 
 SKIP these - they do not belong in session memory:
-- Transient physical details that only matter for this exact moment (stained clothes, spilled food, current body positions)
+- Transient physical state that won't outlast this moment (stained clothes, spilled food, current body positions)
 - Generic atmosphere descriptions without story significance
 - Anything already captured in long-term memory above
 
+DO capture persistent physical anchors even if they feel minor - wounds sustained, physical features described for the first time, notable features of a named location, significant objects referenced by name. These ground the continuity checker.
+
 Types:
-- scene       - current or recently completed scene details (location, atmosphere, time)
+- scene       - current or recently completed scene details (location, atmosphere, time, spatial layout)
 - revelation  - something revealed or discovered in this exchange
 - development - how the relationship or situation changed
-- detail      - specific facts, names, objects, or details mentioned (e.g. "The whiskey is Dragon's Fire brand")
+- detail      - specific facts, names, objects, or physical details mentioned (e.g. "The whiskey is Dragon's Fire brand", "The inn has a locked cellar door", "She has green eyes")
 
 SCORING CRITERIA:
 - 1: Atmospheric or minor flavor detail
@@ -573,7 +580,7 @@ export function buildExtractionPrompt(chatHistory, existingMemories, characterNa
     ? `ACTIVE CHARACTER FOR THIS MEMORY STORE: ${characterName}\n\n`
     : '';
   const existingSection = existingMemories
-    ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\n`
+    ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\nIf a fact has CHANGED since an existing memory was written, extract the updated version using explicit state-change language so it can supersede the old entry. Use phrases like "now", "no longer", "formerly", "became", "used to", "moved to", "stopped" - e.g. "Alex no longer distrusts Finn" or "Alex and Finn are now lovers". Without this phrasing, both the old and new fact will be stored redundantly.\n\n`
     : '';
 
   return (
@@ -587,6 +594,7 @@ Your task: Extract NEW facts worth remembering in future sessions with this char
 
 Prioritization rules (strict):
 - Prioritize durable memories about the ACTIVE CHARACTER and their bond with the user.
+- Physical traits are durable facts - appearance, scars, injuries, distinctive features, notable possessions. Capture these at importance 2-3. They are the anchors a continuity checker depends on.
 - If temporary side characters appear, store only major lasting impact (e.g. a new ally/rival), not blow-by-blow dialogue.
 - Avoid over-capturing a single short-lived topic; keep long-term memory diverse and stable across many sessions.
 
@@ -611,6 +619,7 @@ If the memory involves specific NAMED entities (proper nouns with a specific nam
 
 Output ONLY one memory per line using this exact format (nothing else):
 [fact:2:permanent] The character's name is Elara and she works as a blacksmith.
+[fact:2:permanent:entity=Elara/character] Elara has a burn scar on her right forearm from an accident at the forge.
 [relationship:3:permanent:entity=Elara/character] We have developed a close friendship after helping each other escape the dungeon.
 [event:2:permanent:entity=Elara/character,Kael/character] Elara and Kael fought side by side at the bridge.
 [preference:2:session] The user enjoys slow-burn romance and witty banter.
@@ -618,6 +627,33 @@ Output ONLY one memory per line using this exact format (nothing else):
 
 FINAL RULE: Output ONLY [type:score:expiration] or [type:score:expiration:entity=...] lines. No headers. No intros. No explanations.
 If there is nothing new worth preserving, output exactly: NONE`
+  );
+}
+
+// ---- Supersession confirmation (method B) --------------------------------
+
+/**
+ * Builds the narrow binary prompt used to confirm whether a new memory
+ * updates/replaces an existing one (UPDATE) or is independently true (INDEPENDENT).
+ * Called only for pairs that scored above the same-topic similarity threshold
+ * but had no state-change pattern - i.e. the cheap checks were inconclusive.
+ *
+ * Intentionally minimal: two sentences in, one word out. Short context means
+ * even weak local models answer reliably.
+ *
+ * @param {string} newMemory      - Content of the newly extracted memory.
+ * @param {string} existingMemory - Content of the existing stored memory.
+ * @returns {string} The complete prompt string.
+ */
+export function buildSupersessionConfirmPrompt(newMemory, existingMemory) {
+  return (
+    `[MEMORY CLASSIFICATION - Output one word only: UPDATE or INDEPENDENT]\n\n` +
+    `Existing memory: ${existingMemory}\n` +
+    `New memory:      ${newMemory}\n\n` +
+    `Does the new memory UPDATE or REPLACE the existing memory, making it ` +
+    `outdated or no longer fully accurate?\n` +
+    `Or are both memories INDEPENDENTLY TRUE at the same time?\n\n` +
+    `Output exactly one word: UPDATE or INDEPENDENT`
   );
 }
 

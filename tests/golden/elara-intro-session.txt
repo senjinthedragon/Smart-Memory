@@ -1,0 +1,29 @@
+[scene:2:session] The forge is dimly lit, with a single flame visible in the background, casting long shadows. A hammer rests beside Elara as she works. She does not look up until Senjin speaks.
+
+[revelation:3:session:entity=Elara/character] Elara reveals she grew up in Port Varen, on the south coast, near the Ashwood, and watched ships come in from that side — many of which never returned.
+
+[revelation:2:session:entity=Port Varen/place] Port Varen is identified as a coastal location near the Ashwood, where Elara spent her childhood.
+
+[revelation:2:session:entity=Senjin/character] Senjin reveals he’s heading into the Ashwood, prompting Elara’s recollection and emotional response.
+
+[development:2:session] Senjin offers double payment for a blade, but Elara refuses — yet, under pressure, she accepts and modifies her terms.
+
+[detail:2:session:entity=Elara/character] Elara has a wide, pale burn scar on her right forearm, running from wrist to elbow. She pulls her sleeve down when asked about it — a reflexive gesture.
+
+[detail:2:session:entity=blade/object] The blade given to Senjin is a shortsword — described as clean lines, well-balanced, and better balanced than it looks.
+
+[detail:2:session:entity=Port Varen/place] Elara references Port Varen as “on the south coast” — a specific geographic anchor for her past.
+
+[revelation:2:session:entity=Elara/character] Elara states she came to the forge for “better money, fewer ghosts” — suggesting emotional weight tied to her past.
+
+[detail:2:session:entity=Ashwood/place] The Ashwood is named as a dangerous, maritime zone — the setting for Senjin’s journey and Elara’s childhood memories.
+
+[revelation:2:session:entity=Elara/character] Elara reveals the scar on her arm is from a “forge accident” — years ago — a backstory element now tied to her physical presence.
+
+[development:2:session] The exchange shifts from refusal to concession — Elara, initially dismissive, agrees to craft a blade for Senjin, acknowledging his urgency and offering him payment.
+
+[revelation:3:session] Elara’s emotional response to Senjin’s request — “either you're brave or you're stupid” — reveals a sense of skepticism or caution tied to the Ashwood.
+
+[revelation:3:session:entity=Elara/character] Elara’s tone “closes the subject” when discussing her arm — indicating she prefers to keep her past trauma private.
+
+[detail:2:session] The shortsword’s description — “clean lines, well-balanced,

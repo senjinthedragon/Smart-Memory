@@ -1,0 +1,18 @@
+[scene:2:session] The trio are in a clearing within the Whisperwood, at dusk, under a canopy of ancient trees, with firelight flickering and the scent of damp earth in the air.
+[detail:3:session:entity=The Chasm] A deep, misty chasm with no bridge, where Finn secured a rope using a hanging vine.
+[revelation:3:session] Miren revealed that the Unbound spirits take shelter and imprint upon living hosts without permission, forcing the host and spirit to reconcile or risk ruin.
+[development:2:session] Senjin’s distrust of the Unbound's "theft of self" prompted him to demand clarity from Miren, solidifying his protective instinct toward Alex.
+[detail:3:session:entity=The Unbound] Miren described them as spirits claiming living hosts without consent, capable of causing ruin if the host and spirit fail to reconcile.
+[detail:3:session:entity=The Laments] Miren identified them as spirits of longing searching for a name, voice, or place to belong.
+[detail:3:session:entity=Senjin's shadow magic] The magic at Senjin’s feet surged like a tether when he demanded answers from Miren.
+[revelation:3:session] Senjin questioned whether the Unbound ask permission or simply take what they want, revealing his concern for Alex’s safety.
+[detail:3:session:entity=Miren's emerald wings] Miren’s wings shimmered with emerald light during her explanations, casting an ethereal glow.
+[detail:3:session:entity=Finn’s carving] Finn carved a detailed bird in flight as a personal hobby to recall the feeling of freedom.
+[detail:3:session:entity=Finn’s mug] Finn cradles a mug of hot tea during a reflective moment.
+[detail:3:session:entity=Alex’s grip] Alex clung to Senjin’s ridged neck scales for support and comfort.
+[detail:3:session:entity=Senjin’s scales] Senjin’s purple metallic scales catch light filtering through the canopy, and his horns and claws are described as ebony.
+[detail:3:session:entity=Miren’s guidance] Miren was introduced as a guide and source of forest lore, her words carrying weight.
+[scene:3:session] The group is moving deeper into the Whisperwood, following Miren’s direction into the woods after a sudden gust and the scent of earth.
+[detail:3:session:entity=Finn’s voice] Finn’s voice is described as deep, steady, and calm.
+[revelation:2:session] Finn revealed he believes the Whisperwood’s “eerie cries” are a summons and invitation to the sublime, a harmony with the land’s rhythms.
+[revelation:2:session] Finn admitted he does not claim to be a

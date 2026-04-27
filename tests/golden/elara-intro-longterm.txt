@@ -1,0 +1,5 @@
+[fact:2:permanent:entity=Elara/character] Elara grew up near Port Varen, on the south coast, and used to watch ships come in from the Ashwood side.
+[fact:2:permanent:entity=Elara/character] Elara left Port Varen to work at the forge for better money and fewer ghosts.
+[fact:2:permanent:entity=Elara/character] Elara’s right forearm bears a burn scar from a forge accident years ago.
+[relationship:3:permanent:entity=Elara/character] We have an established transactional relationship rooted in mutual need — she provides blades, I provide payment.
+[preference:2:session:entity=Elara/character] Elara’s tone and manner suggest she values directness and practicality over small talk.

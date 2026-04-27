@@ -21,8 +21,8 @@
  * Long-term memory: per-character persistent facts stored in extension_settings.
  *
  * Memories survive across all sessions and are injected at the start of every
- * new chat with the same character. A fresh-start flag in chatMetadata can
- * suppress injection for a specific chat.
+ * new chat with the same character. A fresh-start flag in chatMetadata suppresses
+ * extraction for a specific chat while keeping injection active.
  *
  * loadCharacterMemories    - returns the stored memory array for a character
  * saveCharacterMemories    - persists the memory array for a character
@@ -33,6 +33,9 @@
  * injectMemories           - pushes memories into the prompt via setExtensionPrompt
  * isFreshStart             - returns whether the current chat has fresh-start enabled
  * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
+ * getReadOnlyStartIndex    - returns the chat index at which read-only mode was last enabled
+ * setReadOnlyStartIndex    - stores or clears the read-only window start index (also stores/clears readOnlyStartTime)
+ * getReadOnlyStartTime     - returns the Unix ms timestamp at which read-only mode was last enabled
  */
 
 import {
@@ -57,7 +60,11 @@ import {
   resolveEntityNames,
   reconcileEntityRegistry,
 } from './graph-migration.js';
-import { buildExtractionPrompt, buildLongtermConsolidationPrompt } from './prompts.js';
+import {
+  buildExtractionPrompt,
+  buildLongtermConsolidationPrompt,
+  buildSupersessionConfirmPrompt,
+} from './prompts.js';
 import { parseExtractionOutput } from './parsers.js';
 import {
   prioritizeMemories,
@@ -70,6 +77,7 @@ import {
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 // Maximum new entries accepted per type per extraction pass.
 // Profile B (hosted) uses a higher cap because hosted models extract more
@@ -130,7 +138,36 @@ async function verifyLongtermCandidates(candidates, existing) {
   if (filtered.length === 0) return { verified: [], superseded: new Map(), confirmed: new Set() };
 
   // Batch-embed all candidates and existing memories in one API call.
-  const { passed, superseded, confirmed } = await batchVerify(filtered, existing);
+  const { passed, superseded, confirmed, uncertain } = await batchVerify(filtered, existing);
+
+  // Method B: for pairs that scored above the same-topic threshold but had no
+  // state-change pattern, ask the model directly. Runs sequentially - Ollama
+  // serializes requests anyway and parallel calls risk OOM on 8GB VRAM.
+  for (const pair of uncertain) {
+    // Skip if a pattern already resolved this candidate as a supersession.
+    if (superseded.has(pair.candText)) continue;
+    try {
+      const prompt = buildSupersessionConfirmPrompt(pair.candObj.content, pair.existingContent);
+      const raw = await generateMemoryExtract(prompt, { responseLength: 20 });
+      const answer = raw
+        .trim()
+        .toUpperCase()
+        .split(/\s/)[0]
+        .replace(/[^A-Z]/g, '');
+      if (answer === 'UPDATE') {
+        superseded.set(pair.candText, pair.existingId);
+        smLog(
+          `[SmartMemory] Method B supersession: "${pair.candObj.content.slice(0, 60)}" replaces id ${pair.existingId}`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal: if B fails, the candidate is treated as a new independent memory.
+      smLog(
+        `[SmartMemory] Method B confirmation failed for "${pair.candText.slice(0, 60)}": ${err.message}`,
+      );
+    }
+  }
+
   const verified = filtered.filter((m) =>
     passed.has(
       String(m.content || '')
@@ -392,7 +429,23 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       // Find the old memory in the active set (it may not be in merged if evicted).
       const oldMem = activeMemories.find((m) => m.id === oldId);
 
-      if (newMem && oldMem && !oldMem.superseded_by) {
+      // Guard: newMem must be a different object with different content.
+      // merged includes both active existing memories and new candidates, so
+      // find() could return the existing memory when content strings match -
+      // which would create a self-supersession chain of identical nodes.
+      const newText = String(newMem?.content || '')
+        .toLowerCase()
+        .trim();
+      const oldText = String(oldMem?.content || '')
+        .toLowerCase()
+        .trim();
+      if (
+        newMem &&
+        oldMem &&
+        !oldMem.superseded_by &&
+        newMem.id !== oldMem.id &&
+        newText !== oldText
+      ) {
         // Link new -> old.
         if (!newMem.supersedes) newMem.supersedes = [];
         if (!newMem.supersedes.includes(oldId)) newMem.supersedes.push(oldId);
@@ -524,7 +577,7 @@ function getConsolidationThresholds(settings) {
  */
 export async function consolidateMemories(characterName, force = false) {
   const settings = extension_settings[MODULE_NAME];
-  if (!settings.longterm_consolidate || !characterName) return 0;
+  if (!settings.consolidation_enabled || !characterName) return 0;
   const thresholds = getConsolidationThresholds(settings);
 
   const memories = loadCharacterMemories(characterName);
@@ -624,16 +677,16 @@ export async function consolidateMemories(characterName, force = false) {
  * Clears the injection slot if fresh-start is active, no character is set,
  * or the character has no memories yet.
  * @param {string} characterName
- * @param {boolean} [freshStart=false] - If true, suppress injection for this chat.
  * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
  *   Only pass true from the post-extraction path (one real AI response turn). All other callers
  *   (chat load, settings change, etc.) leave telemetry unchanged to avoid inflating the signal.
  */
-export async function injectMemories(characterName, freshStart = false, updateTelemetry = false) {
+export async function injectMemories(characterName, updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
 
-  if (!settings.longterm_enabled || freshStart || !characterName) {
+  if (!settings.longterm_enabled || !characterName) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_LONG);
     return;
   }
 
@@ -642,6 +695,7 @@ export async function injectMemories(characterName, freshStart = false, updateTe
   const memories = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_LONG);
     return;
   }
 
@@ -765,4 +819,48 @@ export async function setFreshStart(value) {
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].freshStart = value;
   await context.saveMetadata();
+}
+
+/**
+ * Returns the chat message index at which read-only mode was last enabled,
+ * or null if not set. Used to determine which messages to ghost on disable.
+ * @returns {number|null}
+ */
+export function getReadOnlyStartIndex() {
+  const context = getContext();
+  const val = context.chatMetadata?.[META_KEY]?.readOnlyStartIndex;
+  return typeof val === 'number' ? val : null;
+}
+
+/**
+ * Stores or clears the read-only window start index.
+ * When enabling (index is a number), also records the current Unix ms timestamp
+ * so session memories accumulated during the window can be purged by time on disable.
+ * When disabling (index is null), clears both the index and the timestamp.
+ * @param {number|null} index
+ */
+export async function setReadOnlyStartIndex(index) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  if (index === null) {
+    delete context.chatMetadata[META_KEY].readOnlyStartIndex;
+    delete context.chatMetadata[META_KEY].readOnlyStartTime;
+  } else {
+    context.chatMetadata[META_KEY].readOnlyStartIndex = index;
+    context.chatMetadata[META_KEY].readOnlyStartTime = Date.now();
+  }
+  await context.saveMetadata();
+}
+
+/**
+ * Returns the Unix ms timestamp at which read-only mode was last enabled,
+ * or null if not set. Used to purge session memories that leaked in during
+ * a read-only window when the mode is disabled.
+ * @returns {number|null}
+ */
+export function getReadOnlyStartTime() {
+  const context = getContext();
+  const val = context.chatMetadata?.[META_KEY]?.readOnlyStartTime;
+  return typeof val === 'number' ? val : null;
 }

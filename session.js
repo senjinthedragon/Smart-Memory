@@ -28,6 +28,7 @@
  * loadSessionMemories        - returns the current session memory array
  * saveSessionMemories        - persists the session memory array to chatMetadata
  * clearSessionMemories       - empties session memories for the current chat
+ * purgeSessionMemoriesSince  - deletes all session memories with ts >= a given timestamp and repairs the entity registry
  * extractSessionMemories     - runs extraction against recent messages and merges results
  * consolidateSessionMemories - evaluates unprocessed entries against the consolidated base per type
  * injectSessionMemories      - pushes session memories into the prompt via setExtensionPrompt
@@ -56,7 +57,12 @@ import {
 } from './graph-migration.js';
 import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
 import { parseSessionOutput } from './parsers.js';
-import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
+import {
+  batchVerify,
+  getEmbeddingBatch,
+  cosineSimilarity,
+  getHardwareProfile,
+} from './embeddings.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import {
   buildCurrentSceneStateBlock,
@@ -69,6 +75,7 @@ import {
   trimByPriority,
 } from './memory-utils.js';
 import { smLog } from './logging.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 /**
  * Filters session memory candidates against existing entries, removing
@@ -171,40 +178,89 @@ export async function clearSessionMemories() {
   }
 }
 
+/**
+ * Removes all session memories whose ts field is >= the given timestamp,
+ * then repairs the session entity registry to remove stale memory_ids.
+ *
+ * Used when read-only mode is disabled to purge memories that were extracted
+ * during a read-only window before they can contaminate profiles or the entity
+ * registry. Memories without a ts field are treated as pre-existing and kept.
+ *
+ * @param {number} since - Unix ms timestamp. Memories at or after this time are deleted.
+ * @returns {Promise<number>} Number of memories removed.
+ */
+export async function purgeSessionMemoriesSince(since) {
+  const all = loadSessionMemories();
+  const kept = all.filter((m) => typeof m.ts !== 'number' || m.ts < since);
+  const removed = all.length - kept.length;
+  if (removed === 0) return 0;
+
+  // Repair entity registry - reconcileEntityRegistry prunes stale memory_ids
+  // left behind by the deleted memories and re-links by name match.
+  const entityRegistry = loadSessionEntityRegistry();
+  if (entityRegistry.length > 0) {
+    reconcileEntityRegistry(entityRegistry, kept);
+    await saveSessionEntityRegistry(entityRegistry);
+  }
+
+  await saveSessionMemories(kept);
+  smLog(`[SmartMemory] Purged ${removed} session memories from read-only window.`);
+  return removed;
+}
+
 // ---- Parsing ------------------------------------------------------------
 
 /**
  * Merges new session memories into the existing set, skipping near-duplicates
  * and trimming to the configured maximum.
  *
- * Uses a word-overlap ratio: if the intersection of words between a new item
- * and any existing item exceeds 65% of the larger set's word count, the new
- * item is treated as a duplicate. This threshold is slightly looser than
- * long-term (70%) since session details tend to be more specific and verbose.
- *
- * When over the limit, the oldest entries are dropped from the front.
+ * Primary: cosine similarity on embeddings (threshold 0.82), matching the
+ * scene dedup strategy. Falls back to a word-overlap ratio when embeddings
+ * are unavailable: intersection / max(|A|, |B|) > 0.65. The asymmetric
+ * denominator avoids short strings over-matching against long ones.
  *
  * @param {Array} existing - Currently stored session memories.
  * @param {Array} incoming - Newly extracted items to merge in.
  * @param {number} max - Hard cap on total session memories.
- * @returns {Array} The merged array.
+ * @returns {Promise<Array>} The merged array.
  */
-function deduplicateSession(existing, incoming, max) {
+async function deduplicateSession(existing, incoming, max) {
   const merged = [...existing];
+
+  // Batch all texts up front so comparisons are O(1) per pair.
+  const allTexts = [
+    ...existing.map((m) => m.content.toLowerCase().trim()),
+    ...incoming.map((m) => m.content.toLowerCase().trim()),
+  ];
+  let vectorMap = null;
+  try {
+    vectorMap = await getEmbeddingBatch(allTexts);
+  } catch {
+    // embedding service unavailable - fall through to word-overlap
+  }
+
   for (const mem of incoming) {
-    const words = new Set(mem.content.toLowerCase().split(/\s+/));
+    const memKey = mem.content.toLowerCase().trim();
+    const memVec = vectorMap?.get(memKey);
+
     const isDuplicate = merged.some((ex) => {
       if (ex.type !== mem.type) return false;
+
+      if (memVec) {
+        const exVec = vectorMap.get(ex.content.toLowerCase().trim());
+        if (exVec) return cosineSimilarity(memVec, exVec) > 0.82;
+      }
+
+      // Word-overlap fallback.
+      const words = new Set(mem.content.toLowerCase().split(/\s+/));
       const exWords = new Set(ex.content.toLowerCase().split(/\s+/));
       const intersection = [...words].filter((w) => exWords.has(w)).length;
-      // Normalise against the larger set to avoid short strings
-      // matching too aggressively against long ones.
       return intersection / Math.max(words.size, exWords.size) > 0.65;
     });
     if (!isDuplicate) merged.push(mem);
   }
-  // When over the cap, drop the least valuable entries first:
-  // sort by expiration/importance/keyword recurrence/age, remove from the tail.
+
+  // When over the cap, drop the least valuable entries first.
   if (merged.length > max) {
     const prioritized = prioritizeMemories(merged);
     merged.splice(0, merged.length, ...prioritized);
@@ -221,7 +277,12 @@ function deduplicateSession(existing, incoming, max) {
  * @param {Array} recentMessages - Last N message objects from context.chat.
  * @returns {Promise<number>} Count of new items added (0 on failure or nothing found).
  */
-export async function extractSessionMemories(recentMessages) {
+/**
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; if it returns true the function
+ *   bails out before writing to chatMetadata. Used by the automatic extraction path to abort when
+ *   the user switches chats mid-extraction.
+ */
+export async function extractSessionMemories(recentMessages, abortCheck = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) return 0;
 
@@ -245,7 +306,10 @@ export async function extractSessionMemories(recentMessages) {
 
     // Pass long-term memories so the model skips facts already stored there.
     // Cap to 15 entries to avoid inflating the prompt on local hardware.
-    const characterName = getContext().name2 || getContext().characterName || null;
+    // In group chats there is no single authoritative character, so skip this
+    // hint rather than arbitrarily biasing toward one member's long-term store.
+    const isGroup = !!getContext().groupId;
+    const characterName = isGroup ? null : getContext().name2 || getContext().characterName || null;
     const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
     const longtermText =
       longtermMemories.length > 0 ? formatMemoriesForPrompt(longtermMemories.slice(0, 15)) : '';
@@ -267,7 +331,7 @@ export async function extractSessionMemories(recentMessages) {
     if (incoming.length === 0) return 0;
 
     const max = settings.session_max_memories ?? 30;
-    const merged = deduplicateSession(existing, incoming, max);
+    const merged = await deduplicateSession(existing, incoming, max);
 
     // Apply supersession links. For each candidate that supersedes an existing
     // memory: mark the old memory as retired (superseded_by + valid_to) and
@@ -340,6 +404,7 @@ export async function extractSessionMemories(recentMessages) {
     ];
 
     const added = finalActive.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
+    if (abortCheck?.()) return 0;
     await saveSessionMemories([...finalActive, ...updatedRetired]);
 
     return added;
@@ -352,8 +417,44 @@ export async function extractSessionMemories(recentMessages) {
 // ---- Consolidation ------------------------------------------------------
 
 // How many unprocessed entries of a single type must accumulate before
-// consolidation fires for that type.
-const DEFAULT_SESSION_CONSOLIDATION_THRESHOLD = 3;
+// consolidation fires for that type. Used when per-type settings are absent.
+const DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS = {
+  scene: 3,
+  revelation: 3,
+  development: 3,
+  detail: 3,
+};
+
+/**
+ * Returns per-type consolidation thresholds, reading from settings with fallback to defaults.
+ *
+ * @param {object} settings - Extension settings object.
+ * @returns {{ scene: number, revelation: number, development: number, detail: number }}
+ */
+function getSessionConsolidationThresholds(settings) {
+  return {
+    scene: Math.max(
+      2,
+      settings.session_consolidation_threshold_scene ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.scene,
+    ),
+    revelation: Math.max(
+      2,
+      settings.session_consolidation_threshold_revelation ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.revelation,
+    ),
+    development: Math.max(
+      2,
+      settings.session_consolidation_threshold_development ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.development,
+    ),
+    detail: Math.max(
+      2,
+      settings.session_consolidation_threshold_detail ??
+        DEFAULT_SESSION_CONSOLIDATION_THRESHOLDS.detail,
+    ),
+  };
+}
 
 /**
  * Runs a consolidation pass on session memories for the current chat.
@@ -375,10 +476,8 @@ const DEFAULT_SESSION_CONSOLIDATION_THRESHOLD = 3;
 export async function consolidateSessionMemories(force = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) return 0;
-  const threshold = Math.max(
-    2,
-    settings.session_consolidation_threshold ?? DEFAULT_SESSION_CONSOLIDATION_THRESHOLD,
-  );
+  if (!settings.consolidation_enabled) return 0;
+  const thresholds = getSessionConsolidationThresholds(settings);
 
   const memories = loadSessionMemories();
   let totalRemoved = 0;
@@ -391,7 +490,7 @@ export async function consolidateSessionMemories(force = false) {
       (m) => m.type === type && !m.consolidated && !m.superseded_by,
     );
 
-    if (!force && unprocessed.length < threshold) continue;
+    if (!force && unprocessed.length < (thresholds[type] ?? 3)) continue;
     if (unprocessed.length === 0) continue;
 
     try {
@@ -494,6 +593,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SESSION);
     return;
   }
 
@@ -502,6 +602,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
   const memories = loadSessionMemories().filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SESSION);
     return;
   }
 

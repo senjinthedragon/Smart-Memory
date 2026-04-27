@@ -131,7 +131,7 @@ export function saveCharacterEntityRegistry(characterName, entities) {
  */
 export function loadSessionEntityRegistry() {
   const context = getContext();
-  return context.chatMetadata?.[META_KEY]?.entities ?? [];
+  return context.chatMetadata?.[META_KEY]?.sessionEntities ?? [];
 }
 
 /**
@@ -145,7 +145,7 @@ export async function saveSessionEntityRegistry(entities) {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
-  context.chatMetadata[META_KEY].entities = entities;
+  context.chatMetadata[META_KEY].sessionEntities = entities;
   await context.saveMetadata();
 }
 
@@ -157,7 +157,7 @@ export async function saveSessionEntityRegistry(entities) {
 export async function clearSessionEntityRegistry() {
   const context = getContext();
   if (context.chatMetadata?.[META_KEY]) {
-    context.chatMetadata[META_KEY].entities = [];
+    context.chatMetadata[META_KEY].sessionEntities = [];
     await context.saveMetadata();
   }
 }
@@ -522,6 +522,86 @@ function mergeInRegistry(sourceId, targetId, registry, memories) {
  * @param {Array<Object>} sessionRegistry  - Session entity registry (mutated).
  * @param {Array<Object>} sessionMemories  - Session memory array (mutated).
  */
+
+/**
+ * Merges a source entity into a target entity across both registries, identified
+ * by their IDs rather than names. Safe to use when two entities share the same
+ * name (which would cause mergeEntitiesByName to return early).
+ *
+ * @param {string} sourceId - ID of the entity to remove.
+ * @param {string} targetId - ID of the entity to keep.
+ * @param {Array<Object>} ltRegistry
+ * @param {Array<Object>} ltMemories
+ * @param {Array<Object>} sessionRegistry
+ * @param {Array<Object>} sessionMemories
+ */
+export function mergeEntitiesById(
+  sourceId,
+  targetId,
+  ltRegistry,
+  ltMemories,
+  sessionRegistry,
+  sessionMemories,
+) {
+  if (sourceId === targetId) return;
+
+  // Same-registry merges: both source and target exist in the same store.
+  mergeInRegistry(sourceId, targetId, ltRegistry, ltMemories);
+  mergeInRegistry(sourceId, targetId, sessionRegistry, sessionMemories);
+
+  // Cross-registry: source in LT, target in session (or vice versa).
+  // mergeInRegistry returns early when it cannot find both IDs in one
+  // registry, so we handle cross-registry cases here by absorbing the source
+  // entity's name/aliases into the target and removing the source.
+  const ltSource = ltRegistry.find((e) => e.id === sourceId);
+  const ltTarget = ltRegistry.find((e) => e.id === targetId);
+  const sessSource = sessionRegistry.find((e) => e.id === sourceId);
+  const sessTarget = sessionRegistry.find((e) => e.id === targetId);
+
+  // Helper: add name + aliases from `from` into `to` without creating duplicates.
+  const absorbAliases = (from, to) => {
+    if (!Array.isArray(to.aliases)) to.aliases = [];
+    for (const alias of [from.name, ...(from.aliases ?? [])]) {
+      const lower = alias.toLowerCase().trim();
+      const known =
+        to.name.toLowerCase() === lower || to.aliases.some((a) => a.toLowerCase().trim() === lower);
+      if (!known) to.aliases.push(alias);
+    }
+  };
+
+  if (ltSource && !ltTarget && sessTarget) {
+    // Source only in LT, target only in session: absorb into session target
+    // and rewrite any LT memory refs, then remove source from LT.
+    absorbAliases(ltSource, sessTarget);
+    for (const mem of ltMemories) {
+      if (!Array.isArray(mem.entities)) continue;
+      const idx = mem.entities.indexOf(sourceId);
+      if (idx >= 0) mem.entities.splice(idx, 1);
+    }
+    ltRegistry.splice(
+      ltRegistry.findIndex((e) => e.id === sourceId),
+      1,
+    );
+  }
+
+  if (sessSource && !sessTarget && ltTarget) {
+    // Source only in session, target only in LT: absorb into LT target,
+    // rewrite session memory refs, then remove source from session.
+    absorbAliases(sessSource, ltTarget);
+    for (const mem of sessionMemories) {
+      if (!Array.isArray(mem.entities)) continue;
+      const idx = mem.entities.indexOf(sourceId);
+      if (idx >= 0) {
+        mem.entities.splice(idx, 1);
+        if (!mem.entities.includes(targetId)) mem.entities.push(targetId);
+      }
+    }
+    sessionRegistry.splice(
+      sessionRegistry.findIndex((e) => e.id === sourceId),
+      1,
+    );
+  }
+}
 export function mergeEntitiesByName(
   sourceName,
   targetName,
@@ -644,6 +724,7 @@ function migrateCharacter_v1(charData) {
  */
 function migrateChat_v1(chatMeta) {
   const sessionMemories = (chatMeta.sessionMemories ?? []).map(applyGraphDefaults);
+  // Write to entities for now; migrateChat_v5 renames entities -> sessionEntities.
   const entities = Array.isArray(chatMeta.entities) ? chatMeta.entities : [];
   return { ...chatMeta, sessionMemories, entities };
 }
@@ -654,6 +735,10 @@ function migrateChat_v1(chatMeta) {
  * Adds confidence decay fields (confidence, unconfirmed_since) to every
  * long-term memory. These fields are used by the per-memory confidence decay
  * system introduced in v1.4.0.
+ *
+ * v1 guarantees that every memory already has an `id` field (added by
+ * migrateCharacter_v1 via applyGraphDefaults), so id-based operations are
+ * safe from this version onward without a null-guard.
  *
  * @param {Object} charData - Character data object.
  * @returns {Object} Updated character data with schema_version NOT yet set.
@@ -689,6 +774,42 @@ function migrateChat_v3(chatMeta) {
   return chatMeta;
 }
 
+/**
+ * CHARACTER migration: version 3 -> 4
+ *
+ * Adds persistent_arcs array to character data. Persistent arcs are story
+ * threads the user has pinned to carry forward into future chats with this
+ * character.
+ *
+ * @param {Object} charData - Character data object.
+ * @returns {Object} Updated character data with schema_version NOT yet set.
+ */
+function migrateCharacter_v4(charData) {
+  return { ...charData, persistent_arcs: charData.persistent_arcs ?? [] };
+}
+
+/**
+ * CHAT migration: version 4 -> 5
+ *
+ * Renames the session-scoped entity registry from `entities` to
+ * `sessionEntities` to match the naming convention used by sessionMemories
+ * and to distinguish it clearly from the character-level `entities` field
+ * in extension_settings.
+ *
+ * @param {Object} chatMeta - chatMetadata[META_KEY] block.
+ * @returns {Object} Updated chat meta block with schema_version NOT yet set.
+ */
+function migrateChat_v5(chatMeta) {
+  const sessionEntities = Array.isArray(chatMeta.sessionEntities)
+    ? chatMeta.sessionEntities
+    : Array.isArray(chatMeta.entities)
+      ? chatMeta.entities
+      : [];
+  const updated = { ...chatMeta, sessionEntities };
+  delete updated.entities;
+  return updated;
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn | { fn, deletePaths }> - add new entries here when
 // SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
@@ -697,6 +818,7 @@ function migrateChat_v3(chatMeta) {
 const CHARACTER_MIGRATIONS = new Map([
   [1, migrateCharacter_v1],
   [2, migrateCharacter_v2],
+  [4, migrateCharacter_v4],
 ]);
 
 const CHAT_MIGRATIONS = new Map([
@@ -704,6 +826,8 @@ const CHAT_MIGRATIONS = new Map([
   [2, migrateChat_v2],
   // v3 drops the old flat profiles cache - regenerable, not user data.
   [3, { fn: migrateChat_v3, deletePaths: ['profiles'] }],
+  // v5 renames entities -> sessionEntities.
+  [5, { fn: migrateChat_v5, deletePaths: ['entities'] }],
 ]);
 
 // ---- Migration runner -------------------------------------------------------
@@ -777,10 +901,8 @@ function applyMigrations(container, steps) {
       assertNonDestructive(before, current, version + 1, '', allowDelete);
       smLog(`[SmartMemory] Applied migration step v${version + 1}.`);
     } else {
-      // A missing step is expected when one registry has no change for this
+      // A missing step is normal when one registry has no change for a given
       // version (e.g. CHAT_MIGRATIONS has v3 but CHARACTER_MIGRATIONS does not).
-      // Log so it is visible in debug but do not throw.
-      smLog(`[SmartMemory] No migration step for v${version + 1} in this registry - skipping.`);
     }
     version++;
   }

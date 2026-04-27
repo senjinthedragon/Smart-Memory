@@ -1,0 +1,8 @@
+[arc] Elara’s burn scar is tied to a past forge accident, but its full significance remains unknown.
+[arc] Senjin’s mission into the Ashwood introduces a dangerous region with a history of shipwrecks and peril.
+[arc] Elara’s personal connection to the Ashwood (from Port Varen) hints at unresolved emotional ties to the region.
+[arc] Senjin’s request for a “light, good-reach” blade suggests an imminent combat scenario, possibly involving ambush or stealth.
+[arc] Elara’s statement “came here for work. Better money, fewer ghosts” implies a past trauma or haunting she is trying to escape.
+[arc] The mention of “ghosts” from the Ashwood may imply supernatural or lingering danger tied to the region.
+[resolved] Elara’s offer to forge a blade is accepted, completing the immediate transaction.
+[resolved] Senjin’s payment promise (“I’ll pay double”) is accepted, closing that financial negotiation.

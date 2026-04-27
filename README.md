@@ -79,6 +79,8 @@ Smart Memory watches for scene transitions - time skips, location changes, those
 
 Unresolved narrative threads - promises made, character goals, mysteries introduced, tensions left hanging - are tracked and kept in context. When the story resolves one, it gets marked closed and a short narrative summary of that arc is generated for the record. This keeps the AI oriented toward where the story is going, not just reacting to the last message.
 
+Story arcs are normally chat-local - they start fresh with each new chat. If you are running a story across multiple chats with the same character (new chats as chapters rather than fresh starts), you can **pin an arc** using the thumbtack button next to it. Pinned arcs are stored at the character level and automatically appear in every new chat with that character. Unpinning returns the arc to chat-local scope; resolving a pinned arc removes it from future chats automatically.
+
 ### Canon
 
 Once you have at least one resolved arc summary, you can generate a **canon document** - a stable prose narrative synthesized from those arc summaries and high-importance long-term facts. Think of it as a "story bible" for the character: not a list of extracted facts, but a composed history written by the model from everything it has learned.
@@ -119,15 +121,17 @@ Smart Memory is designed to work _alongside_ SillyTavern's built-in vector stora
 
 If you are on limited VRAM (8GB or less), keep the Message Limit extension enabled and consider lowering **Max session memories** to around 15 to keep prompt size comfortable.
 
-### Recommended local model
+### Recommended local models
 
-For local Ollama setups with limited VRAM (8GB or less), the best tested model for Smart Memory's extraction and summarization tasks is:
+For local Ollama setups with limited VRAM (8GB or less), three models have been tested against Smart Memory's full extraction harness and score 47-48/48 (98-100%):
 
-**`huihui_ai/qwen3-vl-abliterated:8b-instruct`**
+**`huihui_ai/qwen3-vl-abliterated:8b-instruct`** (6.1 GB) - primary recommendation. Reliable, consistent, no thinking overhead. Abliterated variant handles explicit roleplay content without refusals.
 
-It follows structured output formats reliably, handles explicit roleplay content without refusals, and fits comfortably at 4-bit quantization on an 8GB card alongside the embedding model.
+**`mistral:7b`** (4.1 GB) - strong alternative when VRAM is tighter. Matches qwen3-vl quality with no thinking mode. A good choice if you want to free up headroom for the embedding model alongside the roleplay model.
 
-Other 8B-class models tested against Smart Memory's prompts consistently produced garbled or nonsense output once the combined prompt length (chat history + existing memories + instructions) exceeded their effective context window. Smart Memory's extraction prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle here. If you try a different model and get malformed output, context overflow is the most likely cause.
+**`gemma3:4b`** (3.3 GB) - lightest recommended option. Matches qwen3-vl on most extractions; occasionally classifies long-term-relevant details into the session tier on very long chats. Use if 4 GB is your hard limit.
+
+All three follow structured output formats reliably. Smart Memory's extraction prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle here if the combined prompt length exceeds its effective context window. If you get malformed or empty extraction output with a different model, context overflow is the most likely cause.
 
 ### Injection depth stacking order
 
@@ -152,6 +156,15 @@ If you change ST's vector storage depth, set session memory one higher so it sti
 ## Settings
 
 All settings are saved automatically per profile.
+
+### Simple and Advanced Mode
+
+The settings panel has two modes:
+
+- **Simple mode** (default) - shows only the most commonly adjusted controls: hardware profile, extraction frequency (Low/Medium/High), and a single total memory context budget slider. Consolidation, injection templates, compaction tuning, and all per-tier position/depth/role settings are hidden and run on sensible defaults.
+- **Advanced mode** - reveals everything: per-tier budgets, injection positions, depths, roles, template fields, compaction threshold, response lengths, and the Consolidation section. Toggle it with the **Advanced mode** checkbox at the top of the settings panel.
+
+Switching from simple to advanced never overwrites your values - the advanced controls always show the current state, including any values previously set by the simple-mode sliders.
 
 ### Hardware Profile
 
@@ -197,7 +210,6 @@ ollama pull nomic-embed-text
 | Enable auto-summarization | On                           | Summarize automatically at threshold                                                                                                                                                                                                                                                                                      |
 | Context threshold         | 80%                          | Summarize when context reaches this % of the model's limit                                                                                                                                                                                                                                                                |
 | Summary response length   | 2000 tokens                  | Length budget for the summary - also acts as the injection cap                                                                                                                                                                                                                                                            |
-| Hide summarized messages  | Off                          | After each compaction, automatically hide all messages that have been folded into the summary. They remain in the chat file but are visually collapsed and excluded from the context window - the injected summary already covers their content. Toggling this on an existing chat applies or restores hiding immediately |
 | Injection template        | `Story so far:\n{{summary}}` | Wrapper text around the summary                                                                                                                                                                                                                                                                                           |
 | Injection position        | In-prompt                    | Where in the prompt the summary appears                                                                                                                                                                                                                                                                                   |
 
@@ -205,6 +217,7 @@ ollama pull nomic-embed-text
 
 | Setting            | Default                          | Description                                                                                          |
 | ------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Enable canon       | On                               | Inject canon and allow auto-regeneration. Disabling suppresses both injection and Profile B auto-gen |
 | Injection budget   | 800 tokens                       | Canon text is trimmed from the end if it exceeds this limit                                          |
 | Injection template | `Character history:\n{{canon}}`  | Wrapper text around the canon document                                                               |
 | Injection position | In-prompt                        | Where in the prompt canon appears                                                                    |
@@ -213,16 +226,14 @@ The **Generate Canon** button synthesizes a prose narrative from resolved arc su
 
 ### Long-term Memory
 
-| Setting                                 | Default                                               | Description                                                                                                                                                                                             |
-| --------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enable long-term memory                 | On                                                    | Extract and inject persistent character facts                                                                                                                                                           |
-| Auto-consolidate                        | On                                                    | Periodically merge near-duplicate entries                                                                                                                                                               |
-| Exclude this chat from long-term memory | Off                                                   | Suppresses long-term extraction and injection for this specific chat only - stored memories for other chats are not affected                                                                            |
-| Extract every N messages                | 3                                                     | How often automatic extraction runs                                                                                                                                                                     |
-| Max memories per character              | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
-| Injection token budget                  | 500                                                   | Least important memories are trimmed first when the budget is exceeded - based on importance, expiration, recency, and how often a memory has been recalled                                             |
-| Injection template                      | `Memories from previous conversations:\n{{memories}}` | Wrapper text                                                                                                                                                                                            |
-| Injection position                      | In-prompt                                             | Where in the prompt memories appear                                                                                                                                                                     |
+| Setting                    | Default                                               | Description                                                                                                                                                                                             |
+| -------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable long-term memory    | On                                                    | Extract and inject persistent character facts                                                                                                                                                           |
+| Extract every N messages   | 3                                                     | How often automatic extraction runs                                                                                                                                                                     |
+| Max memories per character | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries, so one category cannot crowd out the others |
+| Injection token budget     | 500                                                   | Least important memories are trimmed first when the budget is exceeded - based on importance, expiration, recency, and how often a memory has been recalled                                             |
+| Injection template         | `Memories from previous conversations:\n{{memories}}` | Wrapper text                                                                                                                                                                                            |
+| Injection position         | In-prompt                                             | Where in the prompt memories appear                                                                                                                                                                     |
 
 The long-term list shows a **retired** badge on superseded entries. A "Show retired memories" toggle reveals them. Each retired entry has a "superseded by" link to the replacement. Memories with unresolved contradictions show a yellow warning indicator.
 
@@ -236,6 +247,24 @@ The long-term list shows a **retired** badge on superseded entries. A "Show reti
 | Injection token budget   | 400                                       | Least important memories trimmed first when exceeded - based on importance, expiration, and recency |
 | Injection template       | `Details from this session:\n{{session}}` | Wrapper text                                                                                        |
 | Injection position       | In-chat @ depth 3                         | Sits just above ST's default vector depth                                                           |
+
+### Consolidation
+
+Consolidation runs after each extraction pass and asks the LLM to merge near-duplicate or redundant entries into richer single items. This prevents the same information accumulating in slightly different forms across sessions. It runs silently in the background and is recommended for all setups.
+
+The Consolidation section is only shown in advanced mode. In simple mode it is always on with the defaults below.
+
+| Setting                              | Default | Description                                                                               |
+| ------------------------------------ | ------- | ----------------------------------------------------------------------------------------- |
+| Enable consolidation                 | On      | Master toggle - disabling this skips consolidation for both long-term and session memory  |
+| Long-term: consolidate [fact] after  | 4       | Number of unprocessed entries before a consolidation pass fires for that type             |
+| Long-term: consolidate [relationship]| 3       |                                                                                           |
+| Long-term: consolidate [preference]  | 3       |                                                                                           |
+| Long-term: consolidate [event]       | 4       |                                                                                           |
+| Session: consolidate [scene] after   | 3       | Number of unprocessed session entries before consolidation fires for that type            |
+| Session: consolidate [revelation]    | 3       |                                                                                           |
+| Session: consolidate [development]   | 3       |                                                                                           |
+| Session: consolidate [detail]        | 3       |                                                                                           |
 
 ### Character and World Profiles
 
@@ -304,6 +333,21 @@ The registry is built from both the persistent (long-term) and session stores an
 
 All manual operations are in the **Configuration** section at the top of the panel, or inside their respective tier sections.
 
+### Read-only Mode
+
+The **Read-only mode - protect character memories** toggle sits just below the chat action buttons. When enabled, the character arrives with all their memories and behaves normally, but nothing from this chat is saved back to their persistent state - no new long-term memories, arcs, canon, or profiles are written.
+
+Use it to try out a risky scene before committing it to the character's history, or for a consequence-free session. Turn it off again afterward and their memories are exactly as you left them.
+
+When you turn read-only off, a confirmation dialog asks what to do with the window:
+
+- **OK (Commit)** - keeps everything. Session memories are preserved and Smart Memory runs full extraction on the window messages - long-term memories, arcs, and profiles are built as if read-only had never been active. The messages stay visible.
+- **Cancel (Discard)** - throws everything away. Session memories are purged and all messages in the window are automatically hidden from the AI so they can never be picked up by future extraction passes. This is the default consequence-free path.
+
+The "Delete messages" option in the chat context menu is suppressed while read-only is active to prevent message deletions from corrupting the hidden range. You can toggle read-only on and off multiple times in the same chat; each window is handled independently.
+
+**Using read-only with checkpoints and branches**: SillyTavern's checkpoint and branch features save the chat up to a specific message as a new chat file. Smart Memory's long-term memories are shared across all chats with the same character and will not roll back if you switch to a checkpoint or branch. If you plan to use checkpoints or branches to explore alternative story paths, enable read-only mode first. Smart Memory will warn you with a toast notification if you create a checkpoint or branch without read-only active.
+
 ### Memorize Chat
 
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat or to build up a character's long-term memory from previous sessions.
@@ -326,7 +370,7 @@ Clears all Smart Memory context for the current chat - summary, session memories
 
 Clears everything for a clean slate - long-term memories, canon, and entity registry for the current character plus all chat-scoped tiers (summary, session memories, scene history, arcs, profiles). Does not suppress future memory generation; the AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
 
-To prevent a specific chat from contributing to long-term memory at all, use the **Exclude this chat from long-term memory** checkbox in the Long-term Memory section instead.
+To prevent a specific chat from contributing to long-term memory at all, use the **Read-only mode** toggle at the top of the settings panel instead.
 
 ### Per-tier Extract Buttons
 
@@ -352,10 +396,11 @@ For the full chat backlog, use **Memorize Chat** instead.
 
 ### Editing and Adding Memories Manually
 
-Every entry in the long-term memory, session memory, and story arc lists has two action buttons:
+Every entry in the long-term memory, session memory, and story arc lists has action buttons:
 
 - **Pencil (edit)** - replaces the entry text with an inline textarea. Edit the content and click **Save**, or click **Cancel** to discard changes. Not shown on retired memories.
 - **Trash / Checkmark (delete/resolve)** - removes the entry immediately. For story arcs the button is a checkmark to indicate resolving the thread rather than discarding it.
+- **Pin (story arcs only)** - marks the arc as persistent so it carries into future chats with the same character. The pin icon turns gold and the arc gets a gold left border when pinned. Click again to unpin.
 
 Below each list an **Add** form lets you insert a new entry manually:
 
@@ -406,7 +451,7 @@ During trimming, Smart Memory scores each entry across multiple dimensions: expi
 
 ### Supersession
 
-When the story changes a fact - a character moves, a relationship ends, a decision is reversed - Smart Memory detects this automatically. If a new memory candidate describes a state change on the same topic as an existing one, the old memory is retired and replaced rather than kept alongside as a contradiction. Retired memories remain in storage (visible with the "Show retired memories" toggle) but are excluded from injection and retrieval.
+When the story changes a fact - a character moves, a relationship ends, a decision is reversed - Smart Memory detects this automatically. Detection runs in two passes: first, a fast pattern check looks for state-change language in the new memory ("no longer", "became", "healed", "left the", "was captured", etc.); second, any candidate that scored above the same-topic similarity threshold but had no pattern match is sent to a short model confirmation call that asks whether the new memory updates or replaces the old one. Together these catch a broad range of phrasings without requiring every possible state-change verb to be listed. The old memory is retired and replaced rather than kept alongside as a contradiction. Retired memories remain in storage (visible with the "Show retired memories" toggle) but are excluded from injection and retrieval.
 
 ### Contradiction warnings
 
@@ -416,9 +461,20 @@ When two stored memories cannot both be true and neither clearly replaces the ot
 
 ### Developer
 
-| Setting         | Default | Description                                                                                                                                           |
-| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Verbose logging | Off     | Print extraction, consolidation, migration, and scene detection progress to the browser console. Errors are always logged regardless of this setting. |
+| Setting                          | Default | Description                                                                                                                                                                                                                                                              |
+| -------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Verbose logging                  | Off     | Print extraction, consolidation, migration, and scene detection progress to the browser console. Errors are always logged regardless of this setting.                                                                                                                    |
+| Unified injection (experimental) | Off     | Merges all active memory tiers into a single IN_PROMPT block. Ordered most-stable-first (canon, profiles, long-term) to most-immediate-last (session, arcs). Token bar still shows per-tier breakdowns.                                                                  |
+
+---
+
+## Known Limitations
+
+**Editing past messages** - If a message is edited after Smart Memory has already extracted memories from it, those memories are not updated. The character may hold beliefs formed from the original text that no longer match the edited version. If you edit a message and the change is significant, review the relevant memory entries manually and correct or delete them as needed.
+
+**Hiding past messages** - Hiding a message that Smart Memory has already processed does not remove the memories formed from it. The information stays in the character's memory even though the message is no longer in context.
+
+**Checkpoints and branches** - See the [Read-only Mode](#read-only-mode) section.
 
 ---
 

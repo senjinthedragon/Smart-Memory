@@ -85,20 +85,51 @@ export function jaccardSimilarity(a, b) {
 // handled by later consolidation; false positives (wrongly retiring a valid
 // memory) are harder to recover from.
 export const STATE_CHANGE_PATTERNS = [
+  // Negation / reversal
   /\bno longer\b/i,
   /\bnot anymore\b/i,
   /\bno more\b/i,
-  /\bstopped\b/i,
-  /\bmoved (?:to|away|from|out)\b/i,
-  /\bbroke up\b/i,
-  /\bformerly\b/i,
+  /\bcan no longer\b/i,
+
+  // "now" prefix - broad but only fires alongside semantic similarity check
+  /\bare now\b/i,
+  /\bis now\b/i,
+  /\bcan now\b/i,
+  /\bnow \w/i,
+
+  // Temporal markers
+  /\bformer(?:ly)?\b/i,
   /\bused to\b/i,
+  /\bonce (?:was|were|believed?|thought|feared?|distrusted?|had)\b/i,
+  /\bhas since\b/i,
+
+  // Transition verbs
   /\bbecame\b/i,
+  /\bstopped\b/i,
   /\bswitched (?:to|from)\b/i,
-  /\bnow (?:lives?|works?|is|has)\b/i,
+  /\bmoved (?:to|away|from|out)\b/i,
   /\breconciled\b/i,
   /\bseparated\b/i,
   /\bended the\b/i,
+  /\bbroke up\b/i,
+
+  // Physical / status changes
+  /\bhealed\b/i,
+  /\brecovered\b/i,
+  /\blost (?:her|his|their|the|a|an|my)\b/i,
+  /\bstole (?:her|his|their|the|a|an|my)\b/i,
+  /\bdestroyed\b/i,
+  /\bburned down\b/i,
+
+  // Allegiance / membership
+  /\bjoined (?:the|a|an)\b/i,
+  /\bleft (?:the|a|an)\b/i,
+  /\bdefected\b/i,
+  /\babandoned (?:the|a|an|her|his|their)\b/i,
+
+  // Fate
+  /\bwas (?:killed|murdered|captured|freed|released|exiled|banished|promoted|demoted|betrayed|stolen|destroyed|burned|lost)\b/i,
+  /\bhas (?:died|been (?:killed|captured|freed|released|exiled|banished|promoted|demoted|stolen|destroyed))\b/i,
 ];
 
 /**
