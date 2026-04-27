@@ -307,7 +307,10 @@ export async function batchVerify(candidates, existing) {
         // High similarity: would normally be a duplicate. If the candidate
         // contains a state-change marker it is superseding this fact instead.
         // Without a pattern, mark as uncertain so B can make the call.
-        if (isSameType && ex.id) {
+        // Exception: if the content is identical after normalization, always
+        // treat as a duplicate - a memory cannot supersede itself.
+        const contentIdentical = candText === exText;
+        if (isSameType && ex.id && !contentIdentical) {
           if (candHasStateChange && score > bestSupersessionScore) {
             bestSupersessionScore = score;
             bestSupersessionId = ex.id;

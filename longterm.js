@@ -429,7 +429,23 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       // Find the old memory in the active set (it may not be in merged if evicted).
       const oldMem = activeMemories.find((m) => m.id === oldId);
 
-      if (newMem && oldMem && !oldMem.superseded_by) {
+      // Guard: newMem must be a different object with different content.
+      // merged includes both active existing memories and new candidates, so
+      // find() could return the existing memory when content strings match -
+      // which would create a self-supersession chain of identical nodes.
+      const newText = String(newMem?.content || '')
+        .toLowerCase()
+        .trim();
+      const oldText = String(oldMem?.content || '')
+        .toLowerCase()
+        .trim();
+      if (
+        newMem &&
+        oldMem &&
+        !oldMem.superseded_by &&
+        newMem.id !== oldMem.id &&
+        newText !== oldText
+      ) {
         // Link new -> old.
         if (!newMem.supersedes) newMem.supersedes = [];
         if (!newMem.supersedes.includes(oldId)) newMem.supersedes.push(oldId);
