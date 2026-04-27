@@ -423,6 +423,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entity's name and aliases into the target, rewriting memory refs, and
   removing the source from its registry.
 
+- **Supersession rarely firing for evolved facts**: the extraction prompts told
+  the model not to duplicate existing memories but gave no guidance on how to
+  express an update. The model would write a fresh positive fact ("Alex and Finn
+  are now lovers") with no state-change language, so the supersession detector
+  never recognized it as replacing the older entry ("Alex is wary of Finn") and
+  both accumulated together. Both the long-term and session extraction prompts
+  now include an explicit instruction to use state-change phrasing ("now",
+  "no longer", "became", "stopped", etc.) when a known fact has evolved, so the
+  supersession detector can retire the outdated entry.
+
 - **Memory lists not sorted by timestamp**: long-term and session memory lists
   in the Entity Registry panel displayed memories in insertion order (roughly
   extraction time), which did not reflect story chronology and appeared random

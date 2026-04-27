@@ -172,7 +172,7 @@ export const RECAP_PROMPT =
  */
 export function buildSessionExtractionPrompt(chatHistory, existingSession, longtermMemories = '') {
   const existingSection = existingSession
-    ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\n`
+    ? `ALREADY RECORDED THIS SESSION (do not duplicate):\n${existingSession}\n\nIf something from this list has CHANGED, extract the updated version using explicit state-change language ("now", "no longer", "became", "stopped", etc.) so it can supersede the outdated entry rather than accumulating alongside it.\n\n`
     : '';
 
   const longtermSection = longtermMemories
@@ -579,7 +579,7 @@ export function buildExtractionPrompt(chatHistory, existingMemories, characterNa
     ? `ACTIVE CHARACTER FOR THIS MEMORY STORE: ${characterName}\n\n`
     : '';
   const existingSection = existingMemories
-    ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\n`
+    ? `EXISTING MEMORIES (do NOT duplicate or rephrase these - only add genuinely new information):\n${existingMemories}\n\nIf a fact has CHANGED since an existing memory was written, extract the updated version using explicit state-change language so it can supersede the old entry. Use phrases like "now", "no longer", "formerly", "became", "used to", "moved to", "stopped" - e.g. "Alex no longer distrusts Finn" or "Alex and Finn are now lovers". Without this phrasing, both the old and new fact will be stored redundantly.\n\n`
     : '';
 
   return (
