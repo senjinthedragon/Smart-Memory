@@ -248,6 +248,7 @@ export function loadPersistentArcs(characterName) {
  */
 export function savePersistentArcs(characterName, arcs) {
   if (!characterName) return;
+  if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
   if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
   if (!extension_settings[MODULE_NAME].characters[characterName])
     extension_settings[MODULE_NAME].characters[characterName] = {};
@@ -357,12 +358,14 @@ export async function demoteArc(index, characterName) {
 async function generateArcSummary(arcContent) {
   const settings = extension_settings[MODULE_NAME];
 
-  // Collect the last N scene summaries as context for the arc.
-  // Using all available scenes keeps the summary grounded without extra calls.
-  const sceneHistory = loadSceneHistory();
+  // Use only the most recent scenes as context. The arc being summarized was
+  // active and resolved in the recent portion of the chat; attributing it to
+  // scenes from much earlier in the chat inflates source provenance and adds
+  // noise to canon generation.
+  const sceneHistory = loadSceneHistory().slice(-5);
   const sceneSummaries = sceneHistory.map((s, i) => `Scene ${i + 1}: ${s.summary}`).join('\n');
 
-  // Gather source_memory_ids from all scenes (deduplicated) and fetch their content.
+  // Gather source_memory_ids from these scenes (deduplicated).
   const allMemoryIds = new Set(sceneHistory.flatMap((s) => s.source_memory_ids ?? []));
   const sessionMemories = loadSessionMemories();
   const linkedMemories = sessionMemories
@@ -504,8 +507,14 @@ export async function extractArcs(messages, characterName = null, abortCheck = n
     }
 
     const max = settings.arcs_max ?? 10;
-    // slice(-max) keeps the most recent arcs when over the limit.
-    const merged = [...afterResolve, ...dedupedAdd].slice(-max);
+
+    // Re-load one final time just before saving. The async dedup phase above
+    // may have yielded long enough for a UI edit (delete, inline save) to write
+    // chatMetadata. Re-fetching here ensures those edits are not overwritten.
+    // Apply resolved removals and dedupedAdd on top of whatever is current.
+    const finalBase = loadArcs().filter((a) => !resolvedContentSet.has(a.content));
+    const finalNew = dedupedAdd.filter((n) => !finalBase.some((a) => a.content === n.content));
+    const merged = [...finalBase, ...finalNew].slice(-max);
 
     if (abortCheck?.()) return 0;
     await saveArcs(merged);
@@ -538,6 +547,8 @@ export function injectArcs() {
   }
 
   // Trim to token budget: drop oldest arcs (from the front) until we fit.
+  // If a single arc still exceeds the budget, hard-truncate its content so the
+  // injection is always within the cap regardless of individual entry length.
   const budget = settings.arcs_inject_budget ?? 400;
   const trimmed = [...arcs];
   while (trimmed.length > 1) {
@@ -546,7 +557,11 @@ export function injectArcs() {
     trimmed.shift();
   }
 
-  const text = trimmed.map((a) => `- ${a.content}`).join('\n');
+  let text = trimmed.map((a) => `- ${a.content}`).join('\n');
+  if (estimateTokens(text) > budget) {
+    const ratio = budget / estimateTokens(text);
+    text = text.slice(0, Math.floor(text.length * ratio)).trim();
+  }
   const content = `Active story threads:\n${text}`;
 
   setExtensionPrompt(

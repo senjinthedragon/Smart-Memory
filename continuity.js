@@ -159,7 +159,7 @@ export async function generateRepair(contradictions, characterName) {
   });
 
   smLog('[SmartMemory] Repair note generated:', note);
-  return note.trim();
+  return typeof note === 'string' ? note.trim() : null;
 }
 
 /**

@@ -302,6 +302,8 @@ export function injectSceneHistory() {
   }
 
   // Trim to token budget: drop oldest scenes (from the front) until we fit.
+  // If a single scene still exceeds the budget, hard-truncate so the injection
+  // is always within the cap regardless of individual summary length.
   const budget = settings.scene_inject_budget ?? 300;
   const trimmed = [...history];
   while (trimmed.length > 1) {
@@ -310,7 +312,11 @@ export function injectSceneHistory() {
     trimmed.shift();
   }
 
-  const text = trimmed.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
+  let text = trimmed.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
+  if (estimateTokens(text) > budget) {
+    const ratio = budget / estimateTokens(text);
+    text = text.slice(0, Math.floor(text.length * ratio)).trim();
+  }
   const content = `Previous scenes:\n${text}`;
 
   setExtensionPrompt(
