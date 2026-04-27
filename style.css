@@ -284,6 +284,11 @@
 
 /* ── Long-term memories list ─────────────────────────────────────────────── */
 
+#smart_memory_settings .sm_toggle_retired {
+  white-space: nowrap;
+  align-self: flex-start;
+}
+
 #smart_memory_settings .sm_memories_list {
   display: flex;
   flex-direction: column;
