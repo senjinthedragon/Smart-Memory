@@ -160,6 +160,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   injection from the newer selection. The handler now captures the selected value
   at entry and bails after the first await if the selection has since changed.
 
+- **Unified injection stale tier content after memory deletion**: when all
+  memories of a tier were deleted or a tier was disabled, `injectUnified` still
+  injected the previous content from its internal cache on subsequent passes.
+  The cache was only updated when an injector wrote non-empty content, so
+  intentional clears were silently ignored. Each tier injector now calls
+  `invalidateUnifiedCache` alongside any empty `setExtensionPrompt` write,
+  ensuring the unified block reflects the actual current state.
+
+- **`/sm-search` named arguments silently ignored**: the slash command accepted
+  `k` (result count) and `min` (minimum similarity score) as named arguments in
+  its callback and help text, but the command definition omitted
+  `namedArgumentList`. SillyTavern never parsed them - they fell through as part
+  of the query string and defaults were always used regardless of what the user
+  passed. `namedArgumentList` now declares both parameters with correct types and
+  default values.
+
+- **Short-term summary injected when auto-summarization is disabled**: disabling
+  the compaction toggle suppressed new summary generation but did not clear the
+  injection slot, so an existing summary continued to appear in every prompt.
+  `injectSummary` and `loadAndInjectSummary` now clear the slot when
+  `compaction_enabled` is false, matching the behaviour of every other tier
+  toggle.
+
 - **Embedding inactive notice**: a persistent amber notice now appears at the
   top of the Smart Memory settings panel whenever semantic embeddings are
   inactive - either because the toggle is off, or because an API call failed
@@ -328,6 +351,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings migration, and UI binding), and a trimmed `index.js` retaining only
   state variables, event handlers, and the jQuery init block. No behaviour
   changes; import graph is strictly one-way with no circular dependencies.
+
+- **Memory graph pauses rendering when idle**: the force simulation render loop
+  previously ran at 60 fps continuously while the graph overlay was open,
+  regardless of whether anything was moving. The loop now stops once the
+  simulation has settled and no interaction is in progress, resuming only when
+  needed - hover entering a node, selection click, scroll zoom, filter toggle,
+  or reset. This eliminates idle GPU usage on battery-powered machines.
 
 ## [1.5.1] - 2026-04-24
 
