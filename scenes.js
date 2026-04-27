@@ -47,6 +47,7 @@ import { buildSceneDetectPrompt, SCENE_SUMMARY_PROMPT } from './prompts.js';
 import { detectSceneBreakHeuristic } from './parsers.js';
 import { smLog } from './logging.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 // Re-export so index.js can import directly from scenes.js as before.
 export { detectSceneBreakHeuristic };
@@ -289,12 +290,14 @@ export function injectSceneHistory() {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.scene_enabled) {
     setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SCENES);
     return;
   }
 
   const history = loadSceneHistory();
   if (history.length === 0) {
     setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SCENES);
     return;
   }
 

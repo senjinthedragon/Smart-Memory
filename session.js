@@ -75,6 +75,7 @@ import {
   trimByPriority,
 } from './memory-utils.js';
 import { smLog } from './logging.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 /**
  * Filters session memory candidates against existing entries, removing
@@ -592,6 +593,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SESSION);
     return;
   }
 
@@ -600,6 +602,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
   const memories = loadSessionMemories().filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SESSION);
     return;
   }
 

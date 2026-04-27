@@ -63,6 +63,7 @@ import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import {
   ARGUMENT_TYPE,
   SlashCommandArgument,
+  SlashCommandNamedArgument,
 } from '../../../slash-commands/SlashCommandArgument.js';
 
 import { shouldCompact, runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
@@ -1739,6 +1740,22 @@ jQuery(async function () {
         showSearchResults(q, top);
         return `Found ${top.length} result${top.length === 1 ? '' : 's'} for "${q}".`;
       },
+      namedArgumentList: [
+        SlashCommandNamedArgument.fromProps({
+          name: 'k',
+          description: 'number of results to return (default 10, max 50)',
+          typeList: [ARGUMENT_TYPE.NUMBER],
+          isRequired: false,
+          defaultValue: '10',
+        }),
+        SlashCommandNamedArgument.fromProps({
+          name: 'min',
+          description: 'minimum similarity score to include a result (default 0.5, range 0-1)',
+          typeList: [ARGUMENT_TYPE.NUMBER],
+          isRequired: false,
+          defaultValue: '0.5',
+        }),
+      ],
       unnamedArgumentList: [new SlashCommandArgument('search query', [ARGUMENT_TYPE.STRING], true)],
       helpString:
         'Searches long-term and session memories by semantic similarity. Displays top matching memories with type and tier labels. Optional: k sets result count (default 10, max 50); min sets the minimum similarity threshold to filter weak matches (default 0.5, range 0-1).',

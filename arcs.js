@@ -56,6 +56,7 @@ import { loadSceneHistory } from './scenes.js';
 import { loadSessionMemories } from './session.js';
 import { smLog } from './logging.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 // ---- Deduplication ------------------------------------------------------
 
@@ -525,12 +526,14 @@ export function injectArcs() {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.arcs_enabled) {
     setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_ARCS);
     return;
   }
 
   const arcs = loadArcs();
   if (arcs.length === 0) {
     setExtensionPrompt(PROMPT_KEY_ARCS, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_ARCS);
     return;
   }
 

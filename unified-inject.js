@@ -21,12 +21,15 @@
  * Unified injection mode: merges all active tier content into a single
  * IN_PROMPT block instead of injecting each tier into its own named slot.
  *
- * injectUnified        - reads individual tier slots, composes them, clears
- *                        the individual slots, and injects the merged block
- * maybeInjectUnified   - calls injectUnified only when the setting is enabled
- * clearUnifiedSlot     - clears the unified slot and the stored breakdown
+ * injectUnified           - reads individual tier slots, composes them, clears
+ *                           the individual slots, and injects the merged block
+ * maybeInjectUnified      - calls injectUnified only when the setting is enabled
+ * clearUnifiedSlot        - clears the unified slot and the stored breakdown
+ * invalidateUnifiedCache  - removes a tier's cached content; call this whenever
+ *                           an injector explicitly empties its slot so the cache
+ *                           does not inject stale content on the next pass
  * getUnifiedTierBreakdown - returns per-tier token counts from the last pass
- *                          so updateTokenDisplay can still render tier colours
+ *                           so updateTokenDisplay can still render tier colours
  */
 
 import { extension_settings } from '../../../extensions.js';
@@ -104,6 +107,22 @@ export function clearUnifiedSlot() {
   setExtensionPrompt(PROMPT_KEY_UNIFIED, '', extension_prompt_types.NONE, 0);
   lastTierBreakdown = [];
   contentCache = {};
+}
+
+/**
+ * Removes a single tier's entry from the content cache.
+ *
+ * The cache bridges extraction gaps: when injectUnified runs, it clears all
+ * individual tier slots so they cannot be double-injected alongside the unified
+ * block. On the next call, slots that were not refreshed by their injector fall
+ * back to the cache. However, if an injector explicitly empties its slot (e.g.
+ * all memories were deleted), the cache would otherwise keep injecting stale
+ * content. Call this function immediately after any setExtensionPrompt call that
+ * writes an empty string to a tier slot.
+ * @param {string} key - The PROMPT_KEY_* constant for the tier being cleared.
+ */
+export function invalidateUnifiedCache(key) {
+  delete contentCache[key];
 }
 
 /**

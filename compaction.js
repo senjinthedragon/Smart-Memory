@@ -43,6 +43,7 @@ import { buildSummaryPrompt, buildUpdateSummaryPrompt } from './prompts.js';
 import { formatSummary } from './parsers.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 /**
  * Counts tokens across all non-system chat messages.
@@ -204,8 +205,9 @@ export async function runCompaction() {
  */
 export function injectSummary(summary) {
   const settings = extension_settings[MODULE_NAME];
-  if (!summary) {
+  if (!settings.compaction_enabled || !summary) {
     setExtensionPrompt(PROMPT_KEY_SHORT, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SHORT);
     return;
   }
 
@@ -252,6 +254,7 @@ export function loadAndInjectSummary() {
     injectSummary(summary);
   } else {
     setExtensionPrompt(PROMPT_KEY_SHORT, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SHORT);
   }
   return summary || null;
 }

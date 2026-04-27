@@ -47,6 +47,7 @@ import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadArcSummaries } from './arcs.js';
 import { smLog } from './logging.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 // ---- Storage ------------------------------------------------------------
 
@@ -94,6 +95,7 @@ export function clearCanon(characterName) {
     saveSettingsDebounced();
   }
   setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+  invalidateUnifiedCache(PROMPT_KEY_CANON);
 }
 
 // ---- Generation ---------------------------------------------------------
@@ -157,12 +159,14 @@ export function injectCanon(characterName) {
 
   if (!(settings.canon_enabled ?? true)) {
     setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_CANON);
     return;
   }
 
   const canon = loadCanon(characterName);
   if (!canon) {
     setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_CANON);
     return;
   }
 

@@ -73,6 +73,7 @@ import {
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
 
 // Maximum new entries accepted per type per extraction pass.
 // Profile B (hosted) uses a higher cap because hosted models extract more
@@ -636,6 +637,7 @@ export async function injectMemories(characterName, updateTelemetry = false) {
 
   if (!settings.longterm_enabled || !characterName) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_LONG);
     return;
   }
 
@@ -644,6 +646,7 @@ export async function injectMemories(characterName, updateTelemetry = false) {
   const memories = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_LONG);
     return;
   }
 
