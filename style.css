@@ -1149,7 +1149,7 @@
 
 .sm_search_item {
   padding: 8px 0;
-  border-bottom: 1px solid var(--border-color-subtle, rgba(255, 255, 255, 0.07));
+  border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.07));
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -1229,8 +1229,9 @@
 }
 
 #sm_graph_card {
-  background: var(--black-2, #1a1a2e);
-  border: 1px solid var(--border-color, #444);
+  background: var(--SmartThemeBlurTintColor, #1a1a2e);
+  border: 1px solid var(--SmartThemeBorderColor, #444);
+  color: var(--SmartThemeBodyColor, #dcdcd2);
   border-radius: 8px;
   width: calc(100vw - 32px);
   max-width: 1300px;
@@ -1248,7 +1249,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border-color-subtle, rgba(255, 255, 255, 0.07));
+  border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.07));
   flex-shrink: 0;
 }
 
@@ -1304,8 +1305,9 @@
   position: absolute;
   display: none;
   pointer-events: none;
-  background: rgba(18, 18, 30, 0.96);
-  border: 1px solid var(--border-color, #444);
+  background: var(--SmartThemeBlurTintColor, rgba(18, 18, 30, 0.96));
+  color: var(--SmartThemeBodyColor, #dcdcd2);
+  border: 1px solid var(--SmartThemeBorderColor, #444);
   border-radius: 5px;
   padding: 8px 11px;
   font-size: 0.78em;
@@ -1340,7 +1342,7 @@
   gap: 20px;
   flex-wrap: wrap;
   padding: 8px 16px;
-  border-top: 1px solid var(--border-color-subtle, rgba(255, 255, 255, 0.07));
+  border-top: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.07));
   font-size: 0.72em;
   opacity: 0.65;
   flex-shrink: 0;
@@ -1378,7 +1380,7 @@
 }
 
 .sm_graph_legend_edge_supersedes {
-  color: #d4905b;
+  color: var(--SmartThemeQuoteColor, #d4905b);
 }
 
 /* ── Away recap modal ──────────────────────────────────────────────────────── */

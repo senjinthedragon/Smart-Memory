@@ -27,6 +27,8 @@ export default [
         // Animation frame API - available in browsers and Electron
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
+        // CSS variable inspection
+        getComputedStyle: 'readonly',
         // jQuery and toastr - provided by SillyTavern host page
         $: 'readonly',
         jQuery: 'readonly',

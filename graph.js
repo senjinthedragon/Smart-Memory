@@ -56,6 +56,39 @@ const ENTITY_RADIUS = 32;
 // Wide ratio so tiers read clearly on large screens.
 const MEMORY_RADII = [7, 13, 21];
 
+// ---- Theme helpers ----------------------------------------------------------
+
+/**
+ * Reads the active SillyTavern theme's CSS variables so the canvas renderer
+ * can match the surrounding UI. Called once per render frame so theme changes
+ * (e.g. the user switching themes while the graph is open) are reflected
+ * without needing to reopen the graph.
+ * @returns {{ bg: string, text: string, edgeLink: string, retiredStroke: string, selectGlow: string, hoverGlow: string }}
+ */
+function getGraphTheme() {
+  const style = getComputedStyle(document.documentElement);
+  const get = (v, fallback) => style.getPropertyValue(v).trim() || fallback;
+  const bg = get('--SmartThemeBlurTintColor', '#12121e');
+  const text = get('--SmartThemeBodyColor', '#dcdcd2');
+  const em = get('--SmartThemeEmColor', '#919191');
+  return {
+    bg,
+    text,
+    // Link edges use the theme's muted text color at low opacity.
+    edgeLink: em,
+    // Supersession arrows use the theme's quote/accent color when available,
+    // falling back to the original orange which reads well on most backgrounds.
+    edgeSupersedes: get('--SmartThemeQuoteColor', '#d4905b'),
+    // Retired node dashed border adapts to text color.
+    retiredStroke: text,
+    // Selection and hover glows are neutral so they work on any background.
+    selectGlow: 'rgba(255,255,200,0.18)',
+    hoverGlow: 'rgba(128,128,128,0.15)',
+    // Label shadow contrasts against both light and dark backgrounds.
+    labelShadow: 'rgba(0,0,0,0.85)',
+  };
+}
+
 // ---- Force simulation constants ---------------------------------------------
 
 const REPULSION_K = 3500; // Coulomb-like repulsion strength
@@ -386,11 +419,12 @@ function tick() {
 function render() {
   const { nodes, edges, canvas, ctx, camera, selected, hovered } = gs;
   const { width, height } = canvas;
+  const theme = getGraphTheme();
 
   ctx.clearRect(0, 0, width, height);
 
-  // Background.
-  ctx.fillStyle = '#12121e';
+  // Background - matches the card's panel background from the active ST theme.
+  ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, width, height);
 
   // Camera transform: world origin maps to canvas center + pan offset.
@@ -414,11 +448,11 @@ function render() {
     const alpha = dimmed ? 0.04 : baseAlpha;
 
     if (edge.edgeType === 'supersedes') {
-      drawArrow(ctx, a.x, a.y, b.x, b.y, '#d4905b', alpha, b.radius);
+      drawArrow(ctx, a.x, a.y, b.x, b.y, theme.edgeSupersedes, alpha, b.radius);
     } else {
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.strokeStyle = '#8899aa';
+      ctx.strokeStyle = theme.edgeLink;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -441,7 +475,7 @@ function render() {
     if (isSelected || isHovered) {
       ctx.beginPath();
       ctx.arc(node.x, node.y, node.radius + 5, 0, 2 * Math.PI);
-      ctx.fillStyle = isSelected ? 'rgba(255,255,200,0.18)' : 'rgba(255,255,255,0.08)';
+      ctx.fillStyle = isSelected ? theme.selectGlow : theme.hoverGlow;
       ctx.fill();
     }
 
@@ -454,7 +488,8 @@ function render() {
     // Retired memory: dashed border.
     if (node.nodeType === 'memory' && node.retired) {
       ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.strokeStyle = theme.retiredStroke;
+      ctx.globalAlpha = (ctx.globalAlpha ?? 1) * 0.3;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.setLineDash([]);
@@ -472,9 +507,9 @@ function render() {
     ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowColor = theme.labelShadow;
     ctx.shadowBlur = 3;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = theme.text;
     ctx.fillText(node.label, node.x, node.y + node.radius + 4);
     ctx.shadowBlur = 0;
     ctx.restore();
