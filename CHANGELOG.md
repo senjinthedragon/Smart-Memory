@@ -322,6 +322,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memories). Timestamps now fall back to the `ts` field (Unix ms, set on
   every memory at creation) formatted as a locale date/time string.
 
+- **`generateRepair` returning undefined instead of null on non-string model
+  output**: when the model returned a non-string value, `generateRepair` fell
+  through with an implicit `undefined` return instead of the documented `null`.
+  The return is now guarded with a `typeof note === 'string'` check so callers
+  always receive either a trimmed string or `null`.
+
+- **`savePersistentArcs` throwing when settings store is uninitialised**: if
+  `extension_settings[MODULE_NAME]` or its `characters` sub-object had not yet
+  been created, the function threw a TypeError on the first write. Both the
+  outer settings object and the characters map are now created on demand before
+  the write proceeds.
+
+- **Oversized single item not capped by arc and scene token budget loops**: the
+  `while (trimmed.length > 1)` budget loop in `injectArcs` and
+  `injectSceneHistory` would leave a single oversized item uncapped when it
+  alone exceeded the budget. Both functions now apply a hard proportional
+  truncation after the loop so the injected text is always within the configured
+  budget regardless of individual item size.
+
+- **Arc summaries including the full scene history**: `generateArcSummary` fed
+  all stored scene history into the summarisation prompt, causing bloated prompts
+  and unfocused summaries on long chats. The scene history is now capped to the
+  five most recent scenes.
+
+- **Last-write-wins data loss in concurrent arc extraction paths**: `extractArcs`
+  re-loaded the arc list once after the model call to avoid index-based races, but
+  the race window extended through the async deduplication phase. A second re-load
+  now occurs immediately before `saveArcs`, with a content-based merge so arcs
+  added by any overlapping extraction path are preserved rather than overwritten.
+
 ### Changed
 
 - **All lone and paired buttons are now full-width in the settings panel**: any
