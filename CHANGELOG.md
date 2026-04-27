@@ -476,6 +476,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   badge so users immediately understand the controls are gated to the hosted
   profile, without needing to hover the tooltip.
 
+- **Self-supersession chains in graph**: when a newly extracted memory had
+  nearly identical content to an existing one but also contained a state-change
+  marker, the supersession linker could produce a chain where a memory retired
+  itself - appearing as two identical nodes connected by an arrow in the graph.
+  Two guards added: `batchVerify` now treats identical-content pairs as
+  duplicates regardless of state-change markers, and the supersession linking
+  step verifies that the new and old memories are distinct objects with
+  different content before writing the chain.
+
+- **Read-only session commit dialog referenced wrong button labels**: the
+  confirmation popup described the choices as "OK" and "Cancel" but the
+  `POPUP_TYPE.CONFIRM` dialog renders "Yes" and "No" buttons.
+
+- **Force graph not following the active SillyTavern theme**: the canvas
+  renderer used fully hardcoded colors (`#12121e` background, `#ffffff`
+  labels, `#8899aa` link edges, `#d4905b` supersession arrows). A
+  `getGraphTheme()` helper now reads `--SmartThemeBlurTintColor`,
+  `--SmartThemeBodyColor`, `--SmartThemeEmColor`, and
+  `--SmartThemeQuoteColor` at render time so the graph matches any ST
+  theme without needing to reopen it. The card, toolbar, tooltip, and
+  legend borders were updated from hardcoded values to the same CSS
+  variables.
+
+- **Graph filter toggle labels and "Show retired memories" button
+  wrapping**: the "Session" and "Retired" filter toggles in the graph
+  toolbar, and the "Show retired memories" / "Hide retired memories"
+  button in the Long-term Memory panel, could wrap to multiple stacked
+  lines when the container was narrow. Both now have `white-space: nowrap`
+  to stay on a single line.
+
 ## [1.5.1] - 2026-04-24
 
 ### Fixed

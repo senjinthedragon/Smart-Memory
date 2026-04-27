@@ -451,7 +451,7 @@ During trimming, Smart Memory scores each entry across multiple dimensions: expi
 
 ### Supersession
 
-When the story changes a fact - a character moves, a relationship ends, a decision is reversed - Smart Memory detects this automatically. If a new memory candidate describes a state change on the same topic as an existing one, the old memory is retired and replaced rather than kept alongside as a contradiction. Retired memories remain in storage (visible with the "Show retired memories" toggle) but are excluded from injection and retrieval.
+When the story changes a fact - a character moves, a relationship ends, a decision is reversed - Smart Memory detects this automatically. Detection runs in two passes: first, a fast pattern check looks for state-change language in the new memory ("no longer", "became", "healed", "left the", "was captured", etc.); second, any candidate that scored above the same-topic similarity threshold but had no pattern match is sent to a short model confirmation call that asks whether the new memory updates or replaces the old one. Together these catch a broad range of phrasings without requiring every possible state-change verb to be listed. The old memory is retired and replaced rather than kept alongside as a contradiction. Retired memories remain in storage (visible with the "Show retired memories" toggle) but are excluded from injection and retrieval.
 
 ### Contradiction warnings
 
