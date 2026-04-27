@@ -66,7 +66,8 @@ import { loadCharacterMemories, saveCharacterMemories, injectMemories } from './
 import { loadSessionMemories, saveSessionMemories, injectSessionMemories } from './session.js';
 import { loadSceneHistory } from './scenes.js';
 import { loadArcs, saveArcs, deleteArc, injectArcs, promoteArc, demoteArc } from './arcs.js';
-import { loadCanon, loadArcSummaries } from './canon.js';
+import { loadCanon } from './canon.js';
+import { loadArcSummaries } from './arcs.js';
 import { loadProfiles } from './profiles.js';
 import {
   loadCharacterEntityRegistry,
