@@ -1442,6 +1442,23 @@
   user-select: none;
 }
 
+/* Inline badge used to label Profile-B-only controls so users understand
+   why the option is unavailable without needing to hover the tooltip. */
+#smart_memory_settings .sm-profile-tag {
+  display: inline-block;
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--SmartColor, #7b68ee) 20%, transparent);
+  color: var(--SmartColor, #7b68ee);
+  border: 1px solid color-mix(in srgb, var(--SmartColor, #7b68ee) 40%, transparent);
+  vertical-align: middle;
+  margin-left: 5px;
+  white-space: nowrap;
+}
+
 /* Embedding inactive notice - shown at the top of the panel when semantic
    embeddings are disabled or have failed this session. Amber tint without
    hardcoding colors so it adapts to any ST theme. */

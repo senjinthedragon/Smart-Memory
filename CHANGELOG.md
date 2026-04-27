@@ -423,6 +423,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entity's name and aliases into the target, rewriting memory refs, and
   removing the source from its registry.
 
+- **Memory lists not sorted by timestamp**: long-term and session memory lists
+  in the Entity Registry panel displayed memories in insertion order (roughly
+  extraction time), which did not reflect story chronology and appeared random
+  when multiple extractions ran close together. Both lists now sort by the `ts`
+  field ascending before rendering.
+
+- **Short-term Extraction and Injection section headers visible in simple mode**:
+  two `<p class="sm-section-title">` headers in the Short-term Memory section
+  were missing the `sm-advanced-only` class, so they remained visible in simple
+  mode even though all their sibling controls were correctly hidden. Both headers
+  now carry `sm-advanced-only` and hide with the rest of the advanced controls.
+
+- **Profile B-only controls in Continuity Checker had no visible indication**:
+  the "Auto-check after each response" and "Auto-repair contradictions" checkboxes
+  were grayed out and non-interactive on Profile A but carried no label explaining
+  why. The "Also regenerate profiles every N messages" slider in the Profiles
+  section had the same issue. All three now display a small inline "Profile B"
+  badge so users immediately understand the controls are gated to the hosted
+  profile, without needing to hover the tooltip.
+
 ## [1.5.1] - 2026-04-24
 
 ### Fixed
