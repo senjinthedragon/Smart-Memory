@@ -433,10 +433,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   use state-change phrasing when a known fact has evolved. Second, the
   state-change pattern list was too narrow - it required "now" to be followed
   by one of four specific verbs (lives/works/is/has) and matched "formerly" but
-  not "former". Patterns now cover "are now / is now / now \<any word\>",
-  "former(ly)", "has since", and "once was/believed/feared" so outputs like
-  "Alex and Finn are now lovers" and "Alex now accepts magic is real" are
-  correctly detected.
+  not "former". Patterns now cover "are now / is now / can now / now \<any word\>",
+  "former(ly)", "has since", "once was/believed/feared/had", physical recovery
+  ("healed", "recovered"), possession loss ("lost his/her/the", "stole his/her",
+  "was stolen/destroyed"), allegiance changes ("joined the", "left the",
+  "defected", "abandoned"), and fate events ("was killed / captured / freed /
+  promoted / betrayed / exiled") so a broad range of fact-update phrasings are
+  correctly detected across relationship, belief, physical, possession, and
+  allegiance changes. All five change categories were verified by running test
+  prompts against the extraction model.
 
 - **Memory lists not sorted by timestamp**: long-term and session memory lists
   in the Entity Registry panel displayed memories in insertion order (roughly
