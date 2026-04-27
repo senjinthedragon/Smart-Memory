@@ -65,9 +65,16 @@ import {
 import { loadCharacterMemories, saveCharacterMemories, injectMemories } from './longterm.js';
 import { loadSessionMemories, saveSessionMemories, injectSessionMemories } from './session.js';
 import { loadSceneHistory } from './scenes.js';
-import { loadArcs, saveArcs, deleteArc, injectArcs, promoteArc, demoteArc } from './arcs.js';
+import {
+  loadArcs,
+  saveArcs,
+  deleteArc,
+  injectArcs,
+  promoteArc,
+  demoteArc,
+  loadArcSummaries,
+} from './arcs.js';
 import { loadCanon } from './canon.js';
-import { loadArcSummaries } from './arcs.js';
 import { loadProfiles } from './profiles.js';
 import {
   loadCharacterEntityRegistry,
