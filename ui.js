@@ -1003,7 +1003,12 @@ export function updateEntityPanel(characterName) {
           const sessReg = loadSessionEntityRegistry();
           const sessMems = loadSessionMemories();
           mergeEntitiesByName(entity.name, targetName, ltReg, ltMems, sessReg, sessMems);
-          if (characterName) saveCharacterMemories(characterName, ltMems);
+          if (characterName) {
+            saveCharacterEntityRegistry(characterName, ltReg);
+            saveCharacterMemories(characterName, ltMems);
+          }
+          await saveSessionEntityRegistry(sessReg);
+          await saveSessionMemories(sessMems);
           await persistAndRefresh();
         });
         $picker.append($opt);
@@ -1033,7 +1038,12 @@ export function updateEntityPanel(characterName) {
       const sessMems = loadSessionMemories();
       deleteEntityById(entity.id, ltReg, ltMems);
       deleteEntityById(entity.id, sessReg, sessMems);
-      if (characterName) saveCharacterMemories(characterName, ltMems);
+      if (characterName) {
+        saveCharacterEntityRegistry(characterName, ltReg);
+        saveCharacterMemories(characterName, ltMems);
+      }
+      await saveSessionEntityRegistry(sessReg);
+      await saveSessionMemories(sessMems);
       await persistAndRefresh();
     });
 
