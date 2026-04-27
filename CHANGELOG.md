@@ -423,15 +423,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entity's name and aliases into the target, rewriting memory refs, and
   removing the source from its registry.
 
-- **Supersession rarely firing for evolved facts**: the extraction prompts told
-  the model not to duplicate existing memories but gave no guidance on how to
-  express an update. The model would write a fresh positive fact ("Alex and Finn
-  are now lovers") with no state-change language, so the supersession detector
-  never recognized it as replacing the older entry ("Alex is wary of Finn") and
-  both accumulated together. Both the long-term and session extraction prompts
-  now include an explicit instruction to use state-change phrasing ("now",
-  "no longer", "became", "stopped", etc.) when a known fact has evolved, so the
-  supersession detector can retire the outdated entry.
+- **Supersession rarely firing for evolved facts**: two separate gaps prevented
+  supersession from working in practice. First, the extraction prompts told the
+  model not to duplicate existing memories but gave no guidance on how to
+  express an update - the model would write "Alex and Finn are now lovers"
+  rather than "Alex no longer distrusts Finn", so the detector never recognized
+  it as replacing the old entry and both accumulated together. Both the
+  long-term and session extraction prompts now explicitly instruct the model to
+  use state-change phrasing when a known fact has evolved. Second, the
+  state-change pattern list was too narrow - it required "now" to be followed
+  by one of four specific verbs (lives/works/is/has) and matched "formerly" but
+  not "former". Patterns now cover "are now / is now / now \<any word\>",
+  "former(ly)", "has since", and "once was/believed/feared" so outputs like
+  "Alex and Finn are now lovers" and "Alex now accepts magic is real" are
+  correctly detected.
 
 - **Memory lists not sorted by timestamp**: long-term and session memory lists
   in the Entity Registry panel displayed memories in insertion order (roughly

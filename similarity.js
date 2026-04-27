@@ -91,14 +91,20 @@ export const STATE_CHANGE_PATTERNS = [
   /\bstopped\b/i,
   /\bmoved (?:to|away|from|out)\b/i,
   /\bbroke up\b/i,
-  /\bformerly\b/i,
+  /\bformer(?:ly)?\b/i,
   /\bused to\b/i,
   /\bbecame\b/i,
   /\bswitched (?:to|from)\b/i,
-  /\bnow (?:lives?|works?|is|has)\b/i,
+  // "now" followed by any verb or noun signals a state update - broad but only
+  // fires alongside a semantic similarity check so false positives are rare.
+  /\bare now\b/i,
+  /\bis now\b/i,
+  /\bnow \w/i,
   /\breconciled\b/i,
   /\bseparated\b/i,
   /\bended the\b/i,
+  /\bhas since\b/i,
+  /\bonce (?:was|were|believed?|thought|feared?|distrusted?)\b/i,
 ];
 
 /**
