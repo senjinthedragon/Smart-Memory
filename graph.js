@@ -62,7 +62,7 @@ const REPULSION_K = 3500; // Coulomb-like repulsion strength
 const SPRING_K = 0.05; // Hooke's law spring stiffness
 const SPRING_REST_EM = 140; // entity-memory edge rest length
 const SPRING_REST_MM = 55; // memory-memory (supersedes) rest length
-const DAMPING = 0.90; // velocity multiplied by this each tick
+const DAMPING = 0.9; // velocity multiplied by this each tick
 const GRAVITY_K = 0.012; // pull toward world origin (0,0)
 const ALPHA_DECAY = 0.992; // simulation cools by this factor each tick
 const ALPHA_MIN = 0.004; // stop when alpha falls below this
@@ -603,15 +603,31 @@ function renderTooltip() {
 
 // ---- Animation loop ---------------------------------------------------------
 
+/**
+ * Restarts the rAF loop if it has been paused due to idle state.
+ * Call this from any event handler that causes a visual change while the
+ * simulation is settled (hover, selection, zoom, filter toggle).
+ */
+function wakeGraph() {
+  if (gs && !gs.rafId) scheduleFrame();
+}
+
 function scheduleFrame() {
   if (!gs) return;
   gs.rafId = requestAnimationFrame(() => {
     if (!gs) return;
-    if (gs.alpha > ALPHA_MIN || gs.dragging) {
-      tick();
-    }
+    // Tick only while the simulation is active or a node is being dragged.
+    // Panning also keeps the loop running so the canvas tracks the cursor.
+    const simActive = gs.alpha > ALPHA_MIN || gs.dragging || gs.panning;
+    if (simActive) tick();
     render();
-    scheduleFrame();
+    if (simActive) {
+      scheduleFrame();
+    } else {
+      // Simulation idle and no interaction in progress - stop burning frames.
+      // wakeGraph() restarts the loop whenever a visual change is needed.
+      gs.rafId = null;
+    }
   });
 }
 
@@ -669,7 +685,7 @@ function bindEvents(canvas, $overlay, characterName) {
       node.y = world.y + gs.dragging.offsetY;
       node.vx = 0;
       node.vy = 0;
-      gs.alpha = Math.max(gs.alpha, 0.10); // briefly reheat so graph settles
+      gs.alpha = Math.max(gs.alpha, 0.1); // briefly reheat so graph settles
       return;
     }
 
@@ -692,6 +708,8 @@ function bindEvents(canvas, $overlay, characterName) {
     if (node !== gs.hovered) {
       gs.hovered = node;
       canvas.style.cursor = node ? 'pointer' : 'grab';
+      // Hover changed while sim is idle - need one render to show highlight.
+      wakeGraph();
     }
   };
 
@@ -741,6 +759,7 @@ function bindEvents(canvas, $overlay, characterName) {
       const world = mouseToWorld(e);
       const node = nodeAtWorld(world.x, world.y);
       gs.selected = node === gs.selected ? null : node;
+      wakeGraph();
     }
   };
 
@@ -757,6 +776,7 @@ function bindEvents(canvas, $overlay, characterName) {
     gs.camera.x = mx - (mx - gs.camera.x) * (newScale / gs.camera.scale);
     gs.camera.y = my - (my - gs.camera.y) * (newScale / gs.camera.scale);
     gs.camera.scale = newScale;
+    wakeGraph();
   };
 
   // ---- Keyboard: Escape to close ----
@@ -787,6 +807,7 @@ function bindEvents(canvas, $overlay, characterName) {
     initPositions(gs.nodes, gs.edges);
     gs.camera = { x: 0, y: 0, scale: 1 };
     gs.alpha = 1.0;
+    wakeGraph();
     // Re-fit after the simulation has had a moment to settle.
     setTimeout(() => {
       if (gs) {
@@ -831,6 +852,7 @@ function rebuildGraph(characterName) {
   gs.alpha = 1.0;
   gs.selected = null;
   gs.hovered = null;
+  wakeGraph();
 }
 
 // ---- Lifecycle helpers ------------------------------------------------------
