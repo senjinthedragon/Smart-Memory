@@ -71,14 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session memories and retired memories can be toggled live without closing
   the graph.
 
-### Changed
-
-- **index.js split into three modules**: the 5000-line monolith has been split
-  into `ui.js` (display and render functions), `settings.js` (default values,
-  settings migration, and UI binding), and a trimmed `index.js` retaining only
-  state variables, event handlers, and the jQuery init block. No behaviour
-  changes; import graph is strictly one-way with no circular dependencies.
-
 ### Removed
 
 - **Hide summarized messages**: the "Hide summarized messages" checkbox
@@ -330,6 +322,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block with a note that they anchor the continuity checker. The session prompt
   narrows its skip rule to genuinely transient state (wet sleeve, spilled food)
   and adds a positive `DO capture` directive for persistent physical anchors.
+
+- **index.js split into three modules**: the 5000-line monolith has been split
+  into `ui.js` (display and render functions), `settings.js` (default values,
+  settings migration, and UI binding), and a trimmed `index.js` retaining only
+  state variables, event handlers, and the jQuery init block. No behaviour
+  changes; import graph is strictly one-way with no circular dependencies.
 
 ## [1.5.1] - 2026-04-24
 
