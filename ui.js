@@ -542,7 +542,8 @@ export function updateSessionUI() {
     return;
   }
 
-  const hasRetiredSession = memories.some((m) => m.superseded_by);
+  const sortedSession = [...memories].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  const hasRetiredSession = sortedSession.some((m) => m.superseded_by);
 
   if (hasRetiredSession) {
     const $toggle = $(
@@ -559,7 +560,7 @@ export function updateSessionUI() {
     });
   }
 
-  memories.forEach((mem, idx) => {
+  sortedSession.forEach((mem, idx) => {
     const isRetired = Boolean(mem.superseded_by);
     const hasConflict = Array.isArray(mem.contradicts) && mem.contradicts.length > 0;
     const retiredClass = isRetired ? ' sm_memory_retired' : '';
@@ -1141,7 +1142,8 @@ export function renderMemoriesList(memories, characterName) {
     return;
   }
 
-  const hasRetired = memories.some((m) => m.superseded_by);
+  const sorted = [...memories].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  const hasRetired = sorted.some((m) => m.superseded_by);
 
   // "Show retired" toggle - only rendered when retired memories exist.
   if (hasRetired) {
@@ -1161,7 +1163,7 @@ export function renderMemoriesList(memories, characterName) {
     });
   }
 
-  memories.forEach((mem, idx) => {
+  sorted.forEach((mem, idx) => {
     const isRetired = Boolean(mem.superseded_by);
     const hasConflict = Array.isArray(mem.contradicts) && mem.contradicts.length > 0;
     const retiredClass = isRetired ? ' sm_memory_retired' : '';
