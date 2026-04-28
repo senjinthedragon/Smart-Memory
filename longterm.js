@@ -497,7 +497,13 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
       }
     }
+    // Reconcile after every extraction pass, not just after consolidation.
+    // Local models often omit the :entity= tag even when the entity is clearly
+    // named in the memory content. The substring pass here catches those misses
+    // immediately so memories don't float as isolated nodes until the next
+    // consolidation cycle (which may never come for small memory sets).
     if (entityRegistry.length > 0) {
+      reconcileEntityRegistry(entityRegistry, finalActive);
       saveCharacterEntityRegistry(characterName, entityRegistry);
     }
 

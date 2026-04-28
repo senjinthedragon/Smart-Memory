@@ -393,7 +393,11 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
       }
     }
+    // Reconcile after every extraction pass so memories whose entity tag was
+    // omitted by the model get linked via substring match immediately rather
+    // than waiting for the next consolidation cycle.
     if (entityRegistry.length > 0) {
+      reconcileEntityRegistry(entityRegistry, finalActive);
       await saveSessionEntityRegistry(entityRegistry);
     }
 
