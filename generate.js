@@ -280,7 +280,10 @@ export async function generateMemorySummarize(
   // quiet prompt as the final user message - same approach as WebLLM.
   if (source === memory_sources.ollama || source === memory_sources.openai_compatible) {
     const context = getContext();
-    const allMessages = (context.chat ?? [])
+    const chat = context.chat ?? [];
+    const lastMsg = chat[chat.length - 1];
+    const stableChat = lastMsg && !lastMsg.is_user && !lastMsg.is_system ? chat.slice(0, -1) : chat;
+    const allMessages = stableChat
       .filter((msg) => !msg.is_system)
       .map((msg) => ({ role: msg.is_user ? 'user' : 'assistant', content: msg.mes ?? '' }));
 
@@ -302,7 +305,11 @@ export async function generateMemorySummarize(
       );
     } else {
       const context = getContext();
-      const allMessages = (context.chat ?? [])
+      const chat = context.chat ?? [];
+      const lastMsg = chat[chat.length - 1];
+      const stableChat =
+        lastMsg && !lastMsg.is_user && !lastMsg.is_system ? chat.slice(0, -1) : chat;
+      const allMessages = stableChat
         .filter((msg) => !msg.is_system)
         .map((msg) => ({
           role: msg.is_user ? 'user' : 'assistant',

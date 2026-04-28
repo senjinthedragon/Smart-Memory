@@ -156,7 +156,14 @@ export async function runCompaction() {
 
     if (existingSummary && summaryEnd > 0 && summaryEnd < context.chat.length) {
       // Progressive path: feed only the new messages to the update prompt.
-      const newMessages = context.chat.slice(summaryEnd);
+      // Exclude the trailing AI message - it may still be a swipe candidate and
+      // has not been confirmed by the user sending a reply yet.
+      const rawNewMessages = context.chat.slice(summaryEnd);
+      const lastNew = rawNewMessages[rawNewMessages.length - 1];
+      const newMessages =
+        lastNew && !lastNew.is_user && !lastNew.is_system
+          ? rawNewMessages.slice(0, -1)
+          : rawNewMessages;
       const newEvents = newMessages
         .filter((m) => m.mes && !m.is_system)
         .map((m) => `${m.name}: ${m.mes}`)
@@ -187,8 +194,13 @@ export async function runCompaction() {
     context.chatMetadata[META_KEY].summary = summary;
     context.chatMetadata[META_KEY].summaryUpdated = Date.now();
     // Record how far into the chat this summary covers so the next compaction
-    // knows where "new" messages begin.
-    context.chatMetadata[META_KEY].summaryEnd = context.chat.length;
+    // knows where "new" messages begin. Exclude the trailing AI message if it
+    // was skipped above - the next compaction will pick it up from this index.
+    const lastChatMsg = context.chat[context.chat.length - 1];
+    context.chatMetadata[META_KEY].summaryEnd =
+      lastChatMsg && !lastChatMsg.is_user && !lastChatMsg.is_system
+        ? context.chat.length - 1
+        : context.chat.length;
     await context.saveMetadata();
 
     return summary;
