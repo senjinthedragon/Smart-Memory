@@ -123,18 +123,23 @@ export function showMemoryGraph(characterName) {
   if (gs) closeGraph();
 
   // Repair any entity-memory links that the model missed before rendering.
+  // Both registries are reconciled against the combined memory pool so that a
+  // session memory can link to an LT entity and vice versa.
+  const ltMems = characterName
+    ? loadCharacterMemories(characterName).filter((m) => !m.superseded_by)
+    : [];
+  const sessionMems = loadSessionMemories().filter((m) => !m.superseded_by);
+  const allMems = [...ltMems, ...sessionMems];
   if (characterName) {
     const ltRegistry = loadCharacterEntityRegistry(characterName);
     if (ltRegistry.length > 0) {
-      const ltMems = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
-      reconcileEntityRegistry(ltRegistry, ltMems);
+      reconcileEntityRegistry(ltRegistry, allMems);
       saveCharacterEntityRegistry(characterName, ltRegistry);
     }
   }
   const sessionRegistry = loadSessionEntityRegistry();
   if (sessionRegistry.length > 0) {
-    const sessionMems = loadSessionMemories().filter((m) => !m.superseded_by);
-    reconcileEntityRegistry(sessionRegistry, sessionMems);
+    reconcileEntityRegistry(sessionRegistry, allMems);
     saveSessionEntityRegistry(sessionRegistry).catch(console.error);
   }
 
@@ -214,11 +219,21 @@ function buildGraph(characterName, opts) {
   const ltEntities = characterName ? loadCharacterEntityRegistry(characterName) : [];
   const sessionEntities = opts.showSession ? loadSessionEntityRegistry() : [];
 
-  // Deduplicate by name|type (same merging strategy as the entity panel).
+  // Deduplicate by name|type. When the same entity appears in both LT and
+  // session registries, merge their memory_ids so edges to both LT and session
+  // memory nodes are drawn. Discarding the session entry's memory_ids would
+  // leave session memories linked only to the session entity as floating nodes.
   const entityByKey = new Map();
   for (const e of [...ltEntities, ...sessionEntities]) {
     const key = `${e.name.toLowerCase().trim()}|${e.type ?? 'unknown'}`;
-    if (!entityByKey.has(key)) entityByKey.set(key, e);
+    if (!entityByKey.has(key)) {
+      entityByKey.set(key, { ...e, memory_ids: [...(e.memory_ids ?? [])] });
+    } else {
+      const existing = entityByKey.get(key);
+      for (const id of e.memory_ids ?? []) {
+        if (!existing.memory_ids.includes(id)) existing.memory_ids.push(id);
+      }
+    }
   }
 
   for (const entity of entityByKey.values()) {
@@ -784,12 +799,14 @@ function bindEvents(canvas, $overlay, characterName) {
       gs.dragging.offsetY = node.y - world.y;
       node.fixed = true;
       canvas.style.cursor = 'grabbing';
+      wakeGraph();
     } else if (!node && e.button === 0) {
       // Pan.
       gs.panning = true;
       gs.panStart = { x: e.clientX, y: e.clientY };
       gs.cameraAtPanStart = { ...gs.camera };
       canvas.style.cursor = 'grabbing';
+      wakeGraph();
     }
   };
 

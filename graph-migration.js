@@ -351,9 +351,15 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
     entity.memory_ids = (entity.memory_ids ?? []).filter((id) => currentIdSet.has(id));
 
     // Pass 2: re-link by name/alias substring match.
-    const names = [entity.name, ...(entity.aliases ?? [])]
-      .map((n) => n.toLowerCase().trim())
-      .filter((n) => n.length >= 3);
+    // Also include individual words from multi-word names (min 4 chars) so
+    // that "Asher" in content matches the entity "Asher Somel".
+    const rawNames = [entity.name, ...(entity.aliases ?? [])].map((n) => n.toLowerCase().trim());
+    const names = [
+      ...new Set([
+        ...rawNames.filter((n) => n.length >= 3),
+        ...rawNames.flatMap((n) => n.split(/\s+/).filter((w) => w.length >= 4)),
+      ]),
+    ];
 
     if (names.length === 0) continue;
 
