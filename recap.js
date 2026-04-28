@@ -78,6 +78,7 @@ export async function generateRecap() {
   try {
     const response = await generateMemorySummarize(RECAP_PROMPT, {
       responseLength: settings.recap_response_length ?? 300,
+      includeLastMessage: true,
     });
     return response?.trim() || null;
   } catch (err) {
