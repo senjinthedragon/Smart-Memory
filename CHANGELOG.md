@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-04-28
+
+### Fixed
+
+- **Short-term summary no longer captures unconfirmed swipe content**: the
+  compaction and summarization paths now exclude the trailing AI message when
+  building the summary, matching the stable extraction window already used by
+  long-term, session, and arc tiers. The excluded message is picked up on the
+  next compaction once the user has confirmed it by sending a reply.
+
+- **Memorize Chat and recap include the last message**: the stable-window
+  exclusion is bypassed for the Memorize Chat button and the away recap, both
+  of which are deliberate user actions on a settled chat where the last message
+  is confirmed and should be included.
+
 ## [1.6.0] - 2026-04-27
 
 ### Added
