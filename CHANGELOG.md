@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-04-28
+
+### Fixed
+
+- **Force graph floating nodes**: several cases where memory nodes appeared
+  unconnected to their entity despite the entity existing in the graph have
+  been resolved. Reconciliation now runs after every extraction pass (not
+  only after consolidation), when the graph is opened as a catch-all, and
+  cross-tier so session memories can link to long-term entities. When the
+  same entity appears in both the long-term and session registries its
+  memory links from both are now merged rather than the session links being
+  silently dropped. Entity name matching now also tries individual words
+  from multi-word names so a memory mentioning only a first name connects
+  to the full-name entity.
+
+- **Force graph freeze on a settled simulation**: clicking or dragging a
+  node after the physics had cooled completely caused the canvas to stop
+  responding. The render loop was not restarted on mousedown, so position
+  updates never made it to screen. Fixed by calling wakeGraph() when a
+  drag or pan begins.
+
 ## [1.6.1] - 2026-04-28
 
 ### Fixed
