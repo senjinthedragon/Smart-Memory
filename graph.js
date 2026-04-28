@@ -25,7 +25,13 @@
 
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
-import { loadCharacterEntityRegistry, loadSessionEntityRegistry } from './graph-migration.js';
+import {
+  loadCharacterEntityRegistry,
+  saveCharacterEntityRegistry,
+  loadSessionEntityRegistry,
+  saveSessionEntityRegistry,
+  reconcileEntityRegistry,
+} from './graph-migration.js';
 
 // ---- Visual constants -------------------------------------------------------
 
@@ -115,6 +121,22 @@ let gs = null; // active graph state, null when closed
  */
 export function showMemoryGraph(characterName) {
   if (gs) closeGraph();
+
+  // Repair any entity-memory links that the model missed before rendering.
+  if (characterName) {
+    const ltRegistry = loadCharacterEntityRegistry(characterName);
+    if (ltRegistry.length > 0) {
+      const ltMems = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
+      reconcileEntityRegistry(ltRegistry, ltMems);
+      saveCharacterEntityRegistry(characterName, ltRegistry);
+    }
+  }
+  const sessionRegistry = loadSessionEntityRegistry();
+  if (sessionRegistry.length > 0) {
+    const sessionMems = loadSessionMemories().filter((m) => !m.superseded_by);
+    reconcileEntityRegistry(sessionRegistry, sessionMems);
+    saveSessionEntityRegistry(sessionRegistry).catch(console.error);
+  }
 
   const opts = { showSession: true, showRetired: false };
   const { nodes, edges } = buildGraph(characterName, opts);
