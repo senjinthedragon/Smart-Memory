@@ -94,7 +94,7 @@ export async function shouldCompact() {
  * rather than rewriting it from scratch.
  * @returns {Promise<string|null>} The formatted summary, or null on failure.
  */
-export async function runCompaction() {
+export async function runCompaction({ includeLastMessage = false } = {}) {
   const settings = extension_settings[MODULE_NAME];
   const context = getContext();
 
@@ -156,12 +156,12 @@ export async function runCompaction() {
 
     if (existingSummary && summaryEnd > 0 && summaryEnd < context.chat.length) {
       // Progressive path: feed only the new messages to the update prompt.
-      // Exclude the trailing AI message - it may still be a swipe candidate and
-      // has not been confirmed by the user sending a reply yet.
+      // Exclude the trailing AI message unless the caller explicitly wants the
+      // full chat (e.g. Memorize Chat, where the user chose to memorize everything).
       const rawNewMessages = context.chat.slice(summaryEnd);
       const lastNew = rawNewMessages[rawNewMessages.length - 1];
       const newMessages =
-        lastNew && !lastNew.is_user && !lastNew.is_system
+        !includeLastMessage && lastNew && !lastNew.is_user && !lastNew.is_system
           ? rawNewMessages.slice(0, -1)
           : rawNewMessages;
       const newEvents = newMessages
@@ -177,11 +177,13 @@ export async function runCompaction() {
 
       raw = await generateMemorySummarize(updatePrompt, {
         responseLength: settings.compaction_response_length || 2000,
+        includeLastMessage,
       });
     } else {
       // Full compaction: first time or fresh chat with no existing summary.
       raw = await generateMemorySummarize(buildSummaryPrompt(storedMemories), {
         responseLength: settings.compaction_response_length || 2000,
+        includeLastMessage,
       });
     }
 
@@ -194,11 +196,13 @@ export async function runCompaction() {
     context.chatMetadata[META_KEY].summary = summary;
     context.chatMetadata[META_KEY].summaryUpdated = Date.now();
     // Record how far into the chat this summary covers so the next compaction
-    // knows where "new" messages begin. Exclude the trailing AI message if it
-    // was skipped above - the next compaction will pick it up from this index.
+    // knows where "new" messages begin. When the trailing AI message was excluded
+    // (normal roleplay path), point back one so the next compaction picks it up.
+    // When the caller asked for the full chat (Memorize Chat), the last message
+    // was included so the boundary is the full length.
     const lastChatMsg = context.chat[context.chat.length - 1];
     context.chatMetadata[META_KEY].summaryEnd =
-      lastChatMsg && !lastChatMsg.is_user && !lastChatMsg.is_system
+      !includeLastMessage && lastChatMsg && !lastChatMsg.is_user && !lastChatMsg.is_system
         ? context.chat.length - 1
         : context.chat.length;
     await context.saveMetadata();

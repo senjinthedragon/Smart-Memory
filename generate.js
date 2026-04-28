@@ -272,7 +272,7 @@ function trimToBudget(messages, budget) {
  */
 export async function generateMemorySummarize(
   quietPrompt,
-  { responseLength = 1500, skipWIAN = true } = {},
+  { responseLength = 1500, skipWIAN = true, includeLastMessage = false } = {},
 ) {
   const source = getSource();
 
@@ -282,7 +282,10 @@ export async function generateMemorySummarize(
     const context = getContext();
     const chat = context.chat ?? [];
     const lastMsg = chat[chat.length - 1];
-    const stableChat = lastMsg && !lastMsg.is_user && !lastMsg.is_system ? chat.slice(0, -1) : chat;
+    const stableChat =
+      !includeLastMessage && lastMsg && !lastMsg.is_user && !lastMsg.is_system
+        ? chat.slice(0, -1)
+        : chat;
     const allMessages = stableChat
       .filter((msg) => !msg.is_system)
       .map((msg) => ({ role: msg.is_user ? 'user' : 'assistant', content: msg.mes ?? '' }));
@@ -308,7 +311,9 @@ export async function generateMemorySummarize(
       const chat = context.chat ?? [];
       const lastMsg = chat[chat.length - 1];
       const stableChat =
-        lastMsg && !lastMsg.is_user && !lastMsg.is_system ? chat.slice(0, -1) : chat;
+        !includeLastMessage && lastMsg && !lastMsg.is_user && !lastMsg.is_system
+          ? chat.slice(0, -1)
+          : chat;
       const allMessages = stableChat
         .filter((msg) => !msg.is_system)
         .map((msg) => ({

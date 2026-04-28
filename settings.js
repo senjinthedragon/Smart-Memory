@@ -1696,7 +1696,7 @@ export function bindSettingsUI(ctrl) {
         // count to decide what to include, so chunking doesn't apply.
         if (settings.compaction_enabled) {
           setStatusMessage('Generating summary...');
-          await runCompaction()
+          await runCompaction({ includeLastMessage: true })
             .then((summary) => {
               if (summary) {
                 injectSummary(summary);
