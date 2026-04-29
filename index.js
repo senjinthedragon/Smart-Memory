@@ -31,7 +31,7 @@
  *   Continuity    Manual check: does the last response contradict known facts?
  *   /sm-search    Slash command: semantic search across all tiers, shows results popup.
  *   Graph view    Force-directed canvas visualization of entities and memories.
- *   Activity      Non-blocking loader shown during background extraction (startActivityLoader/stopActivityLoader).
+ *   Activity      Sticky toastr notification shown during background extraction (startActivityLoader/stopActivityLoader).
  */
 
 import {
@@ -42,7 +42,6 @@ import {
   extension_prompt_types,
   is_send_press,
 } from '../../../../script.js';
-import { loader, ActionLoaderToastMode } from '../../../scripts/action-loader.js';
 import {
   getContext,
   extension_settings,
@@ -173,29 +172,29 @@ let lastKnownChatLength = 0;
 // ---- Activity indicator helpers -----------------------------------------
 
 /**
- * Shows a non-blocking activity loader if the setting is enabled.
- * Returns a handle that must be passed to stopActivityLoader when done.
+ * Shows a sticky toastr notification if the activity indicator setting is enabled.
+ * Returns the toast element so it can be cleared when the operation finishes.
  * Returns null if the setting is off.
  * @param {object} settings - The Smart Memory settings object.
- * @returns {import('../../../scripts/action-loader.js').ActionLoaderHandle|null}
+ * @param {string} [message] - Status text to display.
+ * @returns {JQuery|null}
  */
-function startActivityLoader(settings) {
+function startActivityLoader(settings, message = 'Processing...') {
   if (!(settings.show_activity_indicator ?? true)) return null;
-  return loader.show({
-    blocking: false,
-    toastMode: ActionLoaderToastMode.STATIC,
-    title: 'Smart Memory',
-    message: 'Extracting memories...',
+  return toastr.info(message, 'Smart Memory', {
+    timeOut: 0,
+    extendedTimeOut: 0,
+    tapToDismiss: false,
   });
 }
 
 /**
- * Hides the activity loader returned by startActivityLoader.
+ * Clears the toast returned by startActivityLoader.
  * Safe to call with null (when the setting was off).
- * @param {import('../../../scripts/action-loader.js').ActionLoaderHandle|null} handle
+ * @param {JQuery|null} handle
  */
 function stopActivityLoader(handle) {
-  if (handle) handle.hide();
+  if (handle) toastr.clear(handle);
 }
 
 /**
@@ -530,7 +529,7 @@ async function onCharacterMessageRendered() {
         arcs_inject_budget: settings.arcs_inject_budget,
         profiles_inject_budget: settings.profiles_inject_budget,
       };
-      const activityHandle = startActivityLoader(settings);
+      const activityHandle = startActivityLoader(settings, 'Extracting memories...');
       try {
         let total = 0;
 
@@ -850,13 +849,16 @@ async function onChatChangedImpl() {
       const hoursAway = getAwayHours();
       if (hoursAway > 0) {
         setStatusMessage('Generating recap...');
+        const recapHandle = startActivityLoader(settings, 'Generating recap...');
         generateRecap()
           .then((recap) => {
+            stopActivityLoader(recapHandle);
             if (thisLoadId !== chatLoadId) return;
             if (recap) displayRecap(recap, hoursAway);
             setStatusMessage('');
           })
           .catch((err) => {
+            stopActivityLoader(recapHandle);
             console.error('[SmartMemory] Auto-recap failed:', err);
             setStatusMessage('');
           });
@@ -941,8 +943,10 @@ async function onChatChangedImpl() {
     const hoursAway = getAwayHours();
     if (hoursAway > 0) {
       setStatusMessage('Generating recap...');
+      const recapHandle = startActivityLoader(settings, 'Generating recap...');
       generateRecap()
         .then((recap) => {
+          stopActivityLoader(recapHandle);
           if (thisLoadId !== chatLoadId) return;
           if (recap) {
             // Pass hoursAway explicitly - updateLastActive() runs after this
@@ -953,6 +957,7 @@ async function onChatChangedImpl() {
           setStatusMessage('');
         })
         .catch((err) => {
+          stopActivityLoader(recapHandle);
           console.error('[SmartMemory] Auto-recap failed:', err);
           setStatusMessage('');
         });
@@ -1209,7 +1214,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           arcs_inject_budget: settings.arcs_inject_budget,
           profiles_inject_budget: settings.profiles_inject_budget,
         };
-        const activityHandle = startActivityLoader(settings);
+        const activityHandle = startActivityLoader(settings, 'Extracting memories...');
 
         try {
           let total = 0;
