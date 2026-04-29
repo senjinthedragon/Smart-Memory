@@ -223,6 +223,11 @@ export const defaultSettings = {
   // 'b': force Profile B (hosted/high-performance behaviour)
   hardware_profile: 'auto',
 
+  // Show a non-blocking activity indicator while background extraction is running.
+  // Gives users a visible signal that Smart Memory is working so they know not
+  // to send a new message until it finishes.
+  show_activity_indicator: true,
+
   // Verbose logging - when false, operational extraction/migration logs are
   // suppressed. Errors (console.error) are always shown regardless of this flag.
   verbose_logging: false,
@@ -2093,6 +2098,14 @@ export function bindSettingsUI(ctrl) {
     .prop('checked', s.continuity_auto_repair)
     .on('change', function () {
       extension_settings[MODULE_NAME].continuity_auto_repair = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
+  // ---- Notifications --------------------------------------------------
+  $('#sm_show_activity_indicator')
+    .prop('checked', s.show_activity_indicator ?? true)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].show_activity_indicator = $(this).prop('checked');
       saveSettingsDebounced();
     });
 

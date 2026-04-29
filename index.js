@@ -31,6 +31,7 @@
  *   Continuity    Manual check: does the last response contradict known facts?
  *   /sm-search    Slash command: semantic search across all tiers, shows results popup.
  *   Graph view    Force-directed canvas visualization of entities and memories.
+ *   Activity      Non-blocking loader shown during background extraction (startActivityLoader/stopActivityLoader).
  */
 
 import {
@@ -41,6 +42,7 @@ import {
   extension_prompt_types,
   is_send_press,
 } from '../../../../script.js';
+import { loader, ActionLoaderToastMode } from '../../../scripts/action-loader.js';
 import {
   getContext,
   extension_settings,
@@ -167,6 +169,34 @@ let repairInjectedThisRound = false;
 // Last observed chat length, used to distinguish new messages from swipes.
 // CHARACTER_MESSAGE_RENDERED fires on both; swipes do not grow the chat array.
 let lastKnownChatLength = 0;
+
+// ---- Activity indicator helpers -----------------------------------------
+
+/**
+ * Shows a non-blocking activity loader if the setting is enabled.
+ * Returns a handle that must be passed to stopActivityLoader when done.
+ * Returns null if the setting is off.
+ * @param {object} settings - The Smart Memory settings object.
+ * @returns {import('../../../scripts/action-loader.js').ActionLoaderHandle|null}
+ */
+function startActivityLoader(settings) {
+  if (!(settings.show_activity_indicator ?? true)) return null;
+  return loader.show({
+    blocking: false,
+    toastMode: ActionLoaderToastMode.STATIC,
+    title: 'Smart Memory',
+    message: 'Extracting memories...',
+  });
+}
+
+/**
+ * Hides the activity loader returned by startActivityLoader.
+ * Safe to call with null (when the setting was off).
+ * @param {import('../../../scripts/action-loader.js').ActionLoaderHandle|null} handle
+ */
+function stopActivityLoader(handle) {
+  if (handle) handle.hide();
+}
 
 /**
  * Returns a stable extraction window that excludes the currently swipable
@@ -500,6 +530,7 @@ async function onCharacterMessageRendered() {
         arcs_inject_budget: settings.arcs_inject_budget,
         profiles_inject_budget: settings.profiles_inject_budget,
       };
+      const activityHandle = startActivityLoader(settings);
       try {
         let total = 0;
 
@@ -660,6 +691,7 @@ async function onCharacterMessageRendered() {
         }
         setStatusMessage('');
       } finally {
+        stopActivityLoader(activityHandle);
         // Restore original budget settings so chat-load / settings-change injection
         // paths use the user's configured values, not this turn's adapted values.
         // saveSettingsDebounced is called here rather than inside the try block to
@@ -1177,6 +1209,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           arcs_inject_budget: settings.arcs_inject_budget,
           profiles_inject_budget: settings.profiles_inject_budget,
         };
+        const activityHandle = startActivityLoader(settings);
 
         try {
           let total = 0;
@@ -1349,6 +1382,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           }
           setStatusMessage('');
         } finally {
+          stopActivityLoader(activityHandle);
           Object.assign(settings, originalBudgets);
           saveSettingsDebounced();
           extractionRunning = false;
