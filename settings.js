@@ -571,10 +571,14 @@ export function bindSettingsUI(ctrl) {
 
   /**
    * Fetches installed Ollama models and populates the model dropdown.
-   * Preserves the previously selected model if it is still available.
+   * On success: shows the select and hides the manual text input.
+   * On failure: hides the select and reveals the manual text input so users
+   * who cannot reach Ollama from their browser (e.g. accessing ST remotely
+   * via a different address) can still type a model name directly.
    */
   async function refreshOllamaModels() {
     const $select = $('#sm_ollama_model');
+    const $manual = $('#sm_ollama_model_manual');
     const $btn = $('#sm_ollama_refresh');
     const prevModel = extension_settings[MODULE_NAME].ollama_model;
     $btn.prop('disabled', true);
@@ -592,12 +596,63 @@ export function bindSettingsUI(ctrl) {
         extension_settings[MODULE_NAME].ollama_model = best;
         saveSettingsDebounced();
       }
+      // Fetch succeeded - use the dropdown and hide the manual fallback.
+      $select.show();
+      $manual.hide();
+      $btn.show();
     } catch (err) {
       toastr.error(
         `Could not reach Ollama at ${extension_settings[MODULE_NAME].ollama_url || 'http://localhost:11434'}. Is it running?`,
         'Smart Memory',
       );
       console.error('[SmartMemory] Ollama model fetch failed:', err);
+      // Fetch failed - reveal the manual text input and hide the refresh
+      // button (it would just fail again until Ollama is reachable).
+      $select.hide();
+      $manual.val(prevModel ?? '').show();
+      $btn.hide();
+    } finally {
+      $btn.prop('disabled', false);
+    }
+  }
+
+  /**
+   * Fetches installed Ollama models and populates the embedding model dropdown.
+   * Uses the embedding-specific URL so users can point embeddings at a separate
+   * Ollama instance. Falls back to the manual text input on failure.
+   */
+  async function refreshEmbeddingModels() {
+    const $select = $('#sm_embedding_model');
+    const $manual = $('#sm_embedding_model_manual');
+    const $btn = $('#sm_embedding_refresh');
+    const prevModel = extension_settings[MODULE_NAME].embedding_model;
+    const embeddingUrl = extension_settings[MODULE_NAME].embedding_url || 'http://localhost:11434';
+    $btn.prop('disabled', true);
+    try {
+      const models = await fetchOllamaModels(embeddingUrl);
+      $select.empty();
+      if (models.length === 0) {
+        $select.append('<option value="">No models found</option>');
+      } else {
+        models.forEach((name) => {
+          $select.append($('<option>', { value: name, text: name }));
+        });
+        const best = models.includes(prevModel) ? prevModel : models[0];
+        $select.val(best);
+        extension_settings[MODULE_NAME].embedding_model = best;
+        clearEmbeddingFailed();
+        updateEmbeddingNotice();
+        saveSettingsDebounced();
+      }
+      $select.show();
+      $manual.hide();
+      $btn.show();
+    } catch (err) {
+      toastr.error(`Could not reach Ollama at ${embeddingUrl}. Is it running?`, 'Smart Memory');
+      console.error('[SmartMemory] Embedding model fetch failed:', err);
+      $select.hide();
+      $manual.val(prevModel ?? '').show();
+      $btn.hide();
     } finally {
       $btn.prop('disabled', false);
     }
@@ -630,9 +685,16 @@ export function bindSettingsUI(ctrl) {
       refreshOllamaModels();
     });
 
-  // Ollama model dropdown
+  // Ollama model dropdown - saves on selection change.
   $('#sm_ollama_model').on('change', function () {
     extension_settings[MODULE_NAME].ollama_model = $(this).val();
+    saveSettingsDebounced();
+  });
+
+  // Manual text fallback - saves on blur/change so a typed name persists
+  // across reloads even when Ollama is not reachable from this browser.
+  $('#sm_ollama_model_manual').on('change', function () {
+    extension_settings[MODULE_NAME].ollama_model = $(this).val().trim();
     saveSettingsDebounced();
   });
 
@@ -1915,23 +1977,38 @@ export function bindSettingsUI(ctrl) {
 
   $('#sm_embedding_url')
     .val(s.embedding_url ?? '')
-    .on('input', function () {
+    .on('change', function () {
       extension_settings[MODULE_NAME].embedding_url = $(this).val().trim();
       clearEmbeddingFailed();
       $('#sm_embedding_test_result').text('');
       updateEmbeddingNotice();
       saveSettingsDebounced();
+      refreshEmbeddingModels();
     });
 
-  $('#sm_embedding_model')
-    .val(s.embedding_model ?? 'nomic-embed-text')
-    .on('input', function () {
-      extension_settings[MODULE_NAME].embedding_model = $(this).val().trim();
-      clearEmbeddingFailed();
-      $('#sm_embedding_test_result').text('');
-      updateEmbeddingNotice();
-      saveSettingsDebounced();
-    });
+  // Embedding model dropdown - saves on selection change.
+  $('#sm_embedding_model').on('change', function () {
+    extension_settings[MODULE_NAME].embedding_model = $(this).val();
+    clearEmbeddingFailed();
+    $('#sm_embedding_test_result').text('');
+    updateEmbeddingNotice();
+    saveSettingsDebounced();
+  });
+
+  // Manual text fallback - shown when Ollama is not reachable from the browser.
+  $('#sm_embedding_model_manual').on('input', function () {
+    extension_settings[MODULE_NAME].embedding_model = $(this).val().trim();
+    clearEmbeddingFailed();
+    $('#sm_embedding_test_result').text('');
+    updateEmbeddingNotice();
+    saveSettingsDebounced();
+  });
+
+  // Refresh button and auto-load on settings open.
+  $('#sm_embedding_refresh').on('click', () => refreshEmbeddingModels());
+  if (s.embedding_enabled) {
+    refreshEmbeddingModels();
+  }
 
   $('#sm_embedding_keep')
     .prop('checked', s.embedding_keep)

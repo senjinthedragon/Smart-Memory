@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6] - 2026-04-30
+
+### Improved
+
+- **Ollama model fields now use a dropdown with a manual fallback**: both the
+  main model and the embedding model selectors are now proper dropdowns that
+  load available models from Ollama on settings open. If Ollama cannot be
+  reached from the browser (e.g. accessing SillyTavern remotely where CORS
+  blocks the fetch), the dropdown is replaced by a plain text input so the
+  model name can be typed directly. The refresh button is hidden in fallback
+  mode since it would immediately fail again. The embedding model list also
+  refreshes automatically when the embedding URL is changed.
+
 ## [1.6.5] - 2026-04-30
 
 ### Fixed
