@@ -419,19 +419,16 @@ async function onCharacterMessageRendered() {
       const needed = await shouldCompact();
       if (needed) {
         setStatusMessage('Updating story summary...');
-        // Only toast for external sources - with the main API, ST's own pipeline
-        // blocks swipes with its own message so a second toast would be redundant.
+        // Only show the activity indicator for external sources - with the main
+        // API, ST's own pipeline blocks swipes with its own message so a second
+        // toast would be redundant.
         const source = extension_settings[MODULE_NAME]?.source ?? memory_sources.main;
-        let compactionToast = null;
-        if (source !== memory_sources.main) {
-          compactionToast = toastr.info('Updating story summary...', 'Smart Memory', {
-            timeOut: 0,
-            extendedTimeOut: 0,
-            positionClass: 'toast-bottom-right',
-          });
-        }
+        const compactionHandle =
+          source !== memory_sources.main
+            ? startActivityLoader(settings, 'Updating story summary...')
+            : null;
         const summary = await runCompaction();
-        if (compactionToast) toastr.clear(compactionToast);
+        stopActivityLoader(compactionHandle);
         if (summary) {
           injectSummary(summary);
           injectCanon(characterName);
@@ -483,8 +480,13 @@ async function onCharacterMessageRendered() {
       settings.longterm_extract_every ?? 3,
     );
 
+    smLog(
+      `[SmartMemory] Solo counter: ${messagesSinceLastExtraction}/${extractEvery} (extractionRunning=${extractionRunning})`,
+    );
+
     if (messagesSinceLastExtraction >= extractEvery) {
       extractionRunning = true;
+      smLog(`[SmartMemory] Solo extraction starting at ${new Date().toISOString()}`);
 
       // Capture the current chat generation so we can abort before any write if
       // the user switches chats while a model call is in progress.
@@ -611,7 +613,7 @@ async function onCharacterMessageRendered() {
               toastr.info(
                 `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
                 'Smart Memory',
-                { timeOut: 3000, positionClass: 'toast-bottom-right' },
+                { timeOut: 3000 },
               );
             }
           }
@@ -690,6 +692,7 @@ async function onCharacterMessageRendered() {
         }
         setStatusMessage('');
       } finally {
+        smLog(`[SmartMemory] Solo extraction finished at ${new Date().toISOString()}`);
         stopActivityLoader(activityHandle);
         // Restore original budget settings so chat-load / settings-change injection
         // paths use the user's configured values, not this turn's adapted values.
@@ -1131,16 +1134,12 @@ async function onGroupWrapperFinished({ type } = {}) {
       if (needed) {
         setStatusMessage('Updating story summary...');
         const source = extension_settings[MODULE_NAME]?.source ?? memory_sources.main;
-        let compactionToast = null;
-        if (source !== memory_sources.main) {
-          compactionToast = toastr.info('Updating story summary...', 'Smart Memory', {
-            timeOut: 0,
-            extendedTimeOut: 0,
-            positionClass: 'toast-bottom-right',
-          });
-        }
+        const compactionHandle =
+          source !== memory_sources.main
+            ? startActivityLoader(settings, 'Updating story summary...')
+            : null;
         const summary = await runCompaction();
-        if (compactionToast) toastr.clear(compactionToast);
+        stopActivityLoader(compactionHandle);
         if (summary) {
           injectSummary(summary);
           updateShortTermUI(summary);
@@ -1189,8 +1188,13 @@ async function onGroupWrapperFinished({ type } = {}) {
       settings.longterm_extract_every ?? 3,
     );
 
+    smLog(
+      `[SmartMemory] Group counter: ${messagesSinceLastExtraction}/${extractEvery} (extractionRunning=${extractionRunning})`,
+    );
+
     if (messagesSinceLastExtraction >= extractEvery) {
       extractionRunning = true;
+      smLog(`[SmartMemory] Group extraction starting at ${new Date().toISOString()}`);
 
       const sessionWindow = getStableExtractionWindow(context.chat, 40);
       // Scale the raw window by character count so that after per-character
@@ -1300,7 +1304,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                   toastr.info(
                     `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
                     'Smart Memory',
-                    { timeOut: 3000, positionClass: 'toast-bottom-right' },
+                    { timeOut: 3000 },
                   );
                 }
               }
@@ -1387,6 +1391,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           }
           setStatusMessage('');
         } finally {
+          smLog(`[SmartMemory] Group extraction finished at ${new Date().toISOString()}`);
           stopActivityLoader(activityHandle);
           Object.assign(settings, originalBudgets);
           saveSettingsDebounced();
