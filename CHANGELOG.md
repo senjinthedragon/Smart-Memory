@@ -9,13 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Activity indicator during background extraction**: a non-blocking indicator
-  now appears in the corner of the screen while Smart Memory is running its
-  background extraction jobs, giving a clear signal that work is in progress
-  and it is not yet safe to send the next message. The indicator disappears
-  automatically when extraction completes. Can be turned off via a new
-  "Show activity indicator while processing" toggle near the top of the
-  settings panel. On by default.
+- **Activity indicator during background processing**: a non-blocking indicator
+  now appears while Smart Memory is running extraction, compaction, or recap
+  in the background, giving a clear signal that work is in progress and it is
+  not yet safe to send the next message. The indicator disappears automatically
+  when the job completes, including on error or chat switch. Can be turned off
+  via a new "Show activity indicator while processing" toggle in the
+  Configuration section alongside Advanced mode and extraction frequency.
+  On by default.
+
+### Fixed
+
+- **All Smart Memory toasts now share the same position**: consolidation and
+  compaction toasts previously hardcoded `toast-bottom-right` while the
+  activity indicator used ST's global position (`toast-top-center`). The
+  mismatched containers caused `fixToastrForDialogs()` to manipulate the
+  DOM on every toast hide, producing a visible blink on the sticky activity
+  indicator. All Smart Memory notifications now use ST's configured position.
 
 ## [1.6.3] - 2026-04-29
 
