@@ -1558,6 +1558,16 @@ jQuery(async function () {
   eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
   eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
   eventSource.on(event_types.CHAT_LOADED, onChatChanged);
+  // Dismiss the recap overlay when a message is sent or when generation starts.
+  // MESSAGE_SENT handles the case where the overlay is already visible when the
+  // message arrives. GENERATION_STARTED covers the race condition where the
+  // message arrives while the recap model call is still running (overlay not yet
+  // created), then the overlay appears after MESSAGE_SENT fired. Non-quiet only -
+  // quiet generations are background extraction calls that should not dismiss it.
+  eventSource.on(event_types.MESSAGE_SENT, () => $('#sm_recap_overlay').remove());
+  eventSource.on(event_types.GENERATION_STARTED, (type) => {
+    if (type !== 'quiet') $('#sm_recap_overlay').remove();
+  });
   eventSource.on(event_types.GROUP_WRAPPER_STARTED, onGroupWrapperStarted);
   eventSource.on(event_types.GROUP_MEMBER_DRAFTED, onGroupMemberDrafted);
   eventSource.on(event_types.GROUP_WRAPPER_FINISHED, onGroupWrapperFinished);

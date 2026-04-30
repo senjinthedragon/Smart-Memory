@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-04-30
+
+### Fixed
+
+- **Recap overlay no longer blocks programmatic senders**: the "Previously on..."
+  overlay is now dismissed when generation starts (non-quiet), covering a race
+  condition where a Discord Bridge message could arrive while the recap model
+  call was still running. The overlay would then appear after the message had
+  already been injected but before the user could see it. Dismissal on
+  `MESSAGE_SENT` handles the case where the overlay is already visible when the
+  message arrives; `GENERATION_STARTED` now covers the remaining gap.
+
 ## [1.6.4] - 2026-04-29
 
 ### Added
