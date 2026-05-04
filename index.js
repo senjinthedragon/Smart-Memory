@@ -151,6 +151,9 @@ let extractionRunning = false;
 let consolidationRunning = false;
 // Guards the Profile B auto-continuity check so at most one runs at a time.
 let continuityCheckRunning = false;
+// Guards recap generation so a slow model call cannot produce a second toast
+// if onChatChangedImpl fires again before updateLastActive() has run.
+let recapRunning = false;
 
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
@@ -804,6 +807,7 @@ async function onChatChangedImpl() {
   messagesSinceLastProfileRegen = 0;
   compactionRunning = false;
   extractionRunning = false;
+  recapRunning = false;
   continuityCheckRunning = false;
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
@@ -855,20 +859,23 @@ async function onChatChangedImpl() {
     maybeInjectUnified();
     updateTokenDisplay();
 
-    if (settings.recap_enabled) {
+    if (settings.recap_enabled && !recapRunning) {
       const hoursAway = getAwayHours();
       if (hoursAway > 0) {
+        recapRunning = true;
         setStatusMessage('Generating recap...');
         const recapHandle = startActivityLoader(settings, 'Generating recap...');
         generateRecap()
           .then((recap) => {
             stopActivityLoader(recapHandle);
+            recapRunning = false;
             if (thisLoadId !== chatLoadId) return;
             if (recap) displayRecap(recap, hoursAway);
             setStatusMessage('');
           })
           .catch((err) => {
             stopActivityLoader(recapHandle);
+            recapRunning = false;
             console.error('[SmartMemory] Auto-recap failed:', err);
             setStatusMessage('');
           });
