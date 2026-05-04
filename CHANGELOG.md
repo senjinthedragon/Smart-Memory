@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - 2026-05-04
+
+### Fixed
+
+- **Profile regeneration no longer runs on chat load**: opening an old chat
+  that had never had profiles generated would trigger a full model call
+  immediately on load, causing several minutes of unexpected GPU load with
+  no visible indicator. Profile regeneration now only runs during extraction
+  passes after new messages, which is where it belongs.
+
+- **All background model calls now show the activity indicator**: scheduled
+  profile regeneration (Profile B, between extraction passes) and the
+  automatic continuity check (Profile B) previously ran silently with no
+  toast. Both now show a message while running so it is always clear what
+  Smart Memory is doing in the background.
+
 ## [1.6.6] - 2026-04-30
 
 ### Improved

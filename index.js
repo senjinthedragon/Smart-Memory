@@ -114,7 +114,7 @@ import {
   saveCharacterEntityRegistry,
   seedCharacterEntity,
 } from './graph-migration.js';
-import { generateProfiles, injectProfiles, loadProfiles, areProfilesStale } from './profiles.js';
+import { generateProfiles, injectProfiles, loadProfiles } from './profiles.js';
 import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
 import { clearUnifiedSlot, maybeInjectUnified } from './unified-inject.js';
 import { smLog } from './logging.js';
@@ -721,14 +721,19 @@ async function onCharacterMessageRendered() {
     messagesSinceLastProfileRegen >= settings.profiles_regen_every
   ) {
     messagesSinceLastProfileRegen = 0;
+    const schedProfileHandle = startActivityLoader(settings, 'Updating profiles...');
     generateProfiles(characterName)
       .then((profiles) => {
+        stopActivityLoader(schedProfileHandle);
         if (profiles) {
           injectProfiles(characterName);
           updateProfilesUI(profiles);
         }
       })
-      .catch((err) => console.error('[SmartMemory] Scheduled profile regeneration error:', err));
+      .catch((err) => {
+        stopActivityLoader(schedProfileHandle);
+        console.error('[SmartMemory] Scheduled profile regeneration error:', err);
+      });
   }
 
   // Step 5: clear any pending continuity repair - it was injected for this
@@ -742,6 +747,7 @@ async function onCharacterMessageRendered() {
   // every turn on an RTX 2080.
   if (getHardwareProfile() === 'b' && settings.continuity_auto_check && !continuityCheckRunning) {
     continuityCheckRunning = true;
+    const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
     checkContinuity(characterName)
       .then(async (contradictions) => {
         setContinuityBadge(contradictions.length);
@@ -754,6 +760,7 @@ async function onCharacterMessageRendered() {
         console.error('[SmartMemory] Auto-continuity check failed:', err);
       })
       .finally(() => {
+        stopActivityLoader(continuityHandle);
         continuityCheckRunning = false;
       });
   }
@@ -921,25 +928,6 @@ async function onChatChangedImpl() {
   maybeInjectUnified();
   updateTokenDisplay();
   updateEmbeddingNotice();
-
-  // Regenerate profiles in the background if they are stale. Non-blocking -
-  // the existing stored profiles (if any) were already injected above, so the
-  // user sees coherent context immediately and the refresh is invisible.
-  if (settings.profiles_enabled && characterName && !isFreshStart()) {
-    const thresholdMs = (settings.profiles_stale_threshold_minutes ?? 30) * 60 * 1000;
-    if (areProfilesStale(thresholdMs, characterName)) {
-      generateProfiles(characterName)
-        .then((profiles) => {
-          if (profiles) {
-            injectProfiles(characterName);
-            updateProfilesUI(profiles);
-          }
-        })
-        .catch((err) =>
-          console.error('[SmartMemory] Background profile regeneration failed:', err),
-        );
-    }
-  }
 
   // Show a recap popup if the user has been away long enough.
   if (settings.recap_enabled) {
@@ -1415,14 +1403,19 @@ async function onGroupWrapperFinished({ type } = {}) {
   ) {
     messagesSinceLastProfileRegen = 0;
     for (const characterName of roundResponders) {
+      const schedProfileHandle = startActivityLoader(settings, 'Updating profiles...');
       generateProfiles(characterName)
         .then((profiles) => {
+          stopActivityLoader(schedProfileHandle);
           if (profiles) {
             injectProfiles(characterName);
             if (characterName === selectedGroupCharacter) updateProfilesUI(profiles);
           }
         })
-        .catch((err) => console.error('[SmartMemory] Scheduled profile regeneration error:', err));
+        .catch((err) => {
+          stopActivityLoader(schedProfileHandle);
+          console.error('[SmartMemory] Scheduled profile regeneration error:', err);
+        });
     }
   }
 
@@ -1440,6 +1433,7 @@ async function onGroupWrapperFinished({ type } = {}) {
     !continuityCheckRunning
   ) {
     continuityCheckRunning = true;
+    const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
     checkContinuity(lastResponder)
       .then(async (contradictions) => {
         setContinuityBadge(contradictions.length);
@@ -1452,6 +1446,7 @@ async function onGroupWrapperFinished({ type } = {}) {
         console.error('[SmartMemory] Auto-continuity check failed:', err);
       })
       .finally(() => {
+        stopActivityLoader(continuityHandle);
         continuityCheckRunning = false;
       });
   }
