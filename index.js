@@ -153,7 +153,26 @@ let consolidationRunning = false;
 let continuityCheckRunning = false;
 // Guards recap generation so a slow model call cannot produce a second toast
 // if onChatChangedImpl fires again before updateLastActive() has run.
-let recapRunning = false;
+// Holds a reference to the chatMetadata object for the chat whose recap is
+// currently in progress, null when idle. Using the metadata object reference
+// as the identity key means:
+//   - Same chat double-fire: both calls get the same object reference, so the
+//     second call is blocked and the first recap can still display its result.
+//   - Navigation away: getContext().chatMetadata returns a different object, so
+//     the in-flight recap is correctly discarded at completion time.
+// This variable must NOT be reset in the onChatChangedImpl reset block.
+let recapRunningForChat = null;
+
+// Set to true when MESSAGE_SENT fires while a recap is in progress. Prevents
+// the popup from appearing after the recap finishes - the user already sent a
+// message so showing "Previously on..." after the fact would be confusing.
+// Reset at the start of each chat load and after each recap completes.
+let recapSuppressed = false;
+
+// Active activity loader handle for an in-progress recap, stored at module
+// level so the reset block can clear a stuck toast if the chat changes before
+// the recap promise settles (e.g. Ollama drops the request on an error).
+let activeRecapHandle = null;
 
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
@@ -797,7 +816,7 @@ function onChatChanged() {
  * an away recap if the user has been gone longer than the configured threshold.
  */
 async function onChatChangedImpl() {
-  const thisLoadId = ++chatLoadId;
+  ++chatLoadId;
 
   // Dismiss any recap overlay from the previous chat immediately - it is modal
   // and blocks input, so leaving it up over the new chat is confusing.
@@ -807,8 +826,10 @@ async function onChatChangedImpl() {
   messagesSinceLastProfileRegen = 0;
   compactionRunning = false;
   extractionRunning = false;
-  recapRunning = false;
   continuityCheckRunning = false;
+  recapSuppressed = false;
+  stopActivityLoader(activeRecapHandle);
+  activeRecapHandle = null;
   sceneMessageBuffer = [];
   sceneBufferLastIndex = -1;
   respondedThisRound = new Set();
@@ -859,26 +880,38 @@ async function onChatChangedImpl() {
     maybeInjectUnified();
     updateTokenDisplay();
 
-    if (settings.recap_enabled && !recapRunning) {
+    const groupChatMeta = getContext().chatMetadata;
+    if (settings.recap_enabled) {
       const hoursAway = getAwayHours();
       if (hoursAway > 0) {
-        recapRunning = true;
-        setStatusMessage('Generating recap...');
-        const recapHandle = startActivityLoader(settings, 'Generating recap...');
-        generateRecap()
-          .then((recap) => {
-            stopActivityLoader(recapHandle);
-            recapRunning = false;
-            if (thisLoadId !== chatLoadId) return;
-            if (recap) displayRecap(recap, hoursAway);
-            setStatusMessage('');
-          })
-          .catch((err) => {
-            stopActivityLoader(recapHandle);
-            recapRunning = false;
-            console.error('[SmartMemory] Auto-recap failed:', err);
-            setStatusMessage('');
-          });
+        if (recapRunningForChat === groupChatMeta) {
+          // Same chat fired again before the recap finished - already handled.
+        } else {
+          recapRunningForChat = groupChatMeta;
+          setStatusMessage('Generating recap...');
+          activeRecapHandle = startActivityLoader(settings, 'Generating recap...');
+          const groupRecapHandle = activeRecapHandle;
+          generateRecap()
+            .then((recap) => {
+              stopActivityLoader(groupRecapHandle);
+              activeRecapHandle = null;
+              const stillThisChat = getContext().chatMetadata === groupChatMeta;
+              if (recapRunningForChat === groupChatMeta) recapRunningForChat = null;
+              const suppressed = recapSuppressed;
+              recapSuppressed = false;
+              setStatusMessage('');
+              if (!stillThisChat || suppressed) return;
+              if (recap) displayRecap(recap, hoursAway);
+            })
+            .catch((err) => {
+              stopActivityLoader(groupRecapHandle);
+              activeRecapHandle = null;
+              if (recapRunningForChat === groupChatMeta) recapRunningForChat = null;
+              recapSuppressed = false;
+              console.error('[SmartMemory] Auto-recap failed:', err);
+              setStatusMessage('');
+            });
+        }
       }
     }
 
@@ -937,28 +970,43 @@ async function onChatChangedImpl() {
   updateEmbeddingNotice();
 
   // Show a recap popup if the user has been away long enough.
+  const soloChatMeta = getContext().chatMetadata;
   if (settings.recap_enabled) {
     const hoursAway = getAwayHours();
     if (hoursAway > 0) {
-      setStatusMessage('Generating recap...');
-      const recapHandle = startActivityLoader(settings, 'Generating recap...');
-      generateRecap()
-        .then((recap) => {
-          stopActivityLoader(recapHandle);
-          if (thisLoadId !== chatLoadId) return;
-          if (recap) {
-            // Pass hoursAway explicitly - updateLastActive() runs after this
-            // async block starts, so getAwayHours() inside displayRecap would
-            // return 0 and always show "short break" regardless of actual gap.
-            displayRecap(recap, hoursAway);
-          }
-          setStatusMessage('');
-        })
-        .catch((err) => {
-          stopActivityLoader(recapHandle);
-          console.error('[SmartMemory] Auto-recap failed:', err);
-          setStatusMessage('');
-        });
+      if (recapRunningForChat === soloChatMeta) {
+        // Same chat fired again before the recap finished - already handled.
+      } else {
+        recapRunningForChat = soloChatMeta;
+        setStatusMessage('Generating recap...');
+        activeRecapHandle = startActivityLoader(settings, 'Generating recap...');
+        const soloRecapHandle = activeRecapHandle;
+        generateRecap()
+          .then((recap) => {
+            stopActivityLoader(soloRecapHandle);
+            activeRecapHandle = null;
+            const stillThisChat = getContext().chatMetadata === soloChatMeta;
+            if (recapRunningForChat === soloChatMeta) recapRunningForChat = null;
+            const suppressed = recapSuppressed;
+            recapSuppressed = false;
+            setStatusMessage('');
+            if (!stillThisChat || suppressed) return;
+            if (recap) {
+              // Pass hoursAway explicitly - updateLastActive() runs after this
+              // async block starts, so getAwayHours() inside displayRecap would
+              // return 0 and always show "short break" regardless of actual gap.
+              displayRecap(recap, hoursAway);
+            }
+          })
+          .catch((err) => {
+            stopActivityLoader(soloRecapHandle);
+            activeRecapHandle = null;
+            if (recapRunningForChat === soloChatMeta) recapRunningForChat = null;
+            recapSuppressed = false;
+            console.error('[SmartMemory] Auto-recap failed:', err);
+            setStatusMessage('');
+          });
+      }
     }
   }
 
@@ -1564,11 +1612,18 @@ jQuery(async function () {
   // MESSAGE_SENT handles the case where the overlay is already visible when the
   // message arrives. GENERATION_STARTED covers the race condition where the
   // message arrives while the recap model call is still running (overlay not yet
-  // created), then the overlay appears after MESSAGE_SENT fired. Non-quiet only -
-  // quiet generations are background extraction calls that should not dismiss it.
-  eventSource.on(event_types.MESSAGE_SENT, () => $('#sm_recap_overlay').remove());
+  // created), then the overlay appears after MESSAGE_SENT fired. Restricted to
+  // 'normal' type only - 'quiet' is Smart Memory's own background extraction,
+  // and other types (e.g. expression classification) are extension background
+  // calls that should not dismiss the overlay.
+  eventSource.on(event_types.MESSAGE_SENT, () => {
+    $('#sm_recap_overlay').remove();
+    // If a recap is still generating when the message is sent, suppress the
+    // popup - showing it after the response arrives would be confusing.
+    if (recapRunningForChat !== null) recapSuppressed = true;
+  });
   eventSource.on(event_types.GENERATION_STARTED, (type) => {
-    if (type !== 'quiet') $('#sm_recap_overlay').remove();
+    if (type === 'normal') $('#sm_recap_overlay').remove();
   });
   eventSource.on(event_types.GROUP_WRAPPER_STARTED, onGroupWrapperStarted);
   eventSource.on(event_types.GROUP_MEMBER_DRAFTED, onGroupMemberDrafted);

@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.9] - 2026-05-05
+
+### Fixed
+
+- **"Generating recap" toast no longer appears twice (again)**: the `recapRunning`
+  boolean added in v1.6.8 was reset inside the same block that runs on every chat
+  load, so it was always false by the time the guard checked it. The guard now
+  uses a chatMetadata object reference (`recapRunningForChat`) instead of a flag,
+  so it survives the reset and correctly prevents a second recap from starting
+  while the first is in progress.
+
+- **Recap popup no longer suppressed by SillyTavern's expression system**: the
+  `GENERATION_STARTED` handler that dismisses the recap overlay was matching any
+  non-quiet generation, which includes the expression/emote generation ST fires
+  after each message. This caused the overlay to be removed as soon as expressions
+  ran, before the user could see the recap. The handler now only matches
+  `type === 'normal'` so expressions and other background calls no longer
+  interfere.
+
+- **"Generating recap..." activity indicator no longer stays stuck after
+  suppression**: when a message was sent while a recap was being generated, the
+  recap popup was correctly suppressed but the status message in the extension
+  panel remained visible until the next action. `setStatusMessage('')` is now
+  called unconditionally before checking the suppression flag, so the indicator
+  always clears when the recap resolves.
+
+- **Stuck "Generating recap..." toast on chat switch**: if the Ollama request
+  backing a recap never settled (e.g. dropped by a model swap), the toastr toast
+  would remain on screen indefinitely. The toastr handle is now stored at module
+  level and cleared in the chat-change reset, so it is always dismissed when the
+  user moves to a different chat.
+
 ## [1.6.8] - 2026-05-04
 
 ### Fixed
