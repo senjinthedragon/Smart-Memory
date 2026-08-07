@@ -64,6 +64,7 @@ import { loadSessionMemories } from './session.js';
 import { smLog } from './logging.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
+import { getCharacterContainer, getGroupContainer } from './scope.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
 
@@ -274,7 +275,7 @@ export async function clearArcSummaries() {
  */
 export function loadPersistentArcs(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.persistent_arcs ?? [];
+  return getCharacterContainer(characterName)?.persistent_arcs ?? [];
 }
 
 /**
@@ -284,11 +285,7 @@ export function loadPersistentArcs(characterName) {
  */
 export function savePersistentArcs(characterName, arcs) {
   if (!characterName) return;
-  if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
-  if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
-  if (!extension_settings[MODULE_NAME].characters[characterName])
-    extension_settings[MODULE_NAME].characters[characterName] = {};
-  extension_settings[MODULE_NAME].characters[characterName].persistent_arcs = arcs;
+  getCharacterContainer(characterName).persistent_arcs = arcs;
   saveSettingsDebounced();
 }
 
@@ -301,7 +298,7 @@ export function savePersistentArcs(characterName, arcs) {
  */
 export function loadGroupPersistentArcs(groupId) {
   if (!groupId) return [];
-  return extension_settings[MODULE_NAME]?.group_arcs?.[groupId] ?? [];
+  return getGroupContainer(groupId)?.persistent_arcs ?? [];
 }
 
 /**
@@ -311,9 +308,7 @@ export function loadGroupPersistentArcs(groupId) {
  */
 export function saveGroupPersistentArcs(groupId, arcs) {
   if (!groupId) return;
-  if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
-  if (!extension_settings[MODULE_NAME].group_arcs) extension_settings[MODULE_NAME].group_arcs = {};
-  extension_settings[MODULE_NAME].group_arcs[groupId] = arcs;
+  getGroupContainer(groupId).persistent_arcs = arcs;
   saveSettingsDebounced();
 }
 

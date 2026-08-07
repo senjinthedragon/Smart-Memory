@@ -64,6 +64,7 @@ import { generateMemoryExtract } from './generate.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
+import { getCharacterContainer } from './scope.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
 
@@ -166,7 +167,7 @@ export function isEpistemicEnabled() {
  */
 export function loadEpistemicKnowledge(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.epistemic_knowledge ?? [];
+  return getCharacterContainer(characterName)?.epistemic_knowledge ?? [];
 }
 
 /**
@@ -178,10 +179,7 @@ export function loadEpistemicKnowledge(characterName) {
  */
 export function saveEpistemicKnowledge(characterName, entries) {
   if (!characterName || !Array.isArray(entries)) return;
-  const s = extension_settings[MODULE_NAME];
-  if (!s.characters) s.characters = {};
-  const existing = s.characters[characterName] ?? {};
-  s.characters[characterName] = { ...existing, epistemic_knowledge: entries };
+  getCharacterContainer(characterName).epistemic_knowledge = entries;
   saveSettingsDebounced();
 }
 
@@ -195,7 +193,7 @@ export function clearEpistemicKnowledge(characterName) {
   if (!characterName) return;
   const s = extension_settings[MODULE_NAME];
   if (!s.characters?.[characterName]) return;
-  s.characters[characterName].epistemic_knowledge = [];
+  getCharacterContainer(characterName).epistemic_knowledge = [];
   saveSettingsDebounced();
 }
 

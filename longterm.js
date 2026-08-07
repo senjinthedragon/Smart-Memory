@@ -57,6 +57,7 @@ import {
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
+import { getCharacterContainer, deleteCharacterContainer } from './scope.js';
 import {
   estimateTokens,
   MODULE_NAME,
@@ -214,8 +215,7 @@ async function verifyLongtermCandidates(candidates, existing) {
  */
 export function loadCharacterMemories(characterName) {
   if (!characterName) return [];
-  const chars = extension_settings[MODULE_NAME].characters;
-  const memories = chars?.[characterName]?.memories ?? [];
+  const memories = getCharacterContainer(characterName)?.memories ?? [];
   // Migrate: entries without the consolidated flag are pre-existing stable memories.
   // Entries without an importance score default to 2 (medium).
   // applyGraphDefaults is a safety net for entries that predate the one-shot
@@ -246,17 +246,11 @@ export function loadCharacterMemories(characterName) {
  */
 export function saveCharacterMemories(characterName, memories) {
   if (!characterName || !Array.isArray(memories)) return;
-  if (!extension_settings[MODULE_NAME].characters) {
-    extension_settings[MODULE_NAME].characters = {};
-  }
-  // Spread the existing character object so the entity registry and any other
-  // fields stored alongside memories (e.g. entities, canon) are preserved.
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
-    ...existing,
-    memories,
-    lastUpdated: Date.now(),
-  };
+  // Spread semantics are preserved by the scoped container: writing a field
+  // on it never touches sibling tiers (entities, canon, chats, etc.).
+  const container = getCharacterContainer(characterName);
+  container.memories = memories;
+  container.lastUpdated = Date.now();
 }
 
 /**
@@ -266,9 +260,7 @@ export function saveCharacterMemories(characterName, memories) {
  */
 export function clearCharacterMemories(characterName) {
   if (!characterName) return;
-  if (extension_settings[MODULE_NAME].characters?.[characterName]) {
-    delete extension_settings[MODULE_NAME].characters[characterName];
-  }
+  deleteCharacterContainer(characterName);
 }
 
 // ---- Relationship history storage ---------------------------------------
@@ -282,8 +274,7 @@ export function clearCharacterMemories(characterName) {
  */
 export function loadRelationshipHistory(characterName) {
   if (!characterName) return {};
-  const raw =
-    extension_settings[MODULE_NAME].characters?.[characterName]?.relationship_history ?? {};
+  const raw = getCharacterContainer(characterName)?.relationship_history ?? {};
   // Normalize entries still in the old flat format { descriptors: string[], magnitude: string }
   // to the current per-descriptor format { descriptors: Array<{word, magnitude}> }.
   // This is a read-time safety net in case the schema migration did not run yet.
@@ -311,14 +302,7 @@ export function loadRelationshipHistory(characterName) {
  */
 export function saveRelationshipHistory(characterName, history) {
   if (!characterName || typeof history !== 'object') return;
-  if (!extension_settings[MODULE_NAME].characters) {
-    extension_settings[MODULE_NAME].characters = {};
-  }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
-    ...existing,
-    relationship_history: history,
-  };
+  getCharacterContainer(characterName).relationship_history = history;
 }
 
 /**
@@ -328,7 +312,7 @@ export function saveRelationshipHistory(characterName, history) {
  */
 export function clearRelationshipHistory(characterName) {
   if (!characterName) return;
-  const char = extension_settings[MODULE_NAME].characters?.[characterName];
+  const char = getCharacterContainer(characterName);
   if (char) delete char.relationship_history;
 }
 

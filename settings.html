@@ -20,6 +20,22 @@
         </label>
       </div>
 
+      <!-- Memory scope (fork: per-chat isolation) -->
+      <div class="sm-block">
+        <label for="sm_memory_scope" style="display: block; margin-bottom: 4px">
+          Memory scope
+          <span
+            class="sm-info"
+            data-tooltip="Per character: long-term memories are shared across all chats with this character (upstream behaviour). Per chat: each chat gets its own isolated long-term memory - new chats start clean and never see other chats' memories. Switching to Per chat seeds the current chat so it keeps its accumulated memory."
+            >ⓘ</span
+          >
+        </label>
+        <select id="sm_memory_scope" class="text_pole widthNatural">
+          <option value="character">Per character (shared across chats)</option>
+          <option value="chat">Per chat (isolated)</option>
+        </select>
+      </div>
+
       <!-- Embedding inactive notice - toggled by updateEmbeddingNotice() in index.js -->
       <div id="sm_embedding_notice" class="sm-block" style="display: none">
         <i class="fa-solid fa-triangle-exclamation"></i>

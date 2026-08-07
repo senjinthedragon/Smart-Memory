@@ -340,6 +340,24 @@ You can toggle read-only on and off multiple times in the same chat; each window
 
 **Using read-only with checkpoints and branches:** SillyTavern's checkpoint and branch features save the chat up to a specific point as a new file. Smart Memory's long-term memories are shared across all chats with the same character - they do not roll back if you switch to an older checkpoint or branch. If you plan to explore alternative story paths this way, enable read-only mode first. Smart Memory will warn you with a notification if you create a checkpoint or branch without it active.
 
+### Per-chat Memory Isolation
+
+By default, long-term memory is stored **per character**: every chat with the same character reads from - and writes into - one shared store. If you use one character across several unrelated stories (a narrator bot, a reused persona, alternate timelines), memories bleed between chats.
+
+This adds a **Memory scope** selector at the top of the extension settings:
+
+- **Per character (shared across chats)** - the default. Nothing changes.
+- **Per chat (isolated)** - each chat gets its own long-term store. A new chat with the same character starts with a clean slate and never sees another chat's memories, relationship history, canon, persistent arcs, Perspectives & Secrets knowledge, or entity registry.
+
+Details:
+
+- Switching to **Per chat** seeds the _current_ chat from the character store, so an ongoing story keeps its accumulated memory. New chats still start clean.
+- Switching back to **Per character** is non-destructive: character-level data was never touched, and each chat's isolated store is kept (dormant) in case you switch again.
+- **Forget This Chat** in per-chat mode clears only the current chat's isolated store - other chats and the character-level store are untouched.
+- Long-term data lives under `characters[characterName].chats[chatId]` in extension settings; each chat container is schema-versioned like every other container.
+
+This solves the shared-memory limitation described above: with per-chat isolation, checkpoints and branches that create new chat files get their own memory space, so a rolled-back timeline cannot leak knowledge from a future one.
+
 ### Per-tier Extract Buttons
 
 Each memory tier has its own **Extract Now** or **Extract** button that processes a recent window of messages - not the full chat. Useful for pulling in the latest exchanges outside the automatic schedule.

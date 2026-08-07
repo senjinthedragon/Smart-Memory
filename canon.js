@@ -48,6 +48,7 @@ import { loadCharacterMemories } from './longterm.js';
 import { loadArcSummaries } from './arcs.js';
 import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
+import { getCharacterContainer } from './scope.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
 
@@ -60,7 +61,7 @@ import { reportTierTrimStats } from './trim-stats.js';
  */
 export function loadCanon(characterName) {
   if (!characterName) return null;
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.canon ?? null;
+  return getCharacterContainer(characterName)?.canon ?? null;
 }
 
 /**
@@ -73,14 +74,7 @@ export function loadCanon(characterName) {
  */
 export function saveCanon(characterName, text) {
   if (!characterName || !text) return;
-  if (!extension_settings[MODULE_NAME].characters) {
-    extension_settings[MODULE_NAME].characters = {};
-  }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
-    ...existing,
-    canon: { text, ts: Date.now() },
-  };
+  getCharacterContainer(characterName).canon = { text, ts: Date.now() };
   saveSettingsDebounced();
 }
 
@@ -91,7 +85,7 @@ export function saveCanon(characterName, text) {
  */
 export function clearCanon(characterName) {
   if (!characterName) return;
-  const char = extension_settings[MODULE_NAME]?.characters?.[characterName];
+  const char = getCharacterContainer(characterName);
   if (char) {
     delete char.canon;
     saveSettingsDebounced();

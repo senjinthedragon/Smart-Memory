@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-chat memory scope (`memory_scope = 'chat'`).** Long-term tiers (memories, relationship history, canon, persistent arcs, epistemic knowledge, entity registry) can be isolated per chat instead of shared across all chats with the same character. Enabled via the Memory scope selector in settings; default remains per-character. Switching to per-chat seeds the current chat from the character store so an ongoing chat keeps its memory; new chats start clean. Non-destructive: character-level data is left untouched and can be returned to at any time. Storage nests per-chat containers under `characters[characterName].chats[chatId]`, schema-versioned like every other container. Group persistent arcs are scoped the same way under `group_arcs[groupId].chats[chatId]`. Pure scope-resolution logic lives in `scope-core.js` and is covered by `tests/scope.test.js`.
+
 ## [1.8.1] - 2026-07-02
 
 ### Added

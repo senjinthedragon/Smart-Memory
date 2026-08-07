@@ -34,9 +34,16 @@ import {
   saveSettingsDebounced,
   getMaxContextSize,
   stopGeneration,
+  getCurrentChatId,
 } from '../../../../script.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../../scripts/popup.js';
 import { getContext, extension_settings } from '../../../extensions.js';
+import {
+  seedCurrentChatFromCharacter,
+  seedCurrentChatGroupFromGroup,
+  pinChatScope,
+  unpinChatScope,
+} from './scope.js';
 import {
   estimateTokens,
   MODULE_NAME,
@@ -145,6 +152,9 @@ import {
 export const defaultSettings = {
   enabled: true,
   settings_mode: 'simple',
+  // Memory scope: 'character' (shared across chats, upstream behaviour) or
+  // 'chat' (long-term tiers isolated per chat - fork feature).
+  memory_scope: 'character',
   extraction_frequency: 'medium',
 
   // LLM source for all memory operations (extraction, summarization, recap)
@@ -744,44 +754,48 @@ export function bindSettingsUI(ctrl) {
         .filter(Boolean);
     })();
 
+    pinChatScope(getCurrentChatId());
     setStatusMessage('Committing read-only session...');
-
-    for (const name of characterNames) {
-      if (settings.longterm_enabled) {
-        const nameWindow = context.groupId
-          ? windowMessages.filter((m) => m.is_user || m.name === name)
-          : windowMessages;
-        if (nameWindow.length > 0) {
-          await extractAndStoreMemories(name, nameWindow).catch((err) =>
-            console.error('[SmartMemory] Commit long-term extraction error:', err),
-          );
-          if (settings.consolidation_enabled) {
-            await consolidateMemories(name).catch((err) =>
-              console.error('[SmartMemory] Commit consolidation error:', err),
+    try {
+      for (const name of characterNames) {
+        if (settings.longterm_enabled) {
+          const nameWindow = context.groupId
+            ? windowMessages.filter((m) => m.is_user || m.name === name)
+            : windowMessages;
+          if (nameWindow.length > 0) {
+            await extractAndStoreMemories(name, nameWindow).catch((err) =>
+              console.error('[SmartMemory] Commit long-term extraction error:', err),
             );
+            if (settings.consolidation_enabled) {
+              await consolidateMemories(name).catch((err) =>
+                console.error('[SmartMemory] Commit consolidation error:', err),
+              );
+            }
           }
         }
+        if (settings.profiles_enabled && name) {
+          await generateProfiles(name)
+            .then((profiles) => {
+              if (profiles) {
+                injectProfiles(name);
+                updateProfilesUI(profiles);
+              }
+            })
+            .catch((err) => console.error('[SmartMemory] Commit profile generation error:', err));
+        }
       }
-      if (settings.profiles_enabled && name) {
-        await generateProfiles(name)
-          .then((profiles) => {
-            if (profiles) {
-              injectProfiles(name);
-              updateProfilesUI(profiles);
-            }
-          })
-          .catch((err) => console.error('[SmartMemory] Commit profile generation error:', err));
+
+      if (settings.arcs_enabled) {
+        await extractArcs(windowMessages).catch((err) =>
+          console.error('[SmartMemory] Commit arc extraction error:', err),
+        );
       }
-    }
 
-    if (settings.arcs_enabled) {
-      await extractArcs(windowMessages).catch((err) =>
-        console.error('[SmartMemory] Commit arc extraction error:', err),
-      );
+      saveSettingsDebounced();
+      setStatusMessage('Session committed.');
+    } finally {
+      unpinChatScope();
     }
-
-    saveSettingsDebounced();
-    setStatusMessage('Session committed.');
   }
 
   // Prevent section-header enable checkboxes from toggling the <details> open/closed
@@ -802,6 +816,41 @@ export function bindSettingsUI(ctrl) {
         // Restore injections from stored data so the user picks up where they left off.
         ctrl.onChatChanged();
       }
+    });
+
+  // ---- Memory scope (fork: per-chat isolation) ---------------------------
+  $('#sm_memory_scope')
+    .val(s.memory_scope ?? 'character')
+    .on('change', function () {
+      const next = $(this).val();
+      const prev = extension_settings[MODULE_NAME].memory_scope ?? 'character';
+      if (next === prev) return;
+      extension_settings[MODULE_NAME].memory_scope = next;
+      if (next === 'chat') {
+        // Keep the ongoing chat's accumulated memory; new chats start clean.
+        const characterName = ctrl.getSelectedCharacterName();
+        if (characterName) {
+          seedCurrentChatFromCharacter(characterName);
+        }
+        const context = getContext();
+        if (context?.groupId) {
+          seedCurrentChatGroupFromGroup(context.groupId);
+        }
+        toastr.info(
+          'Per-chat memory enabled. The current chat was seeded from the character store; new chats start clean.',
+          'Smart Memory',
+          { timeOut: 5000, positionClass: 'toast-bottom-right' },
+        );
+      } else {
+        toastr.info(
+          'Memory is shared per character again. Per-chat data is kept but no longer used.',
+          'Smart Memory',
+          { timeOut: 5000, positionClass: 'toast-bottom-right' },
+        );
+      }
+      saveSettingsDebounced();
+      // Reload injections and tier lists so they reflect the new scope.
+      ctrl.onChatChanged();
     });
 
   // ---- Settings mode toggle -------------------------------------------
@@ -2399,6 +2448,10 @@ export function bindSettingsUI(ctrl) {
     // extraction runs for every character, not just the one in the selector.
     // Solo chats collapse to a single-element array using the active character.
     const catchUpContext = getContext();
+    // Pin the per-chat scope to the chat this job started on. Catch-up can run
+    // for minutes; if the user switches chats mid-run, writes must still land
+    // in the chat being processed, not whatever chat is active at write time.
+    const catchUpChatId = getCurrentChatId() ?? null;
     const catchUpCharacterNames = (() => {
       if (!catchUpContext.groupId) return [characterName];
       const group = catchUpContext.groups?.find((g) => g.id === catchUpContext.groupId);
@@ -2435,6 +2488,7 @@ export function bindSettingsUI(ctrl) {
     $('#sm_cancel_catch_up').show().prop('disabled', false);
 
     try {
+      pinChatScope(catchUpChatId);
       const context = getContext();
       const settings = extension_settings[MODULE_NAME];
 
@@ -2784,6 +2838,7 @@ export function bindSettingsUI(ctrl) {
       showError('Catch-up', err);
       setStatusMessage('Catch-up failed.');
     } finally {
+      unpinChatScope();
       $('#sm_cancel_catch_up').hide();
       $('#sm_catch_up').show();
       ctrl.extractionRunning = false;

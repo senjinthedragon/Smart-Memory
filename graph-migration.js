@@ -47,6 +47,7 @@ import { saveSettingsDebounced } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, SCHEMA_VERSION, generateMemoryId } from './constants.js';
 import { smLog } from './logging.js';
+import { getCharacterContainer } from './scope.js';
 
 // ---- Graph defaults ---------------------------------------------------------
 
@@ -100,7 +101,7 @@ export function applyGraphDefaults(mem) {
  */
 export function loadCharacterEntityRegistry(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.entities ?? [];
+  return getCharacterContainer(characterName)?.entities ?? [];
 }
 
 /**
@@ -115,14 +116,7 @@ export function loadCharacterEntityRegistry(characterName) {
  */
 export function saveCharacterEntityRegistry(characterName, entities) {
   if (!characterName || !Array.isArray(entities)) return;
-  if (!extension_settings[MODULE_NAME].characters) {
-    extension_settings[MODULE_NAME].characters = {};
-  }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
-    ...existing,
-    entities,
-  };
+  getCharacterContainer(characterName).entities = entities;
 }
 
 // ---- Entity registry: session-scoped (chatMetadata) -------------------------
