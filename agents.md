@@ -258,6 +258,8 @@ prompt/parse changes can be checked without a live model.
 - **Group ID normalization.** `sameGroupId` unifies string vs numeric group ID comparisons across UI, settings, and memory tiers.
 - **Three-state profile merge.** Absent sections preserve stored content; present (including empty) sections replace it.
 - **Unified cache invalidation.** Invalidation added to relationship history and triggered memory clear paths; reinjection wired to settings toggle.
+- **Real SillyTavern delete-index recovery.** SillyTavern emits `MESSAGE_DELETED` with the new chat length, not the deleted index. `resolveDeletedIndexFromRefs(prevRefs, currChat, emittedLength)` recovers the deleted turn by object-identity diff against a snapshot captured on load/send/receive; `captureChatRefs()` maintains it. Verified end-to-end against SillyTavern v1.19.0 with the real `v41-flash-combo` model at a 32k cap (mid-chat delete, range delete, and edit each rewind the extraction cursor exactly).
+  - _Known conservative behavior:_ editing a message before any full extraction has stamped `lastExtractCutoff` (e.g. only compaction has run) does not trigger a state rollback. This is deliberate — without a cursor there is no proof the turn was extracted, and rolling back would risk wiping state for a turn nothing was derived from. The summary is refreshed on the next compaction pass.
 
 ### v2 critique fixes
 
