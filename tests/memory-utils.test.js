@@ -6,11 +6,14 @@ import {
   classifyTurn,
   hybridScore,
   memoryUtilityScore,
+  partitionEpistemicEntriesBySubject,
   prioritizeMemories,
   reconcileTypeEntries,
   selectProtectedMemories,
   sortByTimeline,
+  splitSummarySections,
   trimByPriority,
+  truncateSummaryToBudget,
 } from '../memory-utils.js';
 
 test('trimByPriority keeps high-importance memories over low-importance ones', () => {
@@ -287,4 +290,89 @@ test('adaptiveBudgets preserves total budget while reallocating by turn type', (
   assert.equal(actionTotal, baseTotal);
   assert.ok(action.session > settings.session_inject_budget);
   assert.ok(action.longterm < settings.longterm_inject_budget);
+});
+
+// =========================================================================
+// Summary section truncation
+// =========================================================================
+
+function buildNineSectionSummary() {
+  return [
+    `1. Scene & Setting: ${'The ancient hall is cold and dark. '.repeat(12)}`,
+    `2. Characters Present: ${'Elara watches the door nervously. '.repeat(8)}`,
+    `3. Key Events: ${'They crossed the bridge and found the key. '.repeat(14)}`,
+    `4. Relationship Dynamics: ${'Trust is fragile between them. '.repeat(8)}`,
+    `5. Revealed Information: ${'The key opens the sealed gate. '.repeat(8)}`,
+    `6. Story Threads: ${'The oath remains unfulfilled. '.repeat(8)}`,
+    `7. User's Direction: ${'Keep the tone tense and quiet. '.repeat(8)}`,
+    '8. Current Moment: Elara stands at the sealed gate with the key in hand.',
+    '9. Next Beat: The gate opens and cold air rushes out.',
+  ].join('\n\n');
+}
+
+test('splitSummarySections parses numbered sections in order', () => {
+  const { sections } = splitSummarySections(buildNineSectionSummary());
+  assert.equal(sections.length, 9);
+  assert.equal(sections[0].num, 1);
+  assert.equal(sections[8].num, 9);
+  assert.match(sections[7].text, /Current Moment/);
+});
+
+test('truncateSummaryToBudget preserves Current Moment and Next Beat', () => {
+  const summary = buildNineSectionSummary();
+  const trimmed = truncateSummaryToBudget(summary, 120);
+
+  assert.ok(trimmed.length < summary.length);
+  assert.match(trimmed, /8\. Current Moment:/);
+  assert.match(trimmed, /Elara stands at the sealed gate/);
+  assert.match(trimmed, /9\. Next Beat:/);
+  assert.match(trimmed, /The gate opens and cold air rushes out/);
+  assert.doesNotMatch(trimmed, /\[truncated\]$/);
+});
+
+test('truncateSummaryToBudget keeps anchor sections even below their own budget', () => {
+  const summary = buildNineSectionSummary();
+  // Far too small for the tail alone - the anchors must still survive intact.
+  const trimmed = truncateSummaryToBudget(summary, 5);
+
+  assert.match(trimmed, /8\. Current Moment:/);
+  assert.match(trimmed, /Elara stands at the sealed gate/);
+  assert.match(trimmed, /9\. Next Beat:/);
+  assert.match(trimmed, /The gate opens and cold air rushes out/);
+});
+
+test('truncateSummaryToBudget falls back to tail truncation for unnumbered text', () => {
+  const text = 'A long unnumbered recollection without any section headers. '.repeat(40);
+  const trimmed = truncateSummaryToBudget(text, 20);
+
+  assert.ok(trimmed.length < text.length);
+  assert.match(trimmed, /\[truncated\]$/);
+});
+
+// =========================================================================
+// Epistemic partitioning
+// =========================================================================
+
+test('partitionEpistemicEntriesBySubject groups entries per member and skips outsiders', () => {
+  const entries = [
+    { type: 'knows', subject: 'Alice', content: 'the vault code' },
+    { type: 'suspects', subject: 'bob', content: 'Alice is lying' },
+    { type: 'knows', subject: 'Alice', content: 'where the key is' },
+    { type: 'knows', subject: 'Mallory', content: 'not a group member' },
+  ];
+
+  const { grouped, skipped } = partitionEpistemicEntriesBySubject(entries, ['Alice', 'Bob']);
+
+  assert.deepEqual(
+    grouped.get('Alice').map((e) => e.content),
+    ['the vault code', 'where the key is'],
+  );
+  assert.deepEqual(
+    grouped.get('Bob').map((e) => e.content),
+    ['Alice is lying'],
+  );
+  // Subject casing is canonicalised to the member name for storage.
+  assert.equal(grouped.get('Bob')[0].subject, 'Bob');
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].subject, 'Mallory');
 });

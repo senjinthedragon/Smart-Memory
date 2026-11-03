@@ -486,8 +486,10 @@ export function parseTriggerResponse(response, memoryContent) {
 // ---- Relationship delta parser ------------------------------------------
 
 // Matches lines like "Senjin -> Asher: warm(high), cautious(low)"
-// The arrow can be -> or the unicode → character.
-const RELATIONSHIP_LINE_RE = /^([^→-]+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
+// The arrow can be -> or the unicode → character. The subject may contain
+// hyphens (Jean-Luc, Mary-Jane, Al-Haitham) - only the actual arrow token ends
+// it, so use a lookahead instead of excluding "-" outright.
+const RELATIONSHIP_LINE_RE = /^((?:(?!->|→)[^:])+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
 // Matches the inline magnitude suffix: word(low|medium|high)
 const INLINE_MAGNITUDE_RE = /\((\s*low|medium|high\s*)\)/i;
 const MAGNITUDE_KEYWORDS = new Set(['low', 'medium', 'high']);
@@ -800,26 +802,43 @@ export function parseStateCardResponse(raw) {
     if (!name || !type || !rest) continue;
 
     const fields = {};
+    const clearedFields = new Set();
     for (const chunk of rest.split('|')) {
       const eqIdx = chunk.indexOf('=');
       if (eqIdx === -1) continue;
       const fieldName = chunk.slice(0, eqIdx).trim().toLowerCase().replace(/\s+/g, '_');
+      if (!fieldName) continue;
       const value = chunk.slice(eqIdx + 1).trim();
-      if (!fieldName || !value) continue;
-      // Strip noise values - do not store placeholders.
-      if (STATE_NOISE_VALUES.has(value.toLowerCase())) continue;
+      const lowerValue = value.toLowerCase();
+
+      // Explicit clearing signals: an empty value, a bare `none`/`empty`, or a
+      // `!`-prefixed value. These remove a previously stored item/flag instead
+      // of being silently dropped as an unknown placeholder.
+      if (value === '' || value.startsWith('!') || lowerValue === 'none' || lowerValue === 'empty') {
+        clearedFields.add(fieldName);
+        continue;
+      }
+
+      // Strip other noise values - do not store placeholders.
+      if (STATE_NOISE_VALUES.has(lowerValue)) continue;
       fields[fieldName] = value;
     }
 
-    // Drop the entry if no valid fields survived filtering.
-    if (Object.keys(fields).length === 0) continue;
+    // Drop the entry only if it contributes neither values nor clears.
+    if (Object.keys(fields).length === 0 && clearedFields.size === 0) continue;
 
     const key = `${name.toLowerCase().trim()}|${type}`;
     // Merge with any earlier line for the same key (model may split across lines).
     // _name stores the original-case display name - the key itself is lowercased
     // for stable merging but the prompt should show the character's real name.
     const existing = result.get(key) ?? {};
-    result.set(key, { _name: name, ...existing, ...fields });
+    const merged = { _name: name, ...existing, ...fields };
+    // An empty string overwrites the stored value during the shallow merge in
+    // state-ledger.js, which is how a field gets cleared.
+    for (const fieldName of clearedFields) {
+      merged[fieldName] = '';
+    }
+    result.set(key, merged);
   }
 
   return result;

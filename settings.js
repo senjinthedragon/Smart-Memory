@@ -52,7 +52,7 @@ import {
   PROMPT_KEY_STATE_LEDGER,
   generateMemoryId,
 } from './constants.js';
-import { memory_sources, fetchOllamaModels } from './generate.js';
+import { memory_sources, fetchOllamaModels, abortCurrentMemoryGeneration } from './generate.js';
 import { runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
 import {
   extractAndStoreMemories,
@@ -103,7 +103,7 @@ import { runModelTest } from './model-test.js';
 
 /** Set to true while a model test is running to allow cancellation. */
 let modelTestRunning = false;
-import { checkContinuity, generateRepair, injectRepair, clearRepair } from './continuity.js';
+import { checkContinuity, handleContinuityResult } from './continuity.js';
 import {
   getHardwareProfile,
   getEmbeddingBatch,
@@ -263,6 +263,12 @@ export const defaultSettings = {
 
   // Continuity
   continuity_response_length: 300,
+  // off | warn | repair. 'warn' (report only) is the safe default - the checker
+  // can only see baseline notes, so it must never silently steer the story.
+  continuity_mode: 'warn',
+  // Legacy flags kept for backward compatibility. continuity_auto_check still
+  // gates the Profile B post-turn check; continuity_auto_repair is migrated
+  // into continuity_mode on load when the new key is absent.
   continuity_auto_check: true,
   continuity_auto_repair: false,
 
@@ -292,15 +298,17 @@ export const defaultSettings = {
   epistemic_secondhand_framing: true,
   epistemic_response_length: 400,
   epistemic_inject_budget: 200,
-  epistemic_depth: 1,
-  epistemic_position: extension_prompt_types.IN_CHAT,
+  // Injected in the main prompt rather than at IN_CHAT depth 1 so stale
+  // extracted state cannot override the active dialogue turn.
+  epistemic_depth: 0,
+  epistemic_position: extension_prompt_types.IN_PROMPT,
   epistemic_role: extension_prompt_roles.SYSTEM,
 
   // State Ledger (structured entity state cards)
   state_ledger_enabled: false,
   state_ledger_inject_budget: 200,
-  state_ledger_depth: 1,
-  state_ledger_position: extension_prompt_types.IN_CHAT,
+  state_ledger_depth: 0,
+  state_ledger_position: extension_prompt_types.IN_PROMPT,
   state_ledger_role: extension_prompt_roles.SYSTEM,
 
   // Hardware profile - 'auto' | 'a' | 'b'
@@ -606,10 +614,22 @@ export function loadSettings() {
   if (!extension_settings[MODULE_NAME]) {
     extension_settings[MODULE_NAME] = {};
   }
+
+  // Capture the legacy continuity flags before defaults fill in the new key so
+  // users who enabled auto-repair keep that behaviour after upgrading.
+  const hadContinuityMode = extension_settings[MODULE_NAME].continuity_mode !== undefined;
+  const legacyAutoRepair = extension_settings[MODULE_NAME].continuity_auto_repair === true;
+
   for (const [key, value] of Object.entries(defaultSettings)) {
     if (extension_settings[MODULE_NAME][key] === undefined) {
       extension_settings[MODULE_NAME][key] = value;
     }
+  }
+
+  // Migration: continuity_auto_repair -> continuity_mode. Only runs when the
+  // new key was absent, so an explicit user choice is never overwritten.
+  if (!hadContinuityMode && legacyAutoRepair) {
+    extension_settings[MODULE_NAME].continuity_mode = 'repair';
   }
 
   // Migration: replace old bracket-wrapped template defaults with plain-text equivalents.
@@ -1845,7 +1865,7 @@ export function bindSettingsUI(ctrl) {
       reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
-  $(`input[name="sm_epistemic_position"][value="${s.epistemic_position ?? 1}"]`).prop(
+  $(`input[name="sm_epistemic_position"][value="${s.epistemic_position ?? 0}"]`).prop(
     'checked',
     true,
   );
@@ -1855,7 +1875,7 @@ export function bindSettingsUI(ctrl) {
   });
 
   $('#sm_epistemic_depth')
-    .val(s.epistemic_depth ?? 1)
+    .val(s.epistemic_depth ?? 0)
     .on('input', function () {
       extension_settings[MODULE_NAME].epistemic_depth = parseInt($(this).val(), 10);
       saveSettingsDebounced();
@@ -1902,7 +1922,7 @@ export function bindSettingsUI(ctrl) {
       reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
-  $(`input[name="sm_state_ledger_position"][value="${s.state_ledger_position ?? 1}"]`).prop(
+  $(`input[name="sm_state_ledger_position"][value="${s.state_ledger_position ?? 0}"]`).prop(
     'checked',
     true,
   );
@@ -1912,7 +1932,7 @@ export function bindSettingsUI(ctrl) {
   });
 
   $('#sm_state_ledger_depth')
-    .val(s.state_ledger_depth ?? 1)
+    .val(s.state_ledger_depth ?? 0)
     .on('input', function () {
       extension_settings[MODULE_NAME].state_ledger_depth = parseInt($(this).val(), 10);
       saveSettingsDebounced();
@@ -2787,31 +2807,35 @@ export function bindSettingsUI(ctrl) {
         }
       }
 
-      // Re-inject and refresh UI for everything processed so far, whether the
-      // run completed or was cancelled partway through.
-      await injectMemories(characterName);
-      injectRelationshipHistory(characterName);
-      injectSessionMemories();
-      injectSceneHistory();
-      injectArcs();
-      injectStateLedger();
-      // Reset the warn flag so the catch-up final inject can prompt if needed,
-      // then pass warn=true so a single exact-fit dialog fires if the full list
-      // exceeds the current budget.
-      resetEpistemicWarnFlag();
-      injectEpistemicKnowledge(characterName, characterName, false, true, true);
-      injectProfiles(characterName);
-      updateEntityPanel(characterName);
-      updateLongTermUI(characterName);
-      updateRelationshipHistoryUI(characterName);
-      updateEpistemicUI(characterName);
-      updateSessionUI();
-      updateScenesUI();
-      updateArcsUI();
-      updateProfilesUI(loadProfiles(characterName));
-      maybeInjectUnified();
-      updateTokenDisplay();
-      saveSettingsDebounced();
+      // Re-inject and refresh UI only when the run completed. A cancelled run
+      // may still be holding the previous chat's context, and injecting its
+      // character memories into the now-active chat would overwrite the new
+      // chat's slots. Partial extraction results are already persisted.
+      if (!ctrl.catchUpCancelled) {
+        await injectMemories(characterName);
+        injectRelationshipHistory(characterName);
+        injectSessionMemories();
+        injectSceneHistory();
+        injectArcs();
+        injectStateLedger();
+        // Reset the warn flag so the catch-up final inject can prompt if needed,
+        // then pass warn=true so a single exact-fit dialog fires if the full list
+        // exceeds the current budget.
+        resetEpistemicWarnFlag();
+        injectEpistemicKnowledge(characterName, characterName, false, true, true);
+        injectProfiles(characterName);
+        updateEntityPanel(characterName);
+        updateLongTermUI(characterName);
+        updateRelationshipHistoryUI(characterName);
+        updateEpistemicUI(characterName);
+        updateSessionUI();
+        updateScenesUI();
+        updateArcsUI();
+        updateProfilesUI(loadProfiles(characterName));
+        maybeInjectUnified();
+        updateTokenDisplay();
+        saveSettingsDebounced();
+      }
 
       if (ctrl.catchUpCancelled) {
         setStatusMessage('Catch-up cancelled.');
@@ -2840,6 +2864,9 @@ export function bindSettingsUI(ctrl) {
 
   $('#sm_cancel_catch_up').on('click', function () {
     ctrl.catchUpCancelled = true;
+    // Abort any in-flight memory model call immediately so cancellation does
+    // not wait for a long local generation to finish before taking effect.
+    abortCurrentMemoryGeneration();
     $(this).prop('disabled', true);
     setStatusMessage('Cancelling...');
   });
@@ -3241,10 +3268,14 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
     });
 
-  $('#sm_auto_repair')
-    .prop('checked', s.continuity_auto_repair)
+  $('#sm_continuity_mode')
+    .val(s.continuity_mode ?? 'warn')
     .on('change', function () {
-      extension_settings[MODULE_NAME].continuity_auto_repair = $(this).prop('checked');
+      const mode = $(this).val();
+      extension_settings[MODULE_NAME].continuity_mode = mode;
+      // Keep the legacy flag in sync so older builds and external tooling that
+      // still read continuity_auto_repair see the same intent.
+      extension_settings[MODULE_NAME].continuity_auto_repair = mode === 'repair';
       saveSettingsDebounced();
     });
 
@@ -3370,8 +3401,10 @@ export function bindSettingsUI(ctrl) {
     setStatusMessage('Checking continuity...');
     $('#sm_continuity_result').hide().empty();
     try {
-      const contradictions = await checkContinuity(characterName);
-      if (contradictions.length === 0) {
+      const result = await checkContinuity(characterName);
+      const { mode, issues } = handleContinuityResult(result, characterName);
+
+      if (issues.length === 0) {
         $('#sm_continuity_result')
           .addClass('sm_continuity_clean')
           .removeClass('sm_continuity_warn')
@@ -3379,45 +3412,17 @@ export function bindSettingsUI(ctrl) {
           .show();
         setStatusMessage('Continuity OK.');
       } else {
-        const $result = $('#sm_continuity_result')
-          .addClass('sm_continuity_warn')
-          .removeClass('sm_continuity_clean');
-        $result.empty();
-        $result.append('<b>Contradictions found:</b>');
-        const $ul = $('<ul>');
-        contradictions.forEach((c) => $ul.append($('<li>').text(c)));
-        $result.append($ul).show();
-        setStatusMessage(
-          `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found.`,
-        );
-
-        // If auto-repair is on, generate a corrective note and inject it for
-        // the next AI turn. The note is cleared automatically once that response
-        // is rendered by onCharacterMessageRendered.
-        if (extension_settings[MODULE_NAME].continuity_auto_repair) {
-          setStatusMessage('Generating repair...');
-          try {
-            const note = await generateRepair(contradictions, characterName);
-            injectRepair(note);
-            const $repairBlock = $('<div class="sm_repair_queued">');
-            $repairBlock.append($('<p>').text('Correction queued for next response:'));
-            $repairBlock.append($('<p class="sm_repair_note">').text(note));
-            const $cancel = $(
-              '<button class="menu_button sm_repair_cancel">Cancel correction</button>',
-            );
-            $cancel.on('click', () => {
-              clearRepair();
-              $repairBlock.remove();
-              setStatusMessage('Correction cancelled.');
-            });
-            $repairBlock.append($cancel);
-            $result.append($repairBlock);
-            setStatusMessage('Correction queued.');
-            toastr.info('Correction queued for next response.', 'Smart Memory');
-          } catch (repairErr) {
-            console.error('[SmartMemory] Repair generation failed:', repairErr);
-            setStatusMessage('Repair failed - see console.');
-          }
+        // handleContinuityResult already rendered the issue list and respected
+        // the continuity_mode setting (warn shows the list, repair queues a
+        // forward-only anchored note, off discards).
+        const count = issues.length;
+        const plural = count === 1 ? '' : 's';
+        if (mode === 'repair') {
+          setStatusMessage(`${count} contradiction${plural} found. Continuity note queued.`);
+        } else if (mode === 'off') {
+          setStatusMessage(`${count} contradiction${plural} found (continuity mode is off).`);
+        } else {
+          setStatusMessage(`${count} contradiction${plural} found.`);
         }
       }
     } catch (err) {

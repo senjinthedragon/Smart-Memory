@@ -47,6 +47,7 @@ import {
 import { getContext, extension_settings } from '../../../extensions.js';
 import { generateMemoryExtract } from './generate.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_PROFILES } from './constants.js';
+import { replaceTemplate } from './template-utils.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 import { loadCharacterEntityRegistry } from './graph-migration.js';
@@ -210,7 +211,7 @@ function formatProfiles(profiles, budget) {
  * Clears the slot if profiles are disabled, the character is unknown, or nothing is stored.
  * @param {string} [characterName]
  */
-export function injectProfiles(characterName) {
+export function injectProfiles(characterName, budgetOverride = null) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.profiles_enabled) {
@@ -228,7 +229,7 @@ export function injectProfiles(characterName) {
     return;
   }
 
-  const budget = settings.profiles_inject_budget ?? 200;
+  const budget = budgetOverride ?? settings.profiles_inject_budget ?? 200;
   const sections = [
     profiles.character_state,
     profiles.world_state,
@@ -245,7 +246,7 @@ export function injectProfiles(characterName) {
   }
 
   const template = settings.profiles_template ?? '{{profiles}}';
-  const content = template.replace('{{profiles}}', text);
+  const content = replaceTemplate(template, '{{profiles}}', text);
   reportTierTrimStats(PROMPT_KEY_PROFILES, estimateTokens(content), fullTokens);
 
   setMacroContent(MACRO_NAMES.profiles, content);

@@ -39,6 +39,7 @@ import { generateMemorySummarize } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
+import { replaceTemplate } from './template-utils.js';
 import { buildSummaryPrompt, buildUpdateSummaryPrompt } from './prompts.js';
 import { formatSummary } from './parsers.js';
 import { loadCharacterMemories } from './longterm.js';
@@ -46,6 +47,7 @@ import { loadSessionMemories } from './session.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
+import { truncateSummaryToBudget } from './memory-utils.js';
 
 /**
  * Counts tokens across all non-system chat messages.
@@ -104,9 +106,10 @@ export async function shouldCompact() {
  * it in chatMetadata. Uses progressive compaction when a prior summary exists:
  * only messages after summaryEnd are processed, extending the existing summary
  * rather than rewriting it from scratch.
- * @returns {Promise<string|null>} The formatted summary, or null on failure.
+ * @param {{includeLastMessage?: boolean, abortCheck?: Function|null}} [options]
+ * @returns {Promise<string|null>} The formatted summary, or null on failure/abort.
  */
-export async function runCompaction({ includeLastMessage = false } = {}) {
+export async function runCompaction({ includeLastMessage = false, abortCheck = null } = {}) {
   const settings = extension_settings[MODULE_NAME];
   const context = getContext();
 
@@ -188,9 +191,15 @@ export async function runCompaction({ includeLastMessage = false } = {}) {
 
       if (!newEvents.trim()) return existingSummary;
 
-      const updatePrompt = buildUpdateSummaryPrompt(storedMemories)
-        .replace('{{existing_summary}}', existingSummary)
-        .replace('{{new_events}}', newEvents);
+      const updatePrompt = replaceTemplate(
+        replaceTemplate(
+          buildUpdateSummaryPrompt(storedMemories),
+          '{{existing_summary}}',
+          existingSummary,
+        ),
+        '{{new_events}}',
+        newEvents,
+      );
 
       raw = await generateMemorySummarize(updatePrompt, {
         responseLength: settings.compaction_response_length || 2000,
@@ -208,6 +217,11 @@ export async function runCompaction({ includeLastMessage = false } = {}) {
     }
 
     if (!raw || raw.trim() === '') return null;
+
+    // The chat may have been switched while the model call was in flight.
+    // Bail before touching chatMetadata/saveMetadata so the previous chat's
+    // summary is never written into the newly-opened chat.
+    if (abortCheck?.()) return null;
 
     const summary = formatSummary(raw);
 
@@ -248,26 +262,17 @@ export function injectSummary(summary) {
     return;
   }
 
-  // Truncate to token budget - response_length doubles as the injection cap.
-  // Use a proportional char slice based on the actual token estimate rather
-  // than the fixed budget*4 approximation, which breaks on multibyte content.
+  // Truncate to the token budget - response_length doubles as the injection cap.
+  // Sections 8 (Current Moment) and 9 (Next Beat) are at the END of the
+  // summary, so a naive end cut would discard exactly the content the model
+  // needs to continue the scene. The helper trims earlier narrative sections
+  // first and keeps the tail anchored.
   const budget = settings.compaction_response_length ?? 2000;
-  let summaryText = summary;
-  const tokenCount = estimateTokens(summaryText);
-  const fullTokens = tokenCount;
-  if (tokenCount > budget) {
-    const ratio = budget / tokenCount;
-    const sliceAt = Math.floor(summaryText.length * ratio);
-    // Try to break at the last sentence boundary within the sliced region
-    // so we don't cut mid-word or mid-thought.
-    const boundary = summaryText.lastIndexOf('.', sliceAt);
-    summaryText =
-      boundary > sliceAt * 0.8 ? summaryText.slice(0, boundary + 1) : summaryText.slice(0, sliceAt);
-    summaryText += ' ... [truncated]';
-  }
+  const fullTokens = estimateTokens(summary);
+  const summaryText = truncateSummaryToBudget(summary, budget);
 
   const template = settings.compaction_template || 'Story so far:\n{{summary}}';
-  const content = template.replace('{{summary}}', summaryText);
+  const content = replaceTemplate(template, '{{summary}}', summaryText);
   reportTierTrimStats(PROMPT_KEY_SHORT, estimateTokens(content), fullTokens);
 
   setMacroContent(MACRO_NAMES.shortterm, content);

@@ -232,7 +232,7 @@ export function estimateCharPersonalTokens(charName) {
     memories.length > 0 ? estimateTokens(memories.map((m) => `- ${m.content}`).join('\n')) : 0;
 
   const canon = loadCanon(charName);
-  const canonTokens = canon ? estimateTokens(canon) : 0;
+  const canonTokens = canon ? estimateTokens(canon.text) : 0;
 
   const profiles = loadProfiles(charName);
   const profileTokens = profiles
@@ -973,7 +973,7 @@ export function updateArcsUI() {
     const idx = parseInt($(this).data('index'), 10);
     const arc = loadArcs()[idx];
     if (!arc) return;
-    await deleteArc(idx, charName);
+    await deleteArc(idx, charName, groupId);
     if (groupId) {
       const gP = loadGroupPersistentArcs(groupId);
       saveGroupPersistentArcs(
@@ -1069,7 +1069,7 @@ export function updateArcsUI() {
 
   $list.find('.sm_delete_arc').on('click', async function () {
     const idx = parseInt($(this).data('index'), 10);
-    await deleteArc(idx, charName);
+    await deleteArc(idx, charName, groupId);
     injectArcs();
     updateArcsUI();
   });

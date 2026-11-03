@@ -48,6 +48,9 @@ import {
   PROMPT_KEY_ARCS,
   PROMPT_KEY_PROFILES,
   PROMPT_KEY_CANON,
+  PROMPT_KEY_RELATIONSHIPS,
+  PROMPT_KEY_EPISTEMIC,
+  PROMPT_KEY_STATE_LEDGER,
   PROMPT_KEY_UNIFIED,
   estimateTokens,
 } from './constants.js';
@@ -63,11 +66,14 @@ import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 const TIER_ORDER = [
   { key: PROMPT_KEY_CANON, label: 'Canon', color: '#a05870' },
   { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: '#5a9ea0' },
+  { key: PROMPT_KEY_RELATIONSHIPS, label: 'Relationships', color: 'oklch(62% 0.14 0)' },
   { key: PROMPT_KEY_LONG, label: 'Long-term', color: '#4a6fa5' },
   { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
   { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#a07840' },
+  { key: PROMPT_KEY_EPISTEMIC, label: 'Perspectives', color: 'oklch(62% 0.14 108)' },
   { key: PROMPT_KEY_SESSION, label: 'Session', color: '#8e5a8e' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
+  { key: PROMPT_KEY_STATE_LEDGER, label: 'State', color: 'oklch(62% 0.14 72)' },
 ];
 
 /** All individual keys that unified mode absorbs. */

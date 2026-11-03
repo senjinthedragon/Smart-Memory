@@ -191,17 +191,29 @@ export async function saveArcs(arcs) {
 
 /**
  * Removes a single arc by its index in the arc array.
- * If the arc is persistent and characterName is provided, also removes it
- * from character-level storage so it no longer appears in future chats.
+ * If the arc is persistent, also removes it from the matching persistent store
+ * so it no longer appears in future chats: group-level storage when groupId is
+ * provided, otherwise character-level storage when characterName is provided.
  * @param {number} index
  * @param {string|null} [characterName]
+ * @param {string|null} [groupId]
  */
-export async function deleteArc(index, characterName = null) {
+export async function deleteArc(index, characterName = null, groupId = null) {
   const arcs = loadArcs();
   const arc = arcs[index];
   if (!arc) return;
 
-  if (arc.persistent && characterName) {
+  if (arc.persistent && groupId) {
+    // Group chats keep persistent arcs at the group level.
+    const persistent = loadGroupPersistentArcs(groupId);
+    const filtered = [];
+    for (const p of persistent) {
+      if (!(await arcIsDuplicate(p.content, arc.content))) filtered.push(p);
+    }
+    if (filtered.length !== persistent.length) {
+      saveGroupPersistentArcs(groupId, filtered);
+    }
+  } else if (arc.persistent && characterName) {
     const persistent = loadPersistentArcs(characterName);
     const filtered = [];
     for (const p of persistent) {
@@ -855,7 +867,7 @@ export async function extractArcs(messages, characterName = null, abortCheck = n
  * Injects active story arcs into the prompt via setExtensionPrompt.
  * Clears the slot if arc tracking is disabled or no arcs exist.
  */
-export function injectArcs() {
+export function injectArcs(budgetOverride = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.arcs_enabled) {
     setMacroContent(MACRO_NAMES.arcs, '');
@@ -875,7 +887,7 @@ export function injectArcs() {
   // Trim to token budget: drop oldest arcs (from the front) until we fit.
   // If a single arc still exceeds the budget, hard-truncate its content so the
   // injection is always within the cap regardless of individual entry length.
-  const budget = settings.arcs_inject_budget ?? 400;
+  const budget = budgetOverride ?? settings.arcs_inject_budget ?? 400;
   const fullTokens = estimateTokens(
     `Active story threads:\n${arcs.map((a) => `- ${a.content}`).join('\n')}`,
   );

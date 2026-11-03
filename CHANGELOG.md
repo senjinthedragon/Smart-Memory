@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Partitioned epistemic knowledge for group chats.** Group scenes now run a unified epistemic extraction that partitions entries by character name into each member's respective perspective store.
+- **Explicit state card field clearing syntax.** State card responses can now explicitly clear stored attributes using `!field` or `field=none/empty`.
+- **Remote embedding CORS proxy support.** OpenAI-compatible embeddings targeting remote or cloud endpoints now route through SillyTavern's `/proxy/<url>` middleware.
+- **Unified injection mode coverage.** Added Relationships, Perspectives, and State ledger tiers to unified injection ordering.
+
+### Fixed
+
+- **Continuity checks no longer nudge the story backward.** The checker now
+  receives the recent transcript as ground truth and is told that baseline
+  notes lag behind it, so normal progression (moving, using an item, learning
+  something, time passing) is not treated as a contradiction. Only permanent
+  properties are eligible, and each reported issue must quote the response and
+  the baseline verbatim before it is acted on. The default mode is "Notify
+  only"; optional auto-repair uses a forward-only note that never retracts or
+  re-narrates events already written. The note is anchored to the message it was
+  checked against, so swiping, editing, or deleting that message discards it.
+- **Temporal drift and directive placement.** Swapped default injection position for State Ledger and Epistemic to `IN_PROMPT` (`depth: 0`) so extracted state directives do not override recent dialogue turns.
+- **Summary truncation budget anchoring.** Replaced naive tail-truncation with section-aware truncation (`truncateSummaryToBudget`) preserving Current Moment and Next Beat anchor sections.
+- **Assistant message swipe handling.** Assistant swipes now cleanly rewind the scene message buffer and pop discarded turns to prevent scene corruption.
+- **Periodic epistemic extraction.** Extraction passes now perform periodic lightweight epistemic refreshes so character perspectives remain up to date between rare scene breaks.
+- **Adaptive budget race condition.** In-place mutation of `extension_settings` during extraction has been eliminated; injectors accept per-turn budget overrides to prevent debounced saves persisting temporary values.
+- **Background generation abort on chat switch or cancellation.** Running LLM requests are cleanly aborted when switching chats or cancelling catch-up.
+- **Group arc persistence and deletion.** Arc deletion now respects `groupId`, properly pruning persistent group arcs so deleted threads do not resurrect on reload.
+- **Entity registry protection.** Empty memory passes no longer wipe entity registries, and seeded character entities are preserved.
+- **Safe template replacement.** Implemented `replaceTemplate` across prompt formatting sites to prevent `$` capture sequence corruption in roleplay dialogue and memory content.
+- **Canon token estimate read the wrapper object instead of its text.** The
+  per-character token breakdown always reported zero canon tokens.
+
 ## [1.8.3] - 2026-10-01
 
 ### Fixed

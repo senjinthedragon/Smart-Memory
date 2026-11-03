@@ -50,6 +50,7 @@ import {
   SESSION_TYPES,
   MAX_RETIRED_POOL,
 } from './constants.js';
+import { replaceTemplate } from './template-utils.js';
 import {
   applyGraphDefaults,
   loadSessionEntityRegistry,
@@ -636,9 +637,11 @@ function formatSessionMemories(memories) {
  * Clears the slot if session memory is disabled or no memories exist.
  * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
  *   Only pass true from the post-extraction path (one real AI response turn).
+ * @param {number|null} [budgetOverride=null] - Optional per-turn injection budget, used instead
+ *   of the persisted session_inject_budget without mutating settings.
  * @returns {Promise<void>}
  */
-export async function injectSessionMemories(updateTelemetry = false) {
+export async function injectSessionMemories(updateTelemetry = false, budgetOverride = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
     setMacroContent(MACRO_NAMES.session, '');
@@ -659,7 +662,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
 
   // Trim to token budget using hybrid scoring on real AI turns, plain utility
   // scoring on chat load (no "current turn" to extract entity mentions from).
-  const budget = settings.session_inject_budget ?? 400;
+  const budget = budgetOverride ?? settings.session_inject_budget ?? 400;
   const fullTokens = estimateTokens(formatSessionMemories(memories));
   const protectedSet = new Set(selectProtectedMemories(memories, ['development', 'scene']));
 
@@ -711,7 +714,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
   }
 
   const template = settings.session_template ?? 'Details from this session:\n{{session}}';
-  const sessionBlock = template.replace('{{session}}', formatSessionMemories(trimmed));
+  const sessionBlock = replaceTemplate(template, '{{session}}', formatSessionMemories(trimmed));
   const sceneStateBlock = buildCurrentSceneStateBlock(trimmed);
   const content = sceneStateBlock ? `${sceneStateBlock}\n${sessionBlock}` : sessionBlock;
   reportTierTrimStats(PROMPT_KEY_SESSION, estimateTokens(content), fullTokens);

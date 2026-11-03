@@ -47,6 +47,7 @@ import { saveSettingsDebounced } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, SCHEMA_VERSION, generateMemoryId } from './constants.js';
 import { smLog } from './logging.js';
+import { reconcileEntityRegistry as reconcileEntityRegistryCore } from './entity-registry.js';
 
 // ---- Graph defaults ---------------------------------------------------------
 
@@ -324,15 +325,8 @@ export function resolveEntityNames(mem, rawNames, messageIndex, registry) {
  * Repairs entity registry links after memory IDs change (e.g. after consolidation
  * replaces old memories with new ones that have fresh IDs).
  *
- * Two-pass repair:
- * 1. Prune - remove any memory_ids in the registry that no longer exist in the
- *    current memory list (stale refs from memories that were replaced).
- * 2. Re-link - for each entity, scan current memories whose content contains the
- *    entity's canonical name or any of its aliases, and add those memory IDs.
- *    Also updates the memory's own entities array so both sides stay consistent.
- *
- * Re-linking uses simple substring matching on lowercased content. Names shorter
- * than 3 characters are skipped to avoid spurious matches (e.g. "a", "an").
+ * The reconciliation itself lives in entity-registry.js (pure, unit-testable);
+ * this wrapper adds the prune log line. See that module for the full behaviour.
  *
  * Mutates the registry and memory objects in place. Caller is responsible for
  * persisting both the registry and the memories after this call.
@@ -341,74 +335,14 @@ export function resolveEntityNames(mem, rawNames, messageIndex, registry) {
  * @param {Array<Object>} currentMemories - Current full memory list (mutated in place).
  */
 export function reconcileEntityRegistry(entityRegistry, currentMemories) {
-  if (!Array.isArray(entityRegistry) || entityRegistry.length === 0) return;
-  if (!Array.isArray(currentMemories) || currentMemories.length === 0) {
-    // No current memories - remove all entity entries (nothing left to link to).
-    entityRegistry.splice(0);
-    return;
-  }
+  const before = Array.isArray(entityRegistry) ? entityRegistry.length : 0;
+  reconcileEntityRegistryCore(entityRegistry, currentMemories);
 
-  const currentIdSet = new Set(currentMemories.map((m) => m.id).filter(Boolean));
-
-  for (const entity of entityRegistry) {
-    // Pass 1: prune stale IDs.
-    entity.memory_ids = (entity.memory_ids ?? []).filter((id) => currentIdSet.has(id));
-
-    // Pass 2: re-link by name/alias substring match.
-    // Also include individual words from multi-word names (min 4 chars) so
-    // that "Asher" in content matches the entity "Asher Somel".
-    const rawNames = [entity.name, ...(entity.aliases ?? [])].map((n) => n.toLowerCase().trim());
-    const names = [
-      ...new Set([
-        ...rawNames.filter((n) => n.length >= 3),
-        ...rawNames.flatMap((n) => n.split(/\s+/).filter((w) => w.length >= 4)),
-      ]),
-    ];
-
-    if (names.length === 0) continue;
-
-    for (const mem of currentMemories) {
-      if (entity.memory_ids.includes(mem.id)) continue; // already linked
-
-      const contentLower = (mem.content ?? '').toLowerCase();
-      const linkedByName = names.some((n) => contentLower.includes(n));
-      // Also check the memory's own entities array. A consolidated memory may
-      // use pronouns ("she") instead of the entity's name - content substring
-      // matching would miss it, but reconcileTypeEntries carries the base
-      // entry's entities array forward so the ID is already present.
-      const linkedById = Array.isArray(mem.entities) && mem.entities.includes(entity.id);
-
-      if (linkedByName || linkedById) {
-        entity.memory_ids.push(mem.id);
-
-        // Keep the memory's own entities array in sync.
-        if (!Array.isArray(mem.entities)) mem.entities = [];
-        if (!mem.entities.includes(entity.id)) {
-          mem.entities.push(entity.id);
-        }
-      }
+  if (Array.isArray(entityRegistry)) {
+    const pruned = before - entityRegistry.length;
+    if (pruned > 0) {
+      smLog(`[SmartMemory] Pruned ${pruned} entity entries with no linked memories.`);
     }
-
-    // Update last_seen to the highest valid_from/ts among still-linked memories.
-    if (entity.memory_ids.length > 0) {
-      const linked = currentMemories.filter((m) => entity.memory_ids.includes(m.id));
-      entity.last_seen = Math.max(...linked.map((m) => m.valid_from ?? m.ts ?? 0));
-    }
-  }
-
-  // Remove any entities that ended up with no linked memories. They contribute
-  // nothing to timeline, entity overlap scoring, or the panel display. If the
-  // entity reappears in a future extraction it will be re-added via upsertEntity.
-  const before = entityRegistry.length;
-  entityRegistry.splice(
-    0,
-    entityRegistry.length,
-    ...entityRegistry.filter((e) => e.memory_ids.length > 0),
-  );
-  if (entityRegistry.length < before) {
-    smLog(
-      `[SmartMemory] Pruned ${before - entityRegistry.length} entity entries with no linked memories.`,
-    );
   }
 }
 

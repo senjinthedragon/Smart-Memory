@@ -45,9 +45,9 @@
  */
 
 import { extension_settings } from '../../../extensions.js';
-import { saveSettingsDebounced } from '../../../../script.js';
+import { saveSettingsDebounced, getRequestHeaders } from '../../../../script.js';
 import { MODULE_NAME } from './constants.js';
-import { memory_sources } from './generate.js';
+import { memory_sources, isLocalUrl } from './generate.js';
 import { cosineSimilarity, jaccardSimilarity, hasStateChangeMarker } from './similarity.js';
 
 // In-session embedding cache: normalized text -> vector.
@@ -58,6 +58,58 @@ const embeddingCache = new Map();
 // Tracks whether the user has already been warned about an embedding failure
 // this session so we don't spam a toastr on every extraction pass.
 let embeddingWarnedThisSession = false;
+
+/**
+ * Returns true when running inside a browser (SillyTavern's front-end context).
+ * Node-based tooling and unit tests have no `window`, so they always take the
+ * direct-fetch path.
+ * @returns {boolean}
+ */
+function isBrowserContext() {
+  return typeof window !== 'undefined';
+}
+
+/**
+ * POSTs an embedding request, routing remote/cloud endpoints through
+ * SillyTavern's server-side CORS proxy when running in a browser.
+ *
+ * Local addresses (localhost, private network ranges) are contacted directly -
+ * they do not trigger browser CORS restrictions. Cloud providers such as OpenAI
+ * reject cross-origin browser requests, so they are sent through `/proxy/<url>`
+ * (SillyTavern's CORS proxy middleware) using ST's request headers. If the proxy
+ * is disabled or unavailable we fall back to a direct request so local
+ * reverse-proxies and same-origin setups still work.
+ *
+ * @param {string} url - Fully-qualified embedding endpoint URL.
+ * @param {Object} payload - JSON request body.
+ * @param {string} [apiKey] - Optional bearer token for OpenAI-compatible APIs.
+ * @returns {Promise<Response>}
+ */
+async function fetchEmbeddingEndpoint(url, payload, apiKey = '') {
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  const body = JSON.stringify(payload);
+
+  // Only absolute HTTP(S) targets outside the local network need the proxy.
+  // Relative/same-origin URLs are already served by SillyTavern.
+  const isRemoteHttp = /^https?:\/\//i.test(url) && !isLocalUrl(url);
+  if (isRemoteHttp && isBrowserContext()) {
+    try {
+      const response = await fetch(`/proxy/${url}`, {
+        method: 'POST',
+        headers: { ...getRequestHeaders(), ...headers },
+        body,
+      });
+      if (response.ok) return response;
+      // Non-2xx usually means the CORS proxy is disabled (config.yaml) or the
+      // upstream rejected the request. Fall through to a direct attempt.
+    } catch {
+      // Network error reaching the proxy - fall through to a direct attempt.
+    }
+  }
+
+  return fetch(url, { method: 'POST', headers, body });
+}
 
 /**
  * Fetches embedding vectors for a list of texts in a single API call.
@@ -100,14 +152,12 @@ export async function getEmbeddingBatch(texts) {
     if (source === 'openai_compatible') {
       // OpenAI-compatible endpoint: /v1/embeddings
       // Response shape: { data: [{ embedding: [...] }, ...] }
-      const headers = { 'Content-Type': 'application/json' };
       const apiKey = settings.embedding_api_key || '';
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-      const response = await fetch(`${baseUrl}/v1/embeddings`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ input: uncached, model }),
-      });
+      const response = await fetchEmbeddingEndpoint(
+        `${baseUrl}/v1/embeddings`,
+        { input: uncached, model },
+        apiKey,
+      );
       if (!response.ok) return result;
       const data = await response.json();
       if (!Array.isArray(data?.data)) return result;
@@ -115,15 +165,11 @@ export async function getEmbeddingBatch(texts) {
     } else {
       // Ollama endpoint: /api/embed
       // Response shape: { embeddings: [[...], ...] }
-      const response = await fetch(`${baseUrl}/api/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: uncached,
-          model,
-          keep_alive: keep ? -1 : undefined,
-          truncate: true,
-        }),
+      const response = await fetchEmbeddingEndpoint(`${baseUrl}/api/embed`, {
+        input: uncached,
+        model,
+        keep_alive: keep ? -1 : undefined,
+        truncate: true,
       });
       if (!response.ok) return result;
       const data = await response.json();

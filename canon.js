@@ -43,6 +43,7 @@ import {
 import { generateMemoryExtract } from './generate.js';
 import { extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_CANON } from './constants.js';
+import { replaceTemplate } from './template-utils.js';
 import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadArcSummaries } from './arcs.js';
@@ -190,7 +191,7 @@ export function injectCanon(characterName) {
   }
 
   const template = settings.canon_template ?? 'Character history:\n{{canon}}';
-  const content = template.replace('{{canon}}', text);
+  const content = replaceTemplate(template, '{{canon}}', text);
   reportTierTrimStats(PROMPT_KEY_CANON, estimateTokens(content), fullTokens);
 
   setMacroContent(MACRO_NAMES.canon, content);
