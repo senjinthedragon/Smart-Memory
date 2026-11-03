@@ -37,6 +37,7 @@
  * loadRelationshipHistory     - returns the relationship history map for a character
  * saveRelationshipHistory     - persists the relationship history map for a character
  * clearRelationshipHistory    - deletes the relationship history for a character
+ * prunePersistentMemoriesAfterRollback - removes character-scoped memories sourced after a rollback point
  * injectRelationshipHistory   - pushes relevant relationship state into the prompt via PROMPT_KEY_RELATIONSHIPS
  * isFreshStart                - returns whether the current chat has fresh-start enabled
  * setFreshStart               - toggles the fresh-start flag and saves chatMetadata
@@ -139,14 +140,19 @@ function incomingPriorityScore(mem) {
  *
  * @param {Array} candidates - Newly extracted memory objects to evaluate.
  * @param {Array} existing   - Active (non-retired) memories to compare against.
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; when it returns true the
+ *   pass bails out before further model calls and reports no verified candidates.
  * @returns {Promise<{verified: Array, superseded: Map<string, string>, confirmed: Set<string>}>}
  *   verified  - Candidates that passed dedup and should be added.
  *   superseded - Map from candidate content (lowercase) to the id of the
  *                existing memory it replaces.
  *   confirmed  - Set of existing memory ids re-extracted this pass (still true).
  */
-async function verifyLongtermCandidates(candidates, existing) {
+async function verifyLongtermCandidates(candidates, existing, abortCheck = null) {
   if (!Array.isArray(candidates) || candidates.length === 0) {
+    return { verified: [], superseded: new Map(), confirmed: new Set() };
+  }
+  if (abortCheck?.()) {
     return { verified: [], superseded: new Map(), confirmed: new Set() };
   }
 
@@ -169,11 +175,16 @@ async function verifyLongtermCandidates(candidates, existing) {
 
   // Batch-embed all candidates and existing memories in one API call.
   const { passed, superseded, confirmed, uncertain } = await batchVerify(filtered, existing);
+  if (abortCheck?.()) {
+    return { verified: [], superseded: new Map(), confirmed: new Set() };
+  }
 
   // Method B: for pairs that scored above the same-topic threshold but had no
   // state-change pattern, ask the model directly. Runs sequentially - Ollama
   // serializes requests anyway and parallel calls risk OOM on 8GB VRAM.
   for (const pair of uncertain) {
+    // Stop spending model calls once the caller reports the branch is gone.
+    if (abortCheck?.()) break;
     // Skip if a pattern already resolved this candidate as a supersession.
     if (superseded.has(pair.candText)) continue;
     try {
@@ -420,6 +431,109 @@ export function clearRelationshipHistory(characterName) {
   if (char) delete char.relationship_history;
 }
 
+/**
+ * Returns true when a memory is attributable to the discarded branch: it has at
+ * least one source range, its earliest source start index lies after the
+ * rollback point, and it was sourced from the current chat (so a same-named
+ * character in another chat is never affected). Memories with no source range
+ * are treated as coming from an unknown/older branch and preserved.
+ *
+ * @param {Object} memory
+ * @param {number} targetMsgIndex - Highest chat index whose memories should survive.
+ * @param {string|null} currentChatId
+ * @returns {boolean}
+ */
+function isMemoryAfterRollback(memory, targetMsgIndex, currentChatId) {
+  const ranges = memory?.source_messages;
+  if (!Array.isArray(ranges) || ranges.length === 0) return false;
+  const starts = ranges
+    .map((range) => (Array.isArray(range) ? range[0] : null))
+    .filter((start) => Number.isInteger(start));
+  if (starts.length === 0) return false;
+  if (Math.min(...starts) <= targetMsgIndex) return false;
+  return (memory.source_chat_id ?? null) === currentChatId;
+}
+
+/**
+ * Returns the source message index stored on a relationship-history entry, or
+ * null when the entry carries none. Only explicit integer index fields are
+ * honoured so unrelated state is never guessed at.
+ *
+ * @param {Object} state
+ * @returns {number|null}
+ */
+function relationshipSourceIndex(state) {
+  if (!state || typeof state !== 'object') return null;
+  const fields = ['source_index', 'source_msg_index', 'source_message_index', 'msg_index'];
+  for (const field of fields) {
+    if (Number.isInteger(state[field])) return state[field];
+  }
+  return null;
+}
+
+/**
+ * Removes persistent long-term memories whose source range lies after the
+ * rollback point for the current chat, so a discarded branch cannot survive in
+ * character-scoped storage. Relationship-history entries that carry a
+ * source index after the rollback point are pruned too.
+ * @param {number} targetMsgIndex - Highest chat index whose memories should survive.
+ * @param {string[]} characterNames - Characters whose persisted stores should be pruned.
+ * @returns {number} Total number of memories pruned.
+ */
+export function prunePersistentMemoriesAfterRollback(targetMsgIndex, characterNames) {
+  if (!Number.isInteger(targetMsgIndex)) return 0;
+  const names = [...new Set((characterNames ?? []).filter(Boolean))];
+  if (names.length === 0) return 0;
+
+  const currentChatId = getCurrentChatId() ?? null;
+  let pruned = 0;
+  let changed = false;
+
+  for (const name of names) {
+    // Long-term memories: drop only entries whose earliest source start index
+    // is past the rollback point AND that came from this chat. Retired entries
+    // are pruned on the same rule - a superseded memory from the discarded
+    // branch is just as invalid as an active one.
+    const memories = loadCharacterMemories(name);
+    if (memories.length > 0) {
+      const kept = memories.filter(
+        (mem) => !isMemoryAfterRollback(mem, targetMsgIndex, currentChatId),
+      );
+      const removed = memories.length - kept.length;
+      if (removed > 0) {
+        saveCharacterMemories(name, kept);
+        pruned += removed;
+        changed = true;
+      }
+    }
+
+    // Relationship history: current entries carry no source index, so this is
+    // a no-op for the stock schema. If a custom/future entry does carry an
+    // explicit index past the rollback point, drop that pair rather than guess.
+    const history = loadRelationshipHistory(name);
+    const historyKeys = Object.keys(history);
+    if (historyKeys.length > 0) {
+      const keptHistory = {};
+      let historyChanged = false;
+      for (const key of historyKeys) {
+        const sourceIndex = relationshipSourceIndex(history[key]);
+        if (sourceIndex !== null && sourceIndex > targetMsgIndex) {
+          historyChanged = true;
+          continue;
+        }
+        keptHistory[key] = history[key];
+      }
+      if (historyChanged) {
+        saveRelationshipHistory(name, keptHistory);
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) saveSettingsDebounced();
+  return pruned;
+}
+
 // ---- Formatting ---------------------------------------------------------
 
 /**
@@ -526,13 +640,24 @@ function mergeMemories(existing, incoming, maxTotal) {
  * them into the character's stored memories. Safe to fire-and-forget.
  * @param {string} characterName
  * @param {Array} recentMessages - Last N message objects from context.chat.
+ * @param {Function|null} [statusFn] - Optional status callback for progress messages.
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; when it returns true the
+ *   pass bails out before any persistent write. Used by the automatic extraction path to
+ *   abort when the user switches chats mid-extraction.
  * @returns {Promise<number>} Count of new memories added (0 on failure or nothing found).
  */
-export async function extractAndStoreMemories(characterName, recentMessages, statusFn = null) {
+export async function extractAndStoreMemories(
+  characterName,
+  recentMessages,
+  statusFn = null,
+  abortCheck = null,
+) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.longterm_enabled || !characterName) return 0;
 
   try {
+    if (abortCheck?.()) return 0;
+
     const chatHistory = recentMessages
       .filter((m) => m.mes && !m.is_system)
       .map((m) => `${m.name}: ${m.mes}`)
@@ -551,12 +676,14 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
     // Only show active memories as context in the extraction prompt.
     const existingText = formatMemoriesForPrompt(activeMemories);
 
+    if (abortCheck?.()) return 0;
     const response = await generateMemoryExtract(
       buildExtractionPrompt(chatHistory, existingText, characterName),
       {
         responseLength: settings.longterm_response_length || 600,
       },
     );
+    if (abortCheck?.()) return 0;
 
     smLog(`[SmartMemory] Raw extraction response for "${characterName}":`, response);
 
@@ -572,7 +699,8 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
       verified: newMemories,
       superseded: supersessionMap,
       confirmed: confirmedIds,
-    } = await verifyLongtermCandidates(parsed, activeMemories);
+    } = await verifyLongtermCandidates(parsed, activeMemories, abortCheck);
+    if (abortCheck?.()) return 0;
     if (newMemories.length === 0) {
       smLog(
         `[SmartMemory] All ${parsed.length} extracted candidates were duplicates of existing memories.`,
@@ -686,6 +814,8 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
     const existingKeys = new Set(activeMemories.map((m) => `${m.type}|${m.content}`));
     if (getHardwareProfile() === 'b' || settings.longterm_triggers_enabled) {
       for (const mem of finalActive) {
+        // Stop generating triggers once the caller reports the branch is gone.
+        if (abortCheck?.()) return 0;
         // Skip if triggers are already present - covers both new memories with
         // triggers derived this pass and existing memories that survived consolidation
         // with their triggers intact. Existing memories that lost triggers through
@@ -696,6 +826,7 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
           const triggerResponse = await generateMemoryExtract(triggerPrompt, {
             responseLength: 60,
           });
+          if (abortCheck?.()) return 0;
           const raw = parseTriggerResponse(triggerResponse, mem.content);
           mem.triggers = filterTriggersByFrequency(raw, finalActive);
           smLog(
@@ -731,9 +862,11 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
       const cardExcerpt = cardChar?.description ?? '';
 
       try {
+        if (abortCheck?.()) return 0;
         if (statusFn) statusFn(`Extracting relationship history for ${characterName}...`);
         const relPrompt = buildRelationshipDeltaPrompt(chatHistory, stateLines, cardExcerpt);
         const relResponse = await generateMemoryExtract(relPrompt, { responseLength: 300 });
+        if (abortCheck?.()) return 0;
         const deltas = parseRelationshipDeltaResponse(relResponse);
 
         // Only store pairs where the character is one of the parties.
@@ -769,6 +902,7 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
               updatedAt: Date.now(),
             };
           }
+          if (abortCheck?.()) return 0;
           saveRelationshipHistory(characterName, relHistory);
           smLog(`[SmartMemory] Relationship deltas applied: ${deltas.length} pair(s)`);
         }
@@ -793,6 +927,7 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
     // consolidation cycle (which may never come for small memory sets).
     if (entityRegistry.length > 0) {
       reconcileEntityRegistry(entityRegistry, finalActive);
+      if (abortCheck?.()) return 0;
       saveCharacterEntityRegistry(characterName, entityRegistry);
     }
 
@@ -812,6 +947,7 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
     const added = finalActive.filter((m) => !existingKeys.has(`${m.type}|${m.content}`)).length;
 
     // Save: final active set + all retired memories (history is preserved).
+    if (abortCheck?.()) return 0;
     saveCharacterMemories(characterName, [...finalActive, ...updatedRetired]);
 
     smLog(
@@ -874,9 +1010,12 @@ function getConsolidationThresholds(settings) {
  * @param {boolean} [force=false] - If true, consolidate all types regardless of threshold.
  *   Used by the catch-up final pass to flush any entries that never accumulated enough
  *   to hit the threshold during per-chunk consolidation.
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; when it returns true the
+ *   pass bails out before any persistent write. Used by the automatic extraction path to
+ *   abort when the user switches chats mid-consolidation.
  * @returns {Promise<number>} Number of memories removed by consolidation (0 on no change or failure).
  */
-export async function consolidateMemories(characterName, force = false) {
+export async function consolidateMemories(characterName, force = false, abortCheck = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.consolidation_enabled || !characterName) return 0;
   const thresholds = getConsolidationThresholds(settings);
@@ -886,6 +1025,8 @@ export async function consolidateMemories(characterName, force = false) {
   let dirty = false;
 
   for (const type of MEMORY_TYPES) {
+    // Stop at the first await boundary once the caller reports the branch is gone.
+    if (abortCheck?.()) return totalRemoved;
     // Exclude retired memories from consolidation - they've already been
     // replaced and should not be re-evaluated or re-injected.
     const base = memories.filter((m) => m.type === type && m.consolidated && !m.superseded_by);
@@ -905,6 +1046,7 @@ export async function consolidateMemories(characterName, force = false) {
         buildLongtermConsolidationPrompt(type, baseText, batchText),
         { responseLength: Math.max(400, (base.length + unprocessed.length) * 60) },
       );
+      if (abortCheck?.()) return totalRemoved;
 
       smLog(`[SmartMemory] Consolidation response for [${type}]:`, response);
 
@@ -930,6 +1072,7 @@ export async function consolidateMemories(characterName, force = false) {
         [...base, ...unprocessed],
         getEmbeddingBatch,
       );
+      if (abortCheck?.()) return totalRemoved;
 
       // Carry source provenance forward: for each reconciled entry that matches
       // a pre-consolidation memory by ID, inherit its source_messages and
@@ -981,6 +1124,8 @@ export async function consolidateMemories(characterName, force = false) {
   const maxMemories = settings.longterm_max_memories || 25;
   const finalMemories = sortByTimeline(trimByPriority(memories, maxMemories));
   if (dirty || finalMemories.length !== memories.length) {
+    // Never persist a partially-consolidated result after an abort.
+    if (abortCheck?.()) return totalRemoved;
     // Repair entity registry links after consolidation - consolidation replaces
     // memories with new IDs, leaving the registry with stale memory_id refs.
     // reconcileEntityRegistry prunes those stale IDs and re-links by name match.

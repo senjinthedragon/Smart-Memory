@@ -76,6 +76,7 @@ import {
   partitionEpistemicEntriesBySubject,
   matchSubjectToMember,
   normalizeEpistemicSubject,
+  safeStorageKey,
   setSmartMemoryLogger,
 } from './memory-utils.js';
 import { resolveChatEpistemic } from './epistemic-utils.js';
@@ -209,7 +210,8 @@ export function loadEpistemicKnowledge(characterName) {
   // One-time migration source: a pre-existing chat (or pre-upgrade settings)
   // may hold this character's knowledge in the global extension_settings store.
   const legacy = characterName
-    ? extension_settings[MODULE_NAME]?.characters?.[characterName]?.epistemic_knowledge
+    ? extension_settings[MODULE_NAME]?.characters?.[safeStorageKey(characterName)]
+        ?.epistemic_knowledge
     : null;
 
   const { entries, migrated } = resolveChatEpistemic(meta, legacy);
@@ -218,8 +220,9 @@ export function loadEpistemicKnowledge(characterName) {
     // Clear the global copy so it can never leak into a different chat or AU
     // branch with the same character.
     const s = extension_settings[MODULE_NAME];
-    if (s?.characters?.[characterName]) {
-      s.characters[characterName].epistemic_knowledge = [];
+    const legacyKey = safeStorageKey(characterName);
+    if (s?.characters?.[legacyKey]) {
+      s.characters[legacyKey].epistemic_knowledge = [];
       saveSettingsDebounced();
     }
     context.saveMetadata()?.catch?.(console.error);
@@ -279,8 +282,9 @@ export function clearEpistemicKnowledge(characterName) {
   }
 
   const s = extension_settings[MODULE_NAME];
-  if (characterName && s?.characters?.[characterName]) {
-    s.characters[characterName].epistemic_knowledge = [];
+  const clearKey = safeStorageKey(characterName);
+  if (characterName && s?.characters?.[clearKey]) {
+    s.characters[clearKey].epistemic_knowledge = [];
     saveSettingsDebounced();
   }
   snapshotCurrentState();
@@ -471,18 +475,24 @@ function guardMassRetirement(retireIndices, existing) {
  * @param {Object[]} sceneMessages - Messages from the completed scene.
  * @param {string} characterName - Card character name (storage key).
  * @param {string} [_characterCardExcerpt] - Reserved for future use (card context for the prompt).
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; when it returns true the
+ *   pass bails out before any chatMetadata write. Used by the automatic extraction path to
+ *   abort when the user switches chats mid-extraction.
  * @returns {Promise<number>} Number of new entries added.
  */
 export async function extractEpistemicKnowledge(
   sceneMessages,
   characterName,
   _characterCardExcerpt = '',
+  abortCheck = null,
 ) {
   if (!isEpistemicEnabled() || !characterName) return 0;
 
   const settings = extension_settings[MODULE_NAME];
 
   try {
+    if (abortCheck?.()) return 0;
+
     const chatExcerpt = buildEpistemicSceneExcerpt(sceneMessages);
     if (!chatExcerpt.trim()) return 0;
 
@@ -495,9 +505,11 @@ export async function extractEpistemicKnowledge(
 
     const prompt = buildEpistemicExtractionPrompt(chatExcerpt, participants, existing);
 
+    if (abortCheck?.()) return 0;
     const response = await generateMemoryExtract(prompt, {
       responseLength: settings.epistemic_response_length ?? 400,
     });
+    if (abortCheck?.()) return 0;
 
     smLog('[SmartMemory] Epistemic raw response:', response);
 
@@ -532,6 +544,7 @@ export async function extractEpistemicKnowledge(
 
     // Fetch embeddings for all content strings in one batch when possible.
     const embeddings = await fetchEpistemicEmbeddings(survivingExisting, parsed);
+    if (abortCheck?.()) return 0;
     const newEntries = filterDuplicateEpistemicEntries(parsed, survivingExisting, embeddings);
 
     if (newEntries.length === 0 && retiredCount === 0) {
@@ -539,6 +552,7 @@ export async function extractEpistemicKnowledge(
       return 0;
     }
 
+    if (abortCheck?.()) return 0;
     saveEpistemicKnowledge(characterName, [...survivingExisting, ...newEntries]);
     smLog(
       `[SmartMemory] Epistemic: added ${newEntries.length} new entries, retired ${retiredCount} for "${characterName}".`,
@@ -565,9 +579,16 @@ export async function extractEpistemicKnowledge(
  *
  * @param {Object[]} sceneMessages - Messages from the completed scene.
  * @param {string[]} groupMemberNames - Active group members (subject keys).
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; when it returns true the
+ *   pass bails out before any chatMetadata write. Used by the automatic extraction path to
+ *   abort when the user switches chats mid-extraction.
  * @returns {Promise<number>} Number of new entries added across all members.
  */
-export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemberNames) {
+export async function extractAndPartitionGroupEpistemic(
+  sceneMessages,
+  groupMemberNames,
+  abortCheck = null,
+) {
   if (!isEpistemicEnabled()) return 0;
 
   const memberNames = [...new Set((groupMemberNames ?? []).filter(Boolean))];
@@ -576,6 +597,8 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
   const settings = extension_settings[MODULE_NAME];
 
   try {
+    if (abortCheck?.()) return 0;
+
     const chatExcerpt = buildEpistemicSceneExcerpt(sceneMessages);
     if (!chatExcerpt.trim()) return 0;
 
@@ -589,9 +612,11 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
 
     const prompt = buildEpistemicExtractionPrompt(chatExcerpt, participants, existing);
 
+    if (abortCheck?.()) return 0;
     const response = await generateMemoryExtract(prompt, {
       responseLength: settings.epistemic_response_length ?? 400,
     });
+    if (abortCheck?.()) return 0;
 
     smLog('[SmartMemory] Group epistemic raw response:', response);
 
@@ -612,6 +637,7 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
     stampEpistemicEntries(parsed, sceneMessages);
 
     const embeddings = await fetchEpistemicEmbeddings(survivingExisting, parsed);
+    if (abortCheck?.()) return 0;
 
     const { grouped, skipped } = partitionEpistemicEntriesBySubject(parsed, memberNames);
     if (skipped.length > 0) {
@@ -628,6 +654,7 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
       return 0;
     }
 
+    if (abortCheck?.()) return 0;
     saveEpistemicKnowledge(memberNames[0], [...survivingExisting, ...newEntries]);
     smLog(
       `[SmartMemory] Group epistemic: added ${newEntries.length} new entries, retired ${retiredCount} across ${memberNames.length} members.`,

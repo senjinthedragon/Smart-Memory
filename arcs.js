@@ -66,6 +66,7 @@ import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
+import { safeStorageKey } from './memory-utils.js';
 import { takeStateSnapshot } from './state-ledger.js';
 
 // ---- Deduplication ------------------------------------------------------
@@ -304,7 +305,10 @@ export async function clearArcSummaries() {
  */
 export function loadPersistentArcs(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.persistent_arcs ?? [];
+  return (
+    extension_settings[MODULE_NAME]?.characters?.[safeStorageKey(characterName)]?.persistent_arcs ??
+    []
+  );
 }
 
 /**
@@ -316,9 +320,10 @@ export function savePersistentArcs(characterName, arcs) {
   if (!characterName) return;
   if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
   if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
-  if (!extension_settings[MODULE_NAME].characters[characterName])
-    extension_settings[MODULE_NAME].characters[characterName] = {};
-  extension_settings[MODULE_NAME].characters[characterName].persistent_arcs = arcs;
+  const key = safeStorageKey(characterName);
+  if (!extension_settings[MODULE_NAME].characters[key])
+    extension_settings[MODULE_NAME].characters[key] = {};
+  extension_settings[MODULE_NAME].characters[key].persistent_arcs = arcs;
   saveSettingsDebounced();
 }
 
@@ -331,7 +336,7 @@ export function savePersistentArcs(characterName, arcs) {
  */
 export function loadGroupPersistentArcs(groupId) {
   if (!groupId) return [];
-  return extension_settings[MODULE_NAME]?.group_arcs?.[groupId] ?? [];
+  return extension_settings[MODULE_NAME]?.group_arcs?.[safeStorageKey(groupId)] ?? [];
 }
 
 /**
@@ -343,7 +348,7 @@ export function saveGroupPersistentArcs(groupId, arcs) {
   if (!groupId) return;
   if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
   if (!extension_settings[MODULE_NAME].group_arcs) extension_settings[MODULE_NAME].group_arcs = {};
-  extension_settings[MODULE_NAME].group_arcs[groupId] = arcs;
+  extension_settings[MODULE_NAME].group_arcs[safeStorageKey(groupId)] = arcs;
   saveSettingsDebounced();
 }
 
@@ -355,7 +360,7 @@ export function saveGroupPersistentArcs(groupId, arcs) {
 export function pruneOrphanedGroupArcs() {
   const groupArcs = extension_settings[MODULE_NAME]?.group_arcs;
   if (!groupArcs) return;
-  const knownIds = new Set((getContext().groups ?? []).map((g) => String(g.id)));
+  const knownIds = new Set((getContext().groups ?? []).map((g) => safeStorageKey(String(g.id))));
   let changed = false;
   for (const id of Object.keys(groupArcs)) {
     if (!knownIds.has(id)) {

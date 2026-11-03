@@ -1378,8 +1378,12 @@ export function sameGroupId(a, b) {
  *
  * `__proto__`, `constructor`, and `prototype` as bare keys on a plain object
  * either mutate Object.prototype or resolve to inherited members instead of
- * the caller's data. Prefixing such keys with an underscore keeps them as
- * ordinary own properties. Non-strings collapse to an empty string, which
+ * the caller's data. Prefixing such keys with a NUL sentinel keeps them as
+ * ordinary own properties. A NUL (`\u0000`) cannot appear in a user-typed
+ * character name or group id, so the encoded form can never collide with a
+ * real name - including a name that literally starts with an underscore such
+ * as "_constructor". Keys that already carry the sentinel are prefixed again
+ * so the encoding is injective. Non-strings collapse to an empty string, which
  * preserves the previous falsy-key behaviour at call sites.
  *
  * @param {*} key
@@ -1388,8 +1392,16 @@ export function sameGroupId(a, b) {
 export function safeStorageKey(key) {
   if (typeof key !== 'string') return '';
   const trimmed = key.trim();
-  if (trimmed === '__proto__' || trimmed === 'constructor' || trimmed === 'prototype') {
-    return '_' + trimmed;
+  // Prefix reserved/inherited property names and any already-encoded key with a
+  // NUL sentinel so a real name like "_constructor" can never collide with the
+  // encoded form of "constructor".
+  if (
+    trimmed.startsWith('\u0000') ||
+    trimmed === '__proto__' ||
+    trimmed === 'constructor' ||
+    trimmed === 'prototype'
+  ) {
+    return '\u0000' + trimmed;
   }
   return trimmed;
 }

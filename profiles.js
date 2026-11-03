@@ -168,11 +168,16 @@ export async function generateProfiles(characterName, abortCheck = null) {
     // Merge with any previously stored sections. Weak models frequently emit
     // only one or two of the three sections; overwriting wholesale would blank
     // the missing sections and drop context the AI was already relying on.
+    // Three states from parseProfileOutput: null = section absent (preserve the
+    // stored value), '' = present but intentionally empty (replace, i.e. clear
+    // an obsolete section), non-empty = replace.
     const existing = loadProfiles(characterName) || {};
+    const mergeSection = (parsedVal, existingVal) =>
+      parsedVal === null ? (existingVal ?? '') : parsedVal;
     const profiles = {
-      character_state: parsed.character_state || existing.character_state || '',
-      world_state: parsed.world_state || existing.world_state || '',
-      relationship_matrix: parsed.relationship_matrix || existing.relationship_matrix || '',
+      character_state: mergeSection(parsed.character_state, existing.character_state),
+      world_state: mergeSection(parsed.world_state, existing.world_state),
+      relationship_matrix: mergeSection(parsed.relationship_matrix, existing.relationship_matrix),
       generated_at: Date.now(),
     };
     if (abortCheck?.()) return null;

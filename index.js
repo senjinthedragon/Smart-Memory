@@ -79,6 +79,7 @@ import {
   loadCharacterMemories,
   isFreshStart,
   injectRelationshipHistory,
+  prunePersistentMemoriesAfterRollback,
 } from './longterm.js';
 import { updateLastActive, getAwayHours, generateRecap, displayRecap } from './recap.js';
 import {
@@ -185,6 +186,37 @@ let generationInProgress = false;
 // somehow missed and the flag is left stuck, it is cleared once clearly stale
 // so extraction can resume instead of being suppressed forever.
 let generationStartTime = 0;
+
+// Timer that force-clears generationInProgress when no terminal generation event
+// arrives. The flag is normally cleared by MESSAGE_RECEIVED or by the terminal
+// GENERATION_STOPPED/GENERATION_ENDED events, but a generation that is aborted or
+// never emits one of those would otherwise leave the flag stuck true and suppress
+// extraction forever. The passive timestamp check in onCharacterMessageRendered
+// remains as a secondary guard.
+let generationWatchdogId = null;
+
+/**
+ * Cancels the generation watchdog timer, if one is running.
+ */
+function clearGenerationWatchdog() {
+  if (generationWatchdogId) {
+    clearTimeout(generationWatchdogId);
+    generationWatchdogId = null;
+  }
+}
+
+/**
+ * Starts (or restarts) the watchdog that clears generationInProgress if no
+ * terminal generation event arrives within 90 seconds.
+ */
+function startGenerationWatchdog() {
+  clearGenerationWatchdog();
+  generationWatchdogId = setTimeout(() => {
+    generationInProgress = false;
+    generationStartTime = 0;
+    generationWatchdogId = null;
+  }, 90000);
+}
 
 // Monotonic revision counter for the current chat branch. Incremented on every
 export { bumpOperationRevision, getOperationRevision } from './memory-utils.js';
@@ -487,6 +519,7 @@ async function onCharacterMessageRendered(messageId, type) {
   // true and block extraction indefinitely. Clear it once it is clearly stale.
   if (generationInProgress && Date.now() - generationStartTime > 60000) {
     generationInProgress = false;
+    clearGenerationWatchdog();
   }
 
   // Skip intermediate streaming renders - MESSAGE_RECEIVED clears this flag
@@ -669,7 +702,7 @@ async function onCharacterMessageRendered(messageId, type) {
             updateScenesUI();
             updateTokenDisplay();
             if (isEpistemicEnabled()) {
-              await extractEpistemicKnowledge(sceneMessageBuffer, characterName);
+              await extractEpistemicKnowledge(sceneMessageBuffer, characterName, '', branchChanged);
               injectEpistemicKnowledge(characterName, characterName, true, true);
               epistemicThisPass = true;
             }
@@ -842,6 +875,7 @@ async function onCharacterMessageRendered(messageId, type) {
                 characterName,
                 longtermWindow,
                 setStatusMessage,
+                branchChanged,
               ).catch((err) => {
                 console.error('[SmartMemory] Long-term extraction error:', err);
                 return 0;
@@ -886,7 +920,12 @@ async function onCharacterMessageRendered(messageId, type) {
             if (isEpistemicEnabled() && characterName && !isFreshStart() && !epistemicThisPass) {
               const epistemicWindow = longtermWindow.length > 0 ? longtermWindow : sessionWindow;
               if (epistemicWindow.length > 0) {
-                await extractEpistemicKnowledge(epistemicWindow, characterName).catch((err) => {
+                await extractEpistemicKnowledge(
+                  epistemicWindow,
+                  characterName,
+                  '',
+                  branchChanged,
+                ).catch((err) => {
                   console.error('[SmartMemory] Periodic epistemic extraction error:', err);
                 });
                 if (shouldRefreshInjections) {
@@ -959,7 +998,7 @@ async function onCharacterMessageRendered(messageId, type) {
               getHardwareProfile() === 'b' &&
               loadArcSummaries().length > arcSummaryCountBefore
             ) {
-              await generateCanon(characterName)
+              await generateCanon(characterName, branchChanged)
                 .then(() => injectCanon(characterName))
                 .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
             }
@@ -1102,6 +1141,7 @@ function onChatChanged() {
   // immediately so a stuck value cannot suppress extraction in the new chat.
   generationInProgress = false;
   generationStartTime = 0;
+  clearGenerationWatchdog();
   clearTimeout(chatChangedTimer);
   chatChangedTimer = setTimeout(() => onChatChangedImpl().catch(console.error), 100);
 }
@@ -1636,7 +1676,11 @@ async function onGroupWrapperFinished({ type } = {}) {
               // One extraction pass, then partition the subjects into each
               // member's own epistemic store so every group member keeps the
               // knowledge they gained during the scene.
-              await extractAndPartitionGroupEpistemic(sceneMessageBuffer, activeGroupMembers);
+              await extractAndPartitionGroupEpistemic(
+                sceneMessageBuffer,
+                activeGroupMembers,
+                branchChanged,
+              );
               const epistemicChar = selectedGroupCharacter || activeGroupMembers[0] || null;
               if (epistemicChar) {
                 injectEpistemicKnowledge(epistemicChar, epistemicChar, true, true);
@@ -1794,6 +1838,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                     characterName,
                     characterLongtermWindow,
                     setStatusMessage,
+                    branchChanged,
                   ).catch((err) => {
                     console.error('[SmartMemory] Long-term extraction error:', err);
                     return 0;
@@ -1849,6 +1894,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                   await extractAndPartitionGroupEpistemic(
                     epistemicWindow,
                     activeGroupMembers,
+                    branchChanged,
                   ).catch((err) => {
                     console.error('[SmartMemory] Group periodic epistemic error:', err);
                   });
@@ -1926,7 +1972,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 loadArcSummaries().length > arcSummaryCountBefore
               ) {
                 for (const characterName of roundResponders) {
-                  await generateCanon(characterName)
+                  await generateCanon(characterName, branchChanged)
                     .then(() => injectCanon(characterName))
                     .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
                 }
@@ -2055,7 +2101,12 @@ async function onGroupWrapperFinished({ type } = {}) {
       // last responder's data is still in the slots. Re-inject for the selector choice
       // so the token display reflects what the panel is showing, not who generated last.
       if (selectedGroupCharacter) {
+        // Capture the revision before the awaits below. If the branch changes
+        // while a slot is being re-injected, stop restoring rather than leave
+        // stale branch data in the prompt.
+        const reinjectionRev = getOperationRevision();
         await injectMemories(selectedGroupCharacter);
+        if (getOperationRevision() !== reinjectionRev) return;
         injectRelationshipHistory(selectedGroupCharacter);
         injectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
         injectCanon(selectedGroupCharacter);
@@ -2182,6 +2233,7 @@ jQuery(async function () {
     if (type === 'normal') {
       generationInProgress = true;
       generationStartTime = Date.now();
+      startGenerationWatchdog();
       $('#sm_recap_overlay').remove();
       recapOverlayChatMeta = null;
       // Inject a queued continuity note before the model sees the prompt.
@@ -2192,6 +2244,7 @@ jQuery(async function () {
   });
   eventSource.on(event_types.MESSAGE_RECEIVED, () => {
     generationInProgress = false;
+    clearGenerationWatchdog();
   });
   // Terminal generation paths. A cancelled or stopped generation produces no
   // MESSAGE_RECEIVED and no CHARACTER_MESSAGE_RENDERED, which would otherwise
@@ -2199,9 +2252,11 @@ jQuery(async function () {
   // subsequent message. Clear the flag on both terminal events.
   eventSource.on(event_types.GENERATION_STOPPED, () => {
     generationInProgress = false;
+    clearGenerationWatchdog();
   });
   eventSource.on(event_types.GENERATION_ENDED, () => {
     generationInProgress = false;
+    clearGenerationWatchdog();
   });
   // Allow external extensions to dismiss the recap overlay programmatically
   // (e.g. Discord Connector can dispatch this when the user sends a command
@@ -2222,7 +2277,11 @@ jQuery(async function () {
       !isFreshStart() &&
       getHardwareProfile() === 'b'
     ) {
-      await generateCanon(charName)
+      // Capture the revision so a manual resolve that lands after a branch change
+      // cannot regenerate canon for a branch the user has already discarded.
+      const capturedRev = getOperationRevision();
+      const branchChanged = () => getOperationRevision() !== capturedRev;
+      await generateCanon(charName, branchChanged)
         .then(() => injectCanon(charName))
         .catch((err) => console.error('[SmartMemory] Auto-canon after manual resolve error:', err));
     }
@@ -2258,6 +2317,7 @@ jQuery(async function () {
     bumpOperationRevision();
     generationInProgress = false;
     generationStartTime = 0;
+    clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
     // A swipe rewrites the message the continuity check was anchored to, so
     // any queued note is no longer valid for this branch of the story.
@@ -2277,6 +2337,10 @@ jQuery(async function () {
     // facts, state cards, arcs, secrets, and durable retcons from the discarded
     // reply can never survive the rewrite.
     rollbackStateToSnapshot(targetIndex - 1);
+    prunePersistentMemoriesAfterRollback(
+      targetIndex - 1,
+      [getCurrentCharacterName(), ...getGroupMemberNames()].filter(Boolean),
+    );
     refreshAfterStateRollback();
 
     // Drop the buffered copy of the swiped message when it is the buffer tail.
@@ -2310,6 +2374,7 @@ jQuery(async function () {
     bumpOperationRevision();
     generationInProgress = false;
     generationStartTime = 0;
+    clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
     if (!Number.isInteger(messageId)) return;
 
@@ -2329,6 +2394,10 @@ jQuery(async function () {
     // editing the very first turn resets state instead of preserving it.
     if (meta) meta.lastExtractCutoff = Math.max(0, rollbackTarget);
     rollbackStateToSnapshot(rollbackTarget);
+    prunePersistentMemoriesAfterRollback(
+      rollbackTarget,
+      [getCurrentCharacterName(), ...getGroupMemberNames()].filter(Boolean),
+    );
 
     // Drop the buffered copy of the edited message and every buffered turn after
     // it so the rewritten branch is captured cleanly by the next pass.
@@ -2348,6 +2417,7 @@ jQuery(async function () {
     bumpOperationRevision();
     generationInProgress = false;
     generationStartTime = 0;
+    clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
     const context = getContext();
     const chatSet = new Set(context.chat);
@@ -2371,6 +2441,10 @@ jQuery(async function () {
     // rather than skipped by the next pass.
     if (meta) meta.lastExtractCutoff = Math.max(0, targetIndex);
     rollbackStateToSnapshot(targetIndex);
+    prunePersistentMemoriesAfterRollback(
+      targetIndex,
+      [getCurrentCharacterName(), ...getGroupMemberNames()].filter(Boolean),
+    );
     refreshAfterStateRollback();
   });
 

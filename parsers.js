@@ -704,8 +704,10 @@ function safeTruncate(value, max) {
 
 /**
  * Truncates any string field longer than MAX_STATE_FIELD_LENGTH. Non-string
- * values (partial-removal descriptors) pass through untouched. Pure, so it is
- * safe to call from tests.
+ * values (partial-removal descriptors) pass through untouched. The card's
+ * top-level `lastUpdated` bookkeeping property is always preserved as-is so
+ * freshness-aware pruning keeps a correct ordering. Pure, so it is safe to
+ * call from tests.
  *
  * @param {Object} fields
  * @returns {Object}
@@ -713,6 +715,10 @@ function safeTruncate(value, max) {
 export function capStateFieldValues(fields) {
   const capped = {};
   for (const [field, value] of Object.entries(fields ?? {})) {
+    if (field === 'lastUpdated') {
+      capped[field] = value;
+      continue;
+    }
     capped[field] =
       typeof value === 'string' && value.length > MAX_STATE_FIELD_LENGTH
         ? safeTruncate(value, MAX_STATE_FIELD_LENGTH)
@@ -723,8 +729,13 @@ export function capStateFieldValues(fields) {
 
 /**
  * Enforces MAX_STATE_LEDGER_CARDS by deleting cards in place. Non-character
- * cards are removed first (oldest insertion order first); if that is not enough
- * to cover the excess, the oldest remaining cards are removed as well.
+ * cards are removed first, oldest-first by their explicit `lastUpdated`
+ * timestamp (missing timestamps sort as 0, so legacy cards evict before freshly
+ * touched ones); if that is not enough to cover the excess, the oldest
+ * remaining cards are removed as well.
+ *
+ * Timestamp ordering (rather than object insertion order) means a frequently
+ * updated current card survives even if it was inserted before a stale one.
  *
  * @param {Object} ledger
  * @param {number} [max=MAX_STATE_LEDGER_CARDS]
@@ -737,20 +748,27 @@ export function pruneStateLedger(ledger, max = MAX_STATE_LEDGER_CARDS) {
   const excess = keys.length - max;
   let removed = 0;
 
-  // Pass 1: delete non-character cards oldest-first (by insertion order, which
-  // Object.keys preserves for non-integer keys).
-  for (const key of keys) {
-    if (removed >= excess) break;
+  // Pass 1: delete non-character cards oldest-first by lastUpdated. `sort` is
+  // stable, so cards sharing a timestamp (e.g. all lacking one) keep insertion
+  // order. Character cards are never touched in this pass.
+  const nonCharacterKeys = keys.filter((key) => {
     const type = ledger[key]?.type ?? (key.includes('|') ? key.split('|')[1] : key.split(':')[1]);
-    if (type !== 'character' && !key.endsWith('|character')) {
-      delete ledger[key];
-      removed++;
-    }
+    return type !== 'character' && !key.endsWith('|character');
+  });
+  nonCharacterKeys.sort((a, b) => (ledger[a]?.lastUpdated ?? 0) - (ledger[b]?.lastUpdated ?? 0));
+  for (const key of nonCharacterKeys) {
+    if (removed >= excess) break;
+    delete ledger[key];
+    removed++;
   }
 
-  // Pass 2: if still over the cap, delete oldest remaining cards regardless of type.
+  // Pass 2: if still over the cap, delete the oldest remaining cards regardless
+  // of type, again ordered by lastUpdated so the most recently touched survive.
   if (removed < excess) {
-    for (const key of Object.keys(ledger)) {
+    const remainingKeys = Object.keys(ledger).sort(
+      (a, b) => (ledger[a]?.lastUpdated ?? 0) - (ledger[b]?.lastUpdated ?? 0),
+    );
+    for (const key of remainingKeys) {
       if (removed >= excess) break;
       delete ledger[key];
       removed++;
@@ -992,9 +1010,14 @@ function appendUniqueItems(items, additions) {
  *
  * Pure - no SillyTavern runtime dependency - so it can be unit-tested directly.
  *
+ * The returned object is the top-level ledger card (not just a field bag): a
+ * fresh `lastUpdated` timestamp is stamped onto it so freshness-aware pruning
+ * in pruneStateLedger() can order cards by recency. The timestamp is a
+ * top-level property, kept separate from entity fields.
+ *
  * @param {Object} [existing={}] - Current stored card fields.
  * @param {Object} [incoming={}] - Parsed fields from parseStateCardResponse.
- * @returns {Object} The merged field object.
+ * @returns {Object} The merged card (with a fresh top-level lastUpdated).
  */
 export function mergeStateCardFields(existing = {}, incoming = {}) {
   const merged = { ...(existing ?? {}) };
@@ -1027,6 +1050,9 @@ export function mergeStateCardFields(existing = {}, incoming = {}) {
     // Plain string value: append new items (deduped), never wipe the rest.
     merged[field] = appendUniqueItems(current, splitCollectionItems(value)).join(', ');
   }
+  // Stamp freshness at the card level so pruneStateLedger() can evict by
+  // recency rather than object insertion order.
+  merged.lastUpdated = Date.now();
   return merged;
 }
 

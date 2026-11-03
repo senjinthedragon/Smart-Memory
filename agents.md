@@ -246,14 +246,15 @@ prompt/parse changes can be checked without a live model.
 
 ### v2.1 adversarial resilience fixes (current)
 
-- **Branch revision guarding.** Added synchronous `operationRevision` / `bumpOperationRevision()` token bumped on chat change, swipe, edit, delete, and abort. Async pipelines abort before writing state if `branchChanged()`.
-- **State Ledger allowlist enforcement.** Enforced strict allowlist matching active entities/characters, rejecting hallucinated cards. Bounded cards to 100 with character-preferential pruning; capped field strings to 500 characters.
-- **Unicode-aware token budgeting.** `estimateTokens` weights non-Latin scripts (CJK, Arabic, Thai, Devanagari) at 1.5 tokens/char to prevent context blowout.
-- **Multi-controller aborts & abort-aware sleep.** Abort controllers are tracked in a Set; retry sleep is abort-aware so cancellations immediately stop network requests.
+- **Branch revision guarding.** Added synchronous `operationRevision` / `bumpOperationRevision()` token bumped on chat change, swipe, edit, delete, and abort. Guarded async pipelines (long-term, session, arc, state-ledger, epistemic, continuity, profile, canon) capture the revision and abort before writing state if `branchChanged()`.
+- **Persistent-memory rollback.** `prunePersistentMemoriesAfterRollback(targetMsgIndex, names)` removes long-term memories (and indexed relationship entries) whose source range lies after the rollback point for the current chat.
+- **State Ledger allowlist enforcement.** Only canonical `(name, type)` pairs from the active entity registry (plus seeded `character` entries) are admitted; all writes route through a validated `upsertStateCard` enforcing 500-char field caps and a 100-card freshness-aware prune.
+- **Unicode-aware token budgeting.** `estimateTokens` counts by code point and weights CJK, Thai, Arabic, Devanagari, Cyrillic, Greek, Hebrew, and emoji at 1.5 tokens/char. It is a heuristic, not a tokenizer.
+- **Multi-controller aborts & abort-aware sleep.** Abort controllers are tracked in a Set; retry sleep is abort-aware. `embeddings.js` tracks and can abort its own requests. Main-API/WebLLM/connection-profile generation is host-managed and not transport-cancellable, so those rely on the revision guard to prevent stale writes.
 - **Metadata bounding.** Arc summaries capped at 50, canon prompt arc input capped at 20, epistemic entries capped at 100 per chat; mass retirement guarded and clamped to 5 positive integers.
-- **Prototype pollution protection.** `safeStorageKey` guards object keys (`__proto__`, `constructor`, `prototype`).
+- **Collision-free key safety.** `safeStorageKey` uses a NUL-sentinel encoding and is applied to character and group stores across `longterm.js`, `canon.js`, `epistemic.js`, `graph-migration.js`, and `arcs.js`.
 - **Group ID normalization.** `sameGroupId` unifies string vs numeric group ID comparisons across UI, settings, and memory tiers.
-- **Profile partial output merging.** Partial model XML outputs merge into existing profiles without blanking omitted sections.
+- **Three-state profile merge.** Absent sections preserve stored content; present (including empty) sections replace it.
 - **Unified cache invalidation.** Invalidation added to relationship history and triggered memory clear paths; reinjection wired to settings toggle.
 
 ### v2 critique fixes

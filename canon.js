@@ -43,6 +43,7 @@ import {
 import { generateMemoryExtract } from './generate.js';
 import { extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_CANON } from './constants.js';
+import { safeStorageKey } from './memory-utils.js';
 import { replaceTemplate } from './template-utils.js';
 import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
@@ -61,7 +62,9 @@ import { reportTierTrimStats } from './trim-stats.js';
  */
 export function loadCanon(characterName) {
   if (!characterName) return null;
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.canon ?? null;
+  return (
+    extension_settings[MODULE_NAME]?.characters?.[safeStorageKey(characterName)]?.canon ?? null
+  );
 }
 
 /**
@@ -77,8 +80,9 @@ export function saveCanon(characterName, text) {
   if (!extension_settings[MODULE_NAME].characters) {
     extension_settings[MODULE_NAME].characters = {};
   }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
+  const key = safeStorageKey(characterName);
+  const existing = extension_settings[MODULE_NAME].characters[key] ?? {};
+  extension_settings[MODULE_NAME].characters[key] = {
     ...existing,
     canon: { text, ts: Date.now() },
   };
@@ -92,7 +96,7 @@ export function saveCanon(characterName, text) {
  */
 export function clearCanon(characterName) {
   if (!characterName) return;
-  const char = extension_settings[MODULE_NAME]?.characters?.[characterName];
+  const char = extension_settings[MODULE_NAME]?.characters?.[safeStorageKey(characterName)];
   if (char) {
     delete char.canon;
     saveSettingsDebounced();
@@ -112,9 +116,12 @@ export function clearCanon(characterName) {
  * after each arc closes, but that is handled by the caller.
  *
  * @param {string} characterName
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; when it returns true the
+ *   pass bails out before persisting. Used by the automatic extraction path to abort when
+ *   the user switches chats mid-generation.
  * @returns {Promise<string|null>} The generated canon text, or null on failure.
  */
-export async function generateCanon(characterName) {
+export async function generateCanon(characterName, abortCheck = null) {
   if (!characterName) return null;
 
   const settings = extension_settings[MODULE_NAME];
@@ -140,10 +147,12 @@ export async function generateCanon(characterName) {
   const response = await generateMemoryExtract(prompt, {
     responseLength: settings.canon_response_length ?? 600,
   });
+  if (abortCheck?.()) return null;
 
   if (!response?.trim()) return null;
 
   const text = response.trim();
+  if (abortCheck?.()) return null;
   saveCanon(characterName, text);
   smLog(
     `[SmartMemory] Canon summary generated for "${characterName}" (${estimateTokens(text)} tokens).`,

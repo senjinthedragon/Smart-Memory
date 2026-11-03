@@ -47,6 +47,7 @@ import { saveSettingsDebounced } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, SCHEMA_VERSION, generateMemoryId } from './constants.js';
 import { smLog } from './logging.js';
+import { safeStorageKey } from './memory-utils.js';
 import { reconcileEntityRegistry as reconcileEntityRegistryCore } from './entity-registry.js';
 
 // ---- Graph defaults ---------------------------------------------------------
@@ -101,7 +102,9 @@ export function applyGraphDefaults(mem) {
  */
 export function loadCharacterEntityRegistry(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.entities ?? [];
+  return (
+    extension_settings[MODULE_NAME]?.characters?.[safeStorageKey(characterName)]?.entities ?? []
+  );
 }
 
 /**
@@ -119,8 +122,9 @@ export function saveCharacterEntityRegistry(characterName, entities) {
   if (!extension_settings[MODULE_NAME].characters) {
     extension_settings[MODULE_NAME].characters = {};
   }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
+  const key = safeStorageKey(characterName);
+  const existing = extension_settings[MODULE_NAME].characters[key] ?? {};
+  extension_settings[MODULE_NAME].characters[key] = {
     ...existing,
     entities,
   };
@@ -935,7 +939,8 @@ export function ensureCharacterMigrated(characterName) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings) return false;
 
-  const charData = settings.characters?.[characterName];
+  const charKey = safeStorageKey(characterName);
+  const charData = settings.characters?.[charKey];
   if (!charData) return false;
 
   if ((charData.schema_version ?? 0) >= SCHEMA_VERSION) return false;
@@ -943,7 +948,7 @@ export function ensureCharacterMigrated(characterName) {
   smLog(`[SmartMemory] Migrating character "${characterName}" to schema v${SCHEMA_VERSION}...`);
   const migrated = applyMigrations(charData, CHARACTER_MIGRATIONS);
   if (!settings.characters) settings.characters = {};
-  settings.characters[characterName] = migrated;
+  settings.characters[charKey] = migrated;
   saveSettingsDebounced();
 
   smLog(`[SmartMemory] Character "${characterName}" migration complete.`);

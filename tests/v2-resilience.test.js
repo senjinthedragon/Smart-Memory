@@ -27,13 +27,22 @@ test('sameGroupId: matches equivalent string and numeric group IDs', () => {
 });
 
 test('safeStorageKey: protects against prototype pollution keys', () => {
-  assert.equal(safeStorageKey('__proto__'), '___proto__');
-  assert.equal(safeStorageKey('constructor'), '_constructor');
-  assert.equal(safeStorageKey('prototype'), '_prototype');
+  assert.equal(safeStorageKey('__proto__'), '\u0000__proto__');
+  assert.equal(safeStorageKey('constructor'), '\u0000constructor');
+  assert.equal(safeStorageKey('prototype'), '\u0000prototype');
   assert.equal(safeStorageKey('Elara'), 'Elara');
   assert.equal(safeStorageKey('  Kael  '), 'Kael');
   assert.equal(safeStorageKey(null), '');
   assert.equal(safeStorageKey(undefined), '');
+});
+
+test('safeStorageKey: encoded keys cannot collide with user-typable names', () => {
+  // A real name that literally starts with an underscore must never collide
+  // with the encoded form of a reserved property name.
+  assert.notEqual(safeStorageKey('_constructor'), safeStorageKey('constructor'));
+  assert.equal(safeStorageKey('_constructor'), '_constructor');
+  // An already-encoded key is re-prefixed so the encoding stays injective.
+  assert.equal(safeStorageKey('\u0000constructor'), '\u0000\u0000constructor');
 });
 
 test('estimateTokens: Unicode and CJK script weighting', () => {

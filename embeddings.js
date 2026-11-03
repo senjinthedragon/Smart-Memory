@@ -30,18 +30,24 @@
  * is not available, or the API call fails - so the system degrades gracefully
  * for users who have not configured an embedding source.
  *
- * getEmbeddingBatch        - fetches vectors for multiple texts in one API call
+ * getEmbeddingBatch        - fetches vectors for multiple texts in one API call; accepts an optional AbortSignal
  * cosineSimilarity         - re-exported from similarity.js for callers that import here
  * batchVerify              - compares candidates against existing memories; returns
  *                            passed (new), superseded (pattern-confirmed updates),
  *                            uncertain (same-topic pairs for model confirmation), and
  *                            rejected (duplicates)
  * clearEmbeddingCache      - clears the in-session cache (call on chat change)
+ * abortEmbeddingRequests   - aborts every in-flight embedding fetch (call on swipe/edit/delete)
  * hasEmbeddingFailed       - returns true when an embedding call has failed this session
  * clearEmbeddingFailed     - resets the failure flag (call when the user re-enables or reconfigures)
  * getHardwareProfile       - returns the active hardware profile ('a' or 'b')
  * saveEmbeddingApiKey - writes the API key to extension_settings
  * hasEmbeddingApiKey  - returns true when an API key is configured
+ *
+ * Cancellation scope note: only the embedding HTTP fetches issued here are
+ * transport-cancellable. Main-API, WebLLM, and connection-profile generation in
+ * generate.js is host-managed (SillyTavern owns the request) and cannot be
+ * aborted from this module.
  */
 
 import { extension_settings } from '../../../extensions.js';
@@ -58,6 +64,36 @@ const embeddingCache = new Map();
 // Tracks whether the user has already been warned about an embedding failure
 // this session so we don't spam a toastr on every extraction pass.
 let embeddingWarnedThisSession = false;
+
+/**
+ * Holds every AbortController for currently in-flight embedding fetches. A Set
+ * rather than a single slot because concurrent passes can overlap. Module-level
+ * so index.js can cancel from outside the call stack via abortEmbeddingRequests()
+ * when a swipe/edit/delete is requested. Local to this module (not shared with
+ * generate.js) so the two cancellation domains stay independent.
+ */
+const activeEmbeddingAbortControllers = new Set();
+
+/**
+ * Cancels every in-flight embedding fetch immediately. Aborts each tracked
+ * controller and clears the set; the aborted fetches resolve to an empty result
+ * and callers fall back to keyword matching. Has no effect if no embedding
+ * request is currently running.
+ *
+ * Cancellation scope: this only aborts embedding HTTP requests issued by this
+ * module. Main-API/WebLLM/connection-profile generation in generate.js is
+ * host-managed and is not transport-cancellable here.
+ */
+export function abortEmbeddingRequests() {
+  for (const controller of activeEmbeddingAbortControllers) {
+    try {
+      controller.abort();
+    } catch {
+      // Ignore controllers that have already been aborted or disposed.
+    }
+  }
+  activeEmbeddingAbortControllers.clear();
+}
 
 /**
  * Returns true when running inside a browser (SillyTavern's front-end context).
@@ -83,9 +119,10 @@ function isBrowserContext() {
  * @param {string} url - Fully-qualified embedding endpoint URL.
  * @param {Object} payload - JSON request body.
  * @param {string} [apiKey] - Optional bearer token for OpenAI-compatible APIs.
+ * @param {AbortSignal} [signal] - Cancels the request when aborted.
  * @returns {Promise<Response>}
  */
-async function fetchEmbeddingEndpoint(url, payload, apiKey = '') {
+async function fetchEmbeddingEndpoint(url, payload, apiKey = '', signal) {
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
   const body = JSON.stringify(payload);
@@ -99,16 +136,19 @@ async function fetchEmbeddingEndpoint(url, payload, apiKey = '') {
         method: 'POST',
         headers: { ...getRequestHeaders(), ...headers },
         body,
+        signal,
       });
       if (response.ok) return response;
       // Non-2xx usually means the CORS proxy is disabled (config.yaml) or the
       // upstream rejected the request. Fall through to a direct attempt.
     } catch {
       // Network error reaching the proxy - fall through to a direct attempt.
+      // A caller-triggered abort is surfaced by the direct fetch below, which
+      // also receives the signal and rejects immediately when it is aborted.
     }
   }
 
-  return fetch(url, { method: 'POST', headers, body });
+  return fetch(url, { method: 'POST', headers, body, signal });
 }
 
 /**
@@ -116,10 +156,17 @@ async function fetchEmbeddingEndpoint(url, payload, apiKey = '') {
  * Texts already in the cache are not re-fetched. Returns a Map from
  * normalized text to vector. Any text that fails (bad response, network
  * error) will be absent from the returned Map - callers fall back to Jaccard.
+ *
+ * The request is tracked in a module-level Set so abortEmbeddingRequests() can
+ * cancel it; an optional caller-supplied signal is linked so either source can
+ * abort the fetch. Aborted requests resolve to the partial result (usually
+ * empty) without logging a failure toast.
+ *
  * @param {string[]} texts
+ * @param {AbortSignal} [signal] - Optional caller signal to cancel the fetch.
  * @returns {Promise<Map<string, number[]>>}
  */
-export async function getEmbeddingBatch(texts) {
+export async function getEmbeddingBatch(texts, signal) {
   const settings = extension_settings[MODULE_NAME];
   const result = new Map();
 
@@ -150,6 +197,16 @@ export async function getEmbeddingBatch(texts) {
   // the catch block explain the real cause when the request fails.
   const isRemoteHttp = /^https?:\/\//i.test(baseUrl) && !isLocalUrl(baseUrl);
 
+  // One controller per request, registered so abortEmbeddingRequests() can
+  // cancel it. A caller-supplied signal is linked in so either aborts the fetch.
+  const controller = new AbortController();
+  const onCallerAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onCallerAbort, { once: true });
+  }
+  activeEmbeddingAbortControllers.add(controller);
+
   try {
     let vectors;
     if (source === 'openai_compatible') {
@@ -160,6 +217,7 @@ export async function getEmbeddingBatch(texts) {
         `${baseUrl}/v1/embeddings`,
         { input: uncached, model },
         apiKey,
+        controller.signal,
       );
       if (!response.ok) return result;
       const data = await response.json();
@@ -168,12 +226,17 @@ export async function getEmbeddingBatch(texts) {
     } else {
       // Ollama endpoint: /api/embed
       // Response shape: { embeddings: [[...], ...] }
-      const response = await fetchEmbeddingEndpoint(`${baseUrl}/api/embed`, {
-        input: uncached,
-        model,
-        keep_alive: keep ? -1 : undefined,
-        truncate: true,
-      });
+      const response = await fetchEmbeddingEndpoint(
+        `${baseUrl}/api/embed`,
+        {
+          input: uncached,
+          model,
+          keep_alive: keep ? -1 : undefined,
+          truncate: true,
+        },
+        '',
+        controller.signal,
+      );
       if (!response.ok) return result;
       const data = await response.json();
       if (!Array.isArray(data?.embeddings)) return result;
@@ -188,6 +251,11 @@ export async function getEmbeddingBatch(texts) {
       }
     }
   } catch (err) {
+    // A swipe/edit/delete (or an explicit abortEmbeddingRequests() call) aborted
+    // this request - stay silent and let the caller fall back to keyword matching.
+    if (err?.name === 'AbortError' || controller.signal.aborted) {
+      return result;
+    }
     // Network error, model not found, server not running - callers fall back to Jaccard.
     // Warn once per session so the user knows deduplication quality is degraded.
     console.error('[SmartMemory] Embedding request failed:', err);
@@ -210,6 +278,9 @@ export async function getEmbeddingBatch(texts) {
         );
       }
     }
+  } finally {
+    activeEmbeddingAbortControllers.delete(controller);
+    signal?.removeEventListener?.('abort', onCallerAbort);
   }
 
   return result;

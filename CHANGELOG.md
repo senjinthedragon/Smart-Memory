@@ -10,20 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Chat & branch operation revision tokens.** Introduced `operationRevision`,
-  `bumpOperationRevision()`, and `branchChanged()` guards. Any async extraction,
-  continuity, or profile generation task aborted mid-flight by a chat switch,
-  swipe, edit, or delete cannot write stale memories, state cards, or metadata into
-  the replacement branch.
-- **Strict entity allowlist for State Ledger.** State card extraction now enforces
-  a strict allowlist matching active entities and characters, rejecting hallucinated
-  or prompt-injected cards. Field strings are capped at 500 characters and total
-  retained cards are bounded to 100 with character-preferential pruning.
-- **Unicode-aware token budgeting.** `estimateTokens` now weights non-Latin
-  scripts (CJK, Thai, Arabic, Devanagari) at ~1.5 tokens/char to prevent prompt
-  overflow and context crashes on international roleplays.
-- **Multi-controller abort and abort-aware retries.** `generate.js` now tracks a
-  set of active AbortControllers and makes retry delays abort-aware, ensuring
-  swipes and cancellations immediately abort all network activity.
+  `bumpOperationRevision()`, and `branchChanged()` guards. The guarded async
+  pipelines (long-term, session, arc, state-ledger, epistemic, continuity, and
+  profile extraction, plus canon generation) abort before any write when a chat
+  switch, swipe, edit, or delete changes the branch. On rollback, chat-scoped
+  state is restored and persistent long-term memories whose source range is after
+  the rollback point (for the current chat) are pruned.
+  _Limitation:_ cancellation is transport-enforced for Ollama and
+  OpenAI-compatible sources; main-API, WebLLM, and connection-profile
+  generation remain host-managed, so for those the revision guard prevents
+  the stale write rather than aborting the underlying request.
+- **Strict entity allowlist for State Ledger.** State card extraction now admits
+  only canonical `(name, type)` pairs drawn from the active entity registry plus
+  seeded `character` entries for active characters, and rejects unknown or
+  mismatched-type cards. Field strings are capped at 500 characters and total
+  retained cards are bounded to 100 with character-preferential, freshness-aware
+  pruning. Manual edits and durable-retcon updates route through the same
+  validated `upsertStateCard`.
+- **Unicode-aware token budgeting.** `estimateTokens` now counts by Unicode code
+  point and weights non-Latin scripts (CJK, Thai, Arabic, Devanagari, Cyrillic,
+  Greek, Hebrew, emoji) at ~1.5 tokens/char to reduce prompt-overflow risk on
+  international roleplays. It is a conservative heuristic, not a tokenizer.
+- **Multi-controller abort and abort-aware retries.** `generate.js` tracks a set
+  of active AbortControllers and makes retry delays abort-aware, so swipes and
+  cancellations immediately abort in-flight Ollama and OpenAI-compatible
+  network activity. `embeddings.js` tracks and can abort its own in-flight
+  embedding requests.
 - **Metadata bounding and retention caps.** Arc summaries are capped to 50 recent
   items, canon prompt arc summary inputs are capped to 20, and epistemic entries are
   capped to 100 per chat. Epistemic `[retire]` directives are guarded against mass
@@ -31,8 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Partial profile merge preservation.** Model profile generations that produce
   partial XML sections now merge into existing stored profiles rather than
   overwriting unmentioned sections with blank strings.
-- **Prototype pollution protection.** `safeStorageKey` guards object keys
-  against `__proto__`, `constructor`, and `prototype` in character and group stores.
+- **Prototype pollution protection.** The collision-free `safeStorageKey` helper
+  (NUL-sentinel encoding) guards object keys against `__proto__`, `constructor`,
+  and `prototype` and is applied across character and group stores
+  (`longterm.js`, `canon.js`, `epistemic.js`, `graph-migration.js`, `arcs.js`).
 - **Shared group ID coercion helper.** `sameGroupId` unifies number/string group
   ID comparisons across UI, settings, and memory tiers.
 - **Unified cache invalidation for relationships and triggered memories.** Explicit

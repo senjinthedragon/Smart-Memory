@@ -29,6 +29,7 @@
  * loadStateLedger             - returns the full ledger map from chatMetadata
  * saveStateLedger             - persists the ledger to chatMetadata
  * getStateCard                - returns the fields object for a given entity, or null
+ * upsertStateCard             - validates, caps, stamps, merges, and prunes one state card write
  * setStateCard                - upserts a state card into the ledger
  * deleteStateCard             - removes a state card entry
  * migrateStateLedgerKey       - migrates a state card to a new key after a type change
@@ -172,6 +173,29 @@ function snapshotAfterManualEdit() {
 }
 
 /**
+ * Validated single write path for a state card. Every ledger mutation funnels
+ * through here so field capping, freshness stamping, collection-aware merging,
+ * and ledger pruning are enforced uniformly across extraction, manual edits,
+ * and durable retcons.
+ *
+ * The incoming fields are capped to MAX_STATE_FIELD_LENGTH, stamped with
+ * `lastUpdated: Date.now()` (always now - a model cannot spoof freshness),
+ * merged on top of the existing card, and the ledger is pruned back to
+ * MAX_STATE_LEDGER_CARDS.
+ *
+ * @param {Object} ledger - The full state ledger map (mutated in place).
+ * @param {string} key - Canonical ledger key (`name|type`).
+ * @param {Object} fields - Partial or full field object for this entity type.
+ * @returns {number} Number of cards pruned from the ledger by this call.
+ */
+export function upsertStateCard(ledger, key, fields) {
+  const capped = capStateFieldValues(fields);
+  capped.lastUpdated = Date.now();
+  ledger[key] = mergeStateCardFields(ledger[key] ?? {}, capped);
+  return pruneStateLedger(ledger);
+}
+
+/**
  * Upserts a state card into the ledger. Merges fields on top of any existing
  * card rather than replacing it - sparse update semantics.
  *
@@ -185,7 +209,7 @@ export async function setStateCard(name, type, fields) {
   const key = ledgerKey(name, type);
   // Collection-aware merge: a plain item list appends, a `{ removeItems }`
   // descriptor removes matching items, and `''` clears the field outright.
-  ledger[key] = mergeStateCardFields(ledger[key] ?? {}, fields);
+  upsertStateCard(ledger, key, fields);
   await saveStateLedger(ledger);
   snapshotAfterManualEdit();
 }
@@ -265,7 +289,7 @@ export function applyRetconToStateLedger(retcon) {
   if (!meta.state_ledger || typeof meta.state_ledger !== 'object') meta.state_ledger = {};
 
   const key = ledgerKey(update.name, update.type);
-  meta.state_ledger[key] = mergeStateCardFields(meta.state_ledger[key] ?? {}, update.fields);
+  upsertStateCard(meta.state_ledger, key, update.fields);
   context.saveMetadata()?.catch?.(console.error);
   snapshotAfterManualEdit();
   return true;
@@ -375,36 +399,32 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
     if (abortCheck?.()) return 0;
     const ledger = loadStateLedger();
 
-    // Strict entity whitelist. Only entities the extension already knows about
-    // (present in a registry) or active characters may have cards merged. This
-    // rejects hallucinated or prompt-injected entities the model invented so
-    // they can never enter the ledger (or the injected prompt).
+    // Strict (name, type) whitelist. Only the canonical key for an entity the
+    // extension already knows about (present in a registry) may be merged, and
+    // every active character is seeded as its canonical `name|character` card.
+    // This rejects hallucinated entities AND type-confused cards (e.g.
+    // "elara|place" for the character Elara) so they can never enter the ledger
+    // or the injected prompt.
     const allowedKeys = new Set(entityList.map((e) => ledgerKey(e.name, e.type)));
-    const entityNames = new Set(entityList.map((e) => e.name.toLowerCase().trim()));
-    const activeCharacterNames = new Set(characterNames.map((n) => n.toLowerCase().trim()));
+    for (const name of characterNames) {
+      allowedKeys.add(ledgerKey(name, 'character'));
+    }
 
     let count = 0;
+    let pruned = 0;
     for (const [key, fields] of updates) {
-      const sepIdx = key.lastIndexOf('|');
-      const keyName = sepIdx >= 0 ? key.slice(0, sepIdx) : key;
-      const keyType = sepIdx >= 0 ? key.slice(sepIdx + 1) : '';
-      const type =
-        typeof fields.type === 'string' && fields.type ? fields.type.toLowerCase().trim() : keyType;
-      const permitted =
-        allowedKeys.has(key) ||
-        (STATE_CARD_TYPES.has(type) &&
-          (activeCharacterNames.has(keyName) || entityNames.has(keyName)));
-      if (!permitted) {
+      if (!allowedKeys.has(key)) {
         smLog(`[SmartMemory] State ledger: rejected unknown entity card "${key}".`);
         continue;
       }
-      ledger[key] = mergeStateCardFields(ledger[key] ?? {}, capStateFieldValues(fields));
+      // Every write goes through the validated upsert so cap + lastUpdated
+      // stamping + prune are enforced here as well as on the manual/retcon paths.
+      pruned += upsertStateCard(ledger, key, fields);
       count++;
     }
 
     // Keep the ledger bounded - prune oldest low-priority (non-character) cards
     // first so metadata cannot grow without limit across long chats.
-    const pruned = pruneStateLedger(ledger);
     if (pruned > 0) {
       smLog(
         `[SmartMemory] State ledger: pruned ${pruned} card(s) over the ${MAX_STATE_LEDGER_CARDS} cap.`,
