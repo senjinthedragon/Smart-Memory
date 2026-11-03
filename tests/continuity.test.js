@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  buildContinuityPrompt,
-} from '../prompts.js';
+import { buildContinuityPrompt } from '../prompts.js';
 import {
   buildRecentTranscript,
   hashText,
@@ -12,6 +10,10 @@ import {
   parseContinuityJson,
   isPendingRepairAnchorValid,
   CONTINUITY_CATEGORIES,
+  buildDurableRetconNote,
+  advanceRetconLifetimes,
+  invalidateAcceptedRetcons,
+  RETCON_TURNS,
 } from '../continuity-utils.js';
 import { reconcileEntityRegistry } from '../entity-registry.js';
 import { replaceTemplate } from '../template-utils.js';
@@ -161,8 +163,7 @@ const FACTS = [
   '[fact] Elara has silver eyes.',
 ].join('\n');
 
-const LATEST =
-  'Elara laughed, her silver eyes bright. "I am a high elf, as you know," she said.';
+const LATEST = 'Elara laughed, her silver eyes bright. "I am a high elf, as you know," she said.';
 
 test('validateIssue: accepts a fully evidenced permanent issue', () => {
   const issue = {
@@ -282,7 +283,11 @@ test('progression: inventory/location state changes are not permanent contradict
 });
 
 test('progression: prompt tells the model to assume progression on a mismatch', () => {
-  const prompt = buildContinuityPrompt('The key was lost in the river.', 'She found the key.', 'She used the key.');
+  const prompt = buildContinuityPrompt(
+    'The key was lost in the river.',
+    'She found the key.',
+    'She used the key.',
+  );
   assert.match(prompt, /assume the story PROGRESSED/i);
 });
 
@@ -461,7 +466,14 @@ test('reconcileEntityRegistry: empty memories clear links without wiping the reg
   const registry = [
     { id: 'e1', name: 'Elara', type: 'character', first_seen: 0, last_seen: 0, memory_ids: ['m1'] },
     { id: 'e2', name: 'Kael', type: 'character', first_seen: 3, last_seen: 5, memory_ids: ['m2'] },
-    { id: 'e3', name: 'Silver Key', type: 'object', first_seen: 4, last_seen: 4, memory_ids: ['m3'] },
+    {
+      id: 'e3',
+      name: 'Silver Key',
+      type: 'object',
+      first_seen: 4,
+      last_seen: 4,
+      memory_ids: ['m3'],
+    },
   ];
 
   reconcileEntityRegistry(registry, []);
@@ -486,8 +498,22 @@ test('reconcileEntityRegistry: non-array memories leave links untouched but keep
 test('reconcileEntityRegistry: keeps seeded characters when pruning unlinked entities', () => {
   const registry = [
     { id: 'seed', name: 'Elara', type: 'character', first_seen: 0, last_seen: 0, memory_ids: [] },
-    { id: 'ghost', name: 'Ghost', type: 'character', first_seen: 2, last_seen: 2, memory_ids: ['gone'] },
-    { id: 'obj', name: 'Silver Key', type: 'object', first_seen: 1, last_seen: 1, memory_ids: ['m1'] },
+    {
+      id: 'ghost',
+      name: 'Ghost',
+      type: 'character',
+      first_seen: 2,
+      last_seen: 2,
+      memory_ids: ['gone'],
+    },
+    {
+      id: 'obj',
+      name: 'Silver Key',
+      type: 'object',
+      first_seen: 1,
+      last_seen: 1,
+      memory_ids: ['m1'],
+    },
   ];
   const memories = [{ id: 'm1', content: 'The Silver Key is cold to the touch.' }];
 
@@ -498,6 +524,98 @@ test('reconcileEntityRegistry: keeps seeded characters when pruning unlinked ent
   assert.ok(ids.includes('obj'), 'linked entity should remain');
   assert.equal(ids.includes('ghost'), false, 'unlinked non-seeded entity should be pruned');
   assert.deepEqual(registry.find((e) => e.id === 'obj').memory_ids, ['m1']);
+});
+
+test('reconcileEntityRegistry: honorific titles and substring matches never over-link (F2)', () => {
+  // Seeded characters survive pruning even with no links, so the empty
+  // memory_ids arrays below are directly observable.
+  const registry = [
+    {
+      id: 'king',
+      name: 'King Aldric',
+      type: 'character',
+      first_seen: 0,
+      last_seen: 0,
+      memory_ids: [],
+    },
+    { id: 'ann', name: 'Ann', type: 'character', first_seen: 0, last_seen: 0, memory_ids: [] },
+    { id: 'eli', name: 'Eli', type: 'character', first_seen: 0, last_seen: 0, memory_ids: [] },
+  ];
+  const memories = [
+    // "making" contains "king" as a substring but is not the title "King".
+    { id: 'm1', content: 'Mira is making a potion for the village.' },
+    // "Joanna" contains "ann" as a substring.
+    { id: 'm2', content: 'Joanna planned the channel crossing.' },
+    // "believes" contains "eli" as a substring.
+    { id: 'm3', content: 'She believes the gate is open.' },
+  ];
+
+  reconcileEntityRegistry(registry, memories);
+
+  assert.deepEqual(
+    registry.find((e) => e.id === 'king').memory_ids,
+    [],
+    'King Aldric must not link via the "king" substring in "making"',
+  );
+  assert.deepEqual(
+    registry.find((e) => e.id === 'ann').memory_ids,
+    [],
+    'Ann must not link via the "ann" substring in "Joanna"',
+  );
+  assert.deepEqual(
+    registry.find((e) => e.id === 'eli').memory_ids,
+    [],
+    'Eli must not link via the "eli" substring in "believes"',
+  );
+  for (const mem of memories) {
+    assert.deepEqual(mem.entities ?? [], [], `${mem.id} must not gain spurious entity links`);
+  }
+});
+
+test('reconcileEntityRegistry: word-boundary matching still links genuine names and tokens (F2)', () => {
+  const registry = [
+    {
+      id: 'elara',
+      name: 'Elara Voss',
+      type: 'character',
+      first_seen: 1,
+      last_seen: 1,
+      memory_ids: [],
+    },
+    {
+      id: 'key',
+      name: 'Silver Key',
+      type: 'object',
+      first_seen: 1,
+      last_seen: 1,
+      memory_ids: [],
+    },
+  ];
+  const memories = [
+    { id: 'm1', content: 'Elara drew her sword.' },
+    { id: 'm2', content: 'The Silver Key is cold to the touch.' },
+  ];
+
+  reconcileEntityRegistry(registry, memories);
+
+  assert.deepEqual(registry.find((e) => e.id === 'elara').memory_ids, ['m1']);
+  assert.deepEqual(registry.find((e) => e.id === 'key').memory_ids, ['m2']);
+  assert.deepEqual(memories[0].entities, ['elara']);
+  assert.deepEqual(memories[1].entities, ['key']);
+});
+
+test('reconcileEntityRegistry: a short name links on a word boundary but not as a substring (F2)', () => {
+  const registry = [
+    { id: 'eli', name: 'Eli', type: 'character', first_seen: 0, last_seen: 0, memory_ids: [] },
+  ];
+  const memories = [
+    { id: 'm1', content: 'She believes the gate is open.' },
+    { id: 'm2', content: 'Eli waved from the ridge.' },
+  ];
+
+  reconcileEntityRegistry(registry, memories);
+
+  assert.deepEqual(registry.find((e) => e.id === 'eli').memory_ids, ['m2']);
 });
 
 // =========================================================================
@@ -674,6 +792,67 @@ test('validateIssue: a transcript sentence about a different trait never suppres
 });
 
 // =========================================================================
+// Trivial quote rejection + transcript-transition gating (F5)
+// =========================================================================
+
+test('validateIssue: rejects a trivial stopword quote (F5)', () => {
+  const facts = 'Elara has blue eyes.';
+  const latest = 'She met his gaze, her eyes unreadable.';
+  const base = {
+    fact: 'Elara has blue eyes.',
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is permanent and nothing in the scene changed it.',
+  };
+
+  assert.equal(validateIssue({ ...base, response_quote: 'her' }, latest, facts), false);
+  assert.equal(validateIssue({ ...base, response_quote: 'the' }, latest, facts), false);
+  // A quote that is nothing but stopwords is rejected even when it is long enough.
+  assert.equal(validateIssue({ ...base, response_quote: 'her them' }, latest, facts), false);
+  assert.equal(
+    validateIssue({ ...base, response_quote: 'their' }, 'their eyes gleamed', facts),
+    false,
+  );
+  // A substantive quote (>= 5 chars, at least one content word) still passes.
+  assert.equal(
+    validateIssue({ ...base, response_quote: 'her eyes unreadable' }, latest, facts),
+    true,
+  );
+});
+
+test('validateIssue: an unrelated transcript sentence never suppresses an eye-colour contradiction (F5)', () => {
+  // "[Narrator] The evening sky turned blue." matches the colour "blue" and the
+  // verb "turned", but it is not a transition of Elara's eyes. It must NOT
+  // suppress the genuine contradiction.
+  const facts = 'Elara has blue eyes.';
+  const latest = 'Elara looked up, her eyes green in the torchlight.';
+  const transcript = '[Narrator] The evening sky turned blue.';
+  const issue = {
+    fact: 'Elara has blue eyes.',
+    response_quote: 'her eyes green',
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is permanent and nothing in the scene changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts, transcript), true);
+});
+
+test('validateIssue: a transcript transition that mentions the attribute still suppresses (F5)', () => {
+  // Regression guard for the gate: a genuine on-screen change of the same
+  // attribute (mentioned by name) is still progression, not a contradiction.
+  const facts = 'Elara has silver hair.';
+  const latest = 'Elara tied back her black hair before the fight.';
+  const transcript = '[Elara] Last night I dyed my hair black for the festival.';
+  const issue = {
+    fact: 'Elara has silver hair.',
+    response_quote: 'her black hair',
+    category: 'permanent_trait',
+    why_not_progression: 'Hair colour is permanent and cannot change.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts, transcript), false);
+});
+
+// =========================================================================
 // Repair note vs. user acknowledgement
 // =========================================================================
 
@@ -705,4 +884,88 @@ test('anchored repair: stays valid when the user reply does not reference the ch
   };
 
   assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), true);
+});
+
+// =========================================================================
+// Durable retcons
+// =========================================================================
+
+test('buildDurableRetconNote: injects the standing continuity-note phrasing', () => {
+  const note = buildDurableRetconNote([
+    { fact: 'Elara is a high elf.' },
+    { fact: 'Elara has silver eyes.' },
+  ]);
+
+  assert.ok(note.includes('Elara is a high elf.'));
+  assert.ok(note.includes('Elara has silver eyes.'));
+  assert.match(note, /^\[Continuity notes:/);
+  assert.match(note, /earlier in the story it was established that/);
+  assert.match(
+    note,
+    /Everything already written in this conversation has happened and stands\.\]$/,
+  );
+});
+
+test('buildDurableRetconNote: accepts plain string facts and returns empty for none', () => {
+  assert.ok(buildDurableRetconNote(['Elara is a high elf.']).includes('Elara is a high elf.'));
+  assert.equal(buildDurableRetconNote([]), '');
+  assert.equal(buildDurableRetconNote(null), '');
+  assert.equal(buildDurableRetconNote([{ fact: '   ' }]), '');
+});
+
+test('advanceRetconLifetimes: auto-resolves a retcon after N turns', () => {
+  let retcons = [{ id: 'r1', fact: 'a fact', turns_remaining: 3 }];
+
+  retcons = advanceRetconLifetimes(retcons);
+  assert.equal(retcons[0].turns_remaining, 2);
+
+  retcons = advanceRetconLifetimes(retcons);
+  assert.equal(retcons[0].turns_remaining, 1);
+
+  // One more AI turn reaches zero - the retcon is dropped (canon).
+  retcons = advanceRetconLifetimes(retcons);
+  assert.deepEqual(retcons, []);
+});
+
+test('advanceRetconLifetimes: defaults a missing lifetime to RETCON_TURNS', () => {
+  const retcons = advanceRetconLifetimes([{ id: 'r1', fact: 'a fact' }]);
+  assert.equal(retcons[0].turns_remaining, RETCON_TURNS - 1);
+});
+
+test('advanceRetconLifetimes: keeps unrelated retcons while advancing all', () => {
+  const retcons = advanceRetconLifetimes([
+    { id: 'r1', fact: 'one', turns_remaining: 5 },
+    { id: 'r2', fact: 'two', turns_remaining: 1 },
+  ]);
+  assert.equal(retcons.length, 1);
+  assert.equal(retcons[0].id, 'r1');
+  assert.equal(retcons[0].turns_remaining, 4);
+});
+
+test('invalidateAcceptedRetcons: drops a retcon the user echoes, keeps the rest (F5)', () => {
+  const retcons = [
+    { id: 'r1', fact: 'Elara has silver eyes.', quote: 'her crimson eyes' },
+    { id: 'r2', fact: 'Kael is mortal.', quote: 'he cannot die' },
+  ];
+
+  const remaining = invalidateAcceptedRetcons(
+    retcons,
+    'I stare into her crimson eyes without fear.',
+  );
+
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].id, 'r2');
+});
+
+test('invalidateAcceptedRetcons: keeps everything when the reply is unrelated', () => {
+  const retcons = [{ id: 'r1', fact: 'Elara has silver eyes.', quote: 'her crimson eyes' }];
+  const remaining = invalidateAcceptedRetcons(retcons, 'I ask what happened at the gate.');
+  assert.equal(remaining.length, 1);
+});
+
+test('invalidateAcceptedRetcons: empty/absent user text keeps all retcons', () => {
+  const retcons = [{ id: 'r1', fact: 'Elara has silver eyes.', quote: 'crimson eyes' }];
+  assert.equal(invalidateAcceptedRetcons(retcons, '').length, 1);
+  assert.equal(invalidateAcceptedRetcons(retcons, null).length, 1);
+  assert.deepEqual(invalidateAcceptedRetcons(null, 'text'), []);
 });

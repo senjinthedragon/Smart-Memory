@@ -37,6 +37,8 @@
  * splitSummarySections      - splits a formatted short-term summary into numbered sections
  * truncateSummaryToBudget   - trims earlier summary sections while preserving Current Moment and Next Beat
  * matchSubjectToMember      - resolves an epistemic subject to a group member (exact/token/prefix)
+ * normalizeEpistemicSubject - canonicalises a solo-chat subject to the card character name
+ * STOPWORDS                 - the shared significant-word stoplist (3+ char tokens)
  * setSmartMemoryLogger      - injects the logger used by the pure helpers (kept runtime-free)
  * partitionEpistemicEntriesBySubject - groups group-chat epistemic entries into per-character buckets
  *
@@ -66,7 +68,7 @@ function tokenSet(text) {
   return new Set((text || '').toLowerCase().split(/\s+/).filter(Boolean));
 }
 
-const STOPWORDS = new Set([
+export const STOPWORDS = new Set([
   'a',
   'an',
   'and',
@@ -952,7 +954,7 @@ const SUMMARY_SECTION_TITLES = {
 // Matches a normalized numbered line, e.g. "3. Key Events", "3) Key Events",
 // "3: Key Events", or "3 - Key Events". The captured title is validated against
 // SUMMARY_SECTION_TITLES before use.
-const SUMMARY_SECTION_HEADER_RE = /^([1-9])\s*[.)\:\-]\s*(.+)$/;
+const SUMMARY_SECTION_HEADER_RE = /^([1-9])\s*[.):-]\s*(.+)$/;
 
 /**
  * Normalizes a raw summary line by stripping markdown heading and emphasis
@@ -1203,6 +1205,26 @@ export function matchSubjectToMember(subject, memberNames) {
   }
 
   return matches[0];
+}
+
+/**
+ * Canonicalises an epistemic subject to the solo card character name.
+ *
+ * In a solo chat the card name may be a full name ("Elara Voss") while weak
+ * models emit only the short form ("Elara") in the subject field. Injection
+ * filters entries by subject, so an unreconciled short form would be silently
+ * dropped. This returns the card name when the subject resolves to it and the
+ * original subject otherwise - unrelated subjects are never rewritten, so a
+ * multi-character scene cannot misattribute entries to the card character.
+ *
+ * @param {string} subject
+ * @param {string} characterName
+ * @returns {string} The canonical subject (or the original when unmatched).
+ */
+export function normalizeEpistemicSubject(subject, characterName) {
+  if (!characterName) return subject;
+  const match = matchSubjectToMember(subject, [characterName]);
+  return match ?? subject;
 }
 
 /**

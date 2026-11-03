@@ -7,6 +7,7 @@ import {
   hybridScore,
   matchSubjectToMember,
   memoryUtilityScore,
+  normalizeEpistemicSubject,
   partitionEpistemicEntriesBySubject,
   prioritizeMemories,
   reconcileTypeEntries,
@@ -440,6 +441,35 @@ test('partitionEpistemicEntriesBySubject matches first names to full member name
   assert.equal(grouped.get('Kael Draven')[0].subject, 'Kael Draven');
   assert.equal(skipped.length, 1);
   assert.equal(skipped[0].subject, 'Mallory');
+});
+
+// =========================================================================
+// Solo-chat epistemic subject matching (F1)
+// =========================================================================
+
+test('matchSubjectToMember: solo short-form subject resolves to the full card name', () => {
+  // buildEpistemicBlock filters entries with matchSubjectToMember(subject,
+  // [respondingChar]). A card named "Elara Voss" must still pick up entries the
+  // model emitted with the short form "Elara".
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Voss', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Elara Voss', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('ELARA', ['Elara Voss']), 'Elara Voss');
+  // An unrelated subject must not be pulled into the solo character's block.
+  assert.equal(matchSubjectToMember('Kael', ['Elara Voss']), null);
+});
+
+test('normalizeEpistemicSubject: canonicalises solo short-form subjects', () => {
+  assert.equal(normalizeEpistemicSubject('Elara', 'Elara Voss'), 'Elara Voss');
+  assert.equal(normalizeEpistemicSubject('ELARA VOSS', 'Elara Voss'), 'Elara Voss');
+  assert.equal(normalizeEpistemicSubject('Draven', 'Kael Draven'), 'Kael Draven');
+  // Unrelated subjects are left untouched.
+  assert.equal(normalizeEpistemicSubject('Kael Draven', 'Elara Voss'), 'Kael Draven');
+  assert.equal(normalizeEpistemicSubject('Mallory', 'Elara Voss'), 'Mallory');
+  // Substring false positives are not rewritten.
+  assert.equal(normalizeEpistemicSubject('Evan', 'Evangeline Cole'), 'Evan');
+  // No character name means no rewrite.
+  assert.equal(normalizeEpistemicSubject('Elara', ''), 'Elara');
 });
 
 // =========================================================================

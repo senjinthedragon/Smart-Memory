@@ -105,6 +105,7 @@ import {
   applyPendingRepair,
   clearRepair,
   loadAndInjectRepair,
+  advanceDurableRetcons,
 } from './continuity.js';
 import {
   clearEmbeddingCache,
@@ -138,6 +139,8 @@ import {
   runStateCardExtraction,
   injectStateLedger,
   loadAndInjectStateLedger,
+  takeStateSnapshot,
+  rollbackStateToSnapshot,
 } from './state-ledger.js';
 import {
   setStatusMessage,
@@ -266,6 +269,30 @@ function stopActivityLoader(handle) {
   // it to dismiss the wrong toast when multiple toasts exist concurrently
   // (e.g. a continuity check toast still lingering when extraction starts).
   if (handle) handle.remove();
+}
+
+/**
+ * Re-injects the chat-scoped state blocks and refreshes the UI after a state
+ * rollback, so the prompt and panels immediately reflect the restored snapshot
+ * instead of the discarded branch.
+ */
+function refreshAfterStateRollback() {
+  try {
+    const context = getContext();
+    const characterName = context.groupId ? selectedGroupCharacter : getCurrentCharacterName();
+
+    injectStateLedger();
+    injectArcs();
+    if (characterName) {
+      injectEpistemicKnowledge(characterName, characterName);
+      updateEpistemicUI(characterName);
+    }
+    updateArcsUI();
+    updateTokenDisplay();
+    maybeInjectUnified();
+  } catch (err) {
+    console.error('[SmartMemory] Failed to refresh state after rollback:', err);
+  }
 }
 
 /**
@@ -502,6 +529,10 @@ async function onCharacterMessageRendered(messageId, type) {
   // extraction pipeline, so it can never leak into a later turn.
   clearRepair();
 
+  // Advance durable retcon lifetimes one AI turn. Retcons that reach the end of
+  // their lifespan are auto-resolved as canon and stop being injected.
+  advanceDurableRetcons();
+
   const characterName = getCurrentCharacterName();
 
   // Capture the current chat generation so we can abort before any write if
@@ -712,6 +743,10 @@ async function onCharacterMessageRendered(messageId, type) {
 
           // Only reset the counter once we know extraction will actually proceed.
           messagesSinceLastExtraction = 0;
+
+          // Baseline snapshot: capture the pre-write state at the previous turn
+          // so a swipe/delete of this turn can roll back to it cleanly.
+          takeStateSnapshot(Math.max(0, snapshotCutoff - 1));
 
           setStatusMessage(`Extracting memories for ${characterName}...`);
 
@@ -928,6 +963,10 @@ async function onCharacterMessageRendered(messageId, type) {
               if (shouldRefreshInjections) metaAfter.lastInjectionRefresh = snapshotCutoff;
               context.saveMetadata();
             }
+
+            // Record a message-anchored snapshot of the state after this pass so
+            // a later swipe/delete of this turn rolls back cleanly.
+            takeStateSnapshot(snapshotCutoff);
           } catch (err) {
             if (err === CHAT_SWITCHED) {
               smLog('[SmartMemory] Extraction aborted: chat switched mid-extraction.');
@@ -998,6 +1037,9 @@ async function onCharacterMessageRendered(messageId, type) {
           .then((result) => {
             if (!isCurrentChat()) return;
             handleContinuityResult(result, characterName, isCurrentChat);
+            // Snapshot any durable retcon into its anchor turn so swiping a
+            // later turn does not discard a correction the story still needs.
+            if (result && Number.isInteger(result.anchorIdx)) takeStateSnapshot(result.anchorIdx);
           })
           .catch((err) => {
             if (!isCurrentChat()) return;
@@ -1630,6 +1672,10 @@ async function onGroupWrapperFinished({ type } = {}) {
             extractionRunning = false;
           } else {
             messagesSinceLastExtraction = 0;
+
+            // Baseline snapshot before this round's writes (same as solo path).
+            takeStateSnapshot(Math.max(0, snapshotCutoffGroup - 1));
+
             setStatusMessage('Extracting memories...');
 
             const activityHandle = startActivityLoader(settings, 'Extracting memories...');
@@ -1860,6 +1906,9 @@ async function onGroupWrapperFinished({ type } = {}) {
                   metaAfterGroup.lastInjectionRefresh = snapshotCutoffGroup;
                 context.saveMetadata();
               }
+
+              // Record a message-anchored snapshot after this round's pass.
+              takeStateSnapshot(snapshotCutoffGroup);
             } catch (err) {
               if (err === CHAT_SWITCHED) {
                 smLog('[SmartMemory] Group extraction aborted: chat switched mid-extraction.');
@@ -1910,6 +1959,9 @@ async function onGroupWrapperFinished({ type } = {}) {
       // consumed. Clear it so repair remains strictly one-shot.
       clearRepair();
 
+      // Advance durable retcon lifetimes once per group round.
+      advanceDurableRetcons();
+
       // Step 6 (Profile B only): silent continuity check - once per round using
       // the last character who responded. Running per-character would multiply
       // model calls by character count for the same round of messages.
@@ -1931,6 +1983,9 @@ async function onGroupWrapperFinished({ type } = {}) {
           .then((result) => {
             if (!isCurrentChat()) return;
             handleContinuityResult(result, lastResponder, isCurrentChat);
+            // Snapshot any durable retcon into its anchor turn so swiping a
+            // later turn does not discard a correction the story still needs.
+            if (result && Number.isInteger(result.anchorIdx)) takeStateSnapshot(result.anchorIdx);
           })
           .catch((err) => {
             if (!isCurrentChat()) return;
@@ -2148,6 +2203,12 @@ jQuery(async function () {
     // the scene buffer, so there is nothing to rewind for them.
     if (!swiped || swiped.is_user || swiped.is_system) return;
 
+    // Roll the chat-scoped state back to the turn before the swiped message so
+    // facts, state cards, arcs, secrets, and durable retcons from the discarded
+    // reply can never survive the rewrite.
+    rollbackStateToSnapshot(targetIndex - 1);
+    refreshAfterStateRollback();
+
     // Drop the buffered copy of the swiped message when it is the buffer tail.
     // This prevents the old variant from being included in the next scene
     // summary alongside the regenerated text. The index check covers ST
@@ -2170,7 +2231,7 @@ jQuery(async function () {
   // When a message is deleted, trim the scene buffer to only messages that
   // still exist in the chat. Without this, a deleted message would remain in
   // the buffer and be included in the next scene summary.
-  eventSource.on(event_types.MESSAGE_DELETED, () => {
+  eventSource.on(event_types.MESSAGE_DELETED, (messageId) => {
     const context = getContext();
     const chatSet = new Set(context.chat);
     sceneMessageBuffer = sceneMessageBuffer.filter((m) => chatSet.has(m));
@@ -2178,6 +2239,13 @@ jQuery(async function () {
     // Deleting a message shifts every later index and may remove the anchor.
     // Discard any queued note rather than risk applying it to a different turn.
     clearRepair();
+    // Roll the chat-scoped state back to the surviving turn before the deleted
+    // one so its facts, state cards, arcs, secrets, and retcons are gone. ST
+    // passes either the deleted index or the new chat length; both resolve to
+    // the last surviving turn via `messageId - 1`.
+    const rollbackTarget = Number.isInteger(messageId) ? messageId - 1 : context.chat.length - 1;
+    rollbackStateToSnapshot(rollbackTarget);
+    refreshAfterStateRollback();
   });
 
   onChatChanged();

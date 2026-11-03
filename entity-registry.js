@@ -26,6 +26,40 @@
  * around this core implementation.
  */
 
+// Generic honorific/title words that must never be used as standalone link
+// tokens. Splitting a name like "King Aldric" into single words would otherwise
+// let the token "king" match unrelated content such as "Mira is making a
+// potion" ("making" contains "king"), or a title like "Lady" match "ladybird".
+const HONORIFIC_TITLES = new Set([
+  'king',
+  'queen',
+  'prince',
+  'princess',
+  'lord',
+  'lady',
+  'sir',
+  'madam',
+  'dr',
+  'doctor',
+  'captain',
+  'commander',
+  'baron',
+  'baroness',
+  'duke',
+  'duchess',
+]);
+
+/**
+ * Escapes regular-expression metacharacters in a literal string so it can be
+ * embedded in a RegExp built from user/entity-provided text.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function escapeRegExp(s) {
+  return String(s ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Returns true for an entity seeded from the character card. Seeded characters
  * have no message index yet (first_seen === 0) and must survive registry
@@ -49,8 +83,10 @@ function isSeededCharacter(entity) {
  *    entity's canonical name or any of its aliases, and add those memory IDs.
  *    Also updates the memory's own entities array so both sides stay consistent.
  *
- * Re-linking uses simple substring matching on lowercased content. Names shorter
- * than 3 characters are skipped to avoid spurious matches (e.g. "a", "an").
+ * Re-linking uses exact word-boundary matching on lowercased content. Names
+ * shorter than 3 characters are skipped, and generic honorific titles ("king",
+ * "lady", ...) are never split out of multi-word names, so "King Aldric" cannot
+ * link via the substring "king" in "making".
  *
  * When `currentMemories` is empty the registry itself is preserved - only the
  * now-stale memory_ids are cleared. This prevents an empty/consolidation pass
@@ -81,24 +117,28 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
     // Pass 1: prune stale IDs.
     entity.memory_ids = (entity.memory_ids ?? []).filter((id) => currentIdSet.has(id));
 
-    // Pass 2: re-link by name/alias substring match.
-    // Also include individual words from multi-word names (min 4 chars) so
-    // that "Asher" in content matches the entity "Asher Somel".
+    // Pass 2: re-link by name/alias word-boundary match.
+    // Also include individual words from multi-word names (min 4 chars, minus
+    // honorific titles) so "Asher" in content matches the entity "Asher Somel",
+    // while "King" in "King Aldric" never matches "making".
     const rawNames = [entity.name, ...(entity.aliases ?? [])].map((n) => n.toLowerCase().trim());
     const names = [
       ...new Set([
         ...rawNames.filter((n) => n.length >= 3),
-        ...rawNames.flatMap((n) => n.split(/\s+/).filter((w) => w.length >= 4)),
+        ...rawNames.flatMap((n) =>
+          n.split(/\s+/).filter((w) => w.length >= 4 && !HONORIFIC_TITLES.has(w)),
+        ),
       ]),
     ];
 
     if (names.length === 0) continue;
 
+    const namePatterns = names.map((n) => new RegExp(`\\b${escapeRegExp(n)}\\b`, 'i'));
+
     for (const mem of currentMemories) {
       if (entity.memory_ids.includes(mem.id)) continue; // already linked
 
-      const contentLower = (mem.content ?? '').toLowerCase();
-      const linkedByName = names.some((n) => contentLower.includes(n));
+      const linkedByName = namePatterns.some((re) => re.test(String(mem.content ?? '')));
       // Also check the memory's own entities array. A consolidated memory may
       // use pronouns ("she") instead of the entity's name - content substring
       // matching would miss it, but reconcileTypeEntries carries the base
@@ -130,8 +170,6 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
   entityRegistry.splice(
     0,
     entityRegistry.length,
-    ...entityRegistry.filter(
-      (e) => (e.memory_ids ?? []).length > 0 || isSeededCharacter(e),
-    ),
+    ...entityRegistry.filter((e) => (e.memory_ids ?? []).length > 0 || isSeededCharacter(e)),
   );
 }

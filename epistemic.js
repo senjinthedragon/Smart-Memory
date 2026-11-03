@@ -29,13 +29,14 @@
  * entries (e.g. [suspects] after confirmation, [unaware] after the character
  * learns the fact) from accumulating alongside newer, contradicting entries.
  *
- * Entries are stored per-character in extension_settings and injected as a
- * private knowledge block for the responding character only.
+ * Entries are stored chat-scoped in chatMetadata so different chats and AU
+ * branches with the same character never cross-contaminate secrets. They are
+ * injected as a private knowledge block for the responding character only.
  *
  * isEpistemicEnabled               - returns true when the feature is active for the current profile
- * loadEpistemicKnowledge           - loads entries for a character from extension_settings
- * saveEpistemicKnowledge           - persists entries for a character
- * clearEpistemicKnowledge          - removes all entries for a character
+ * loadEpistemicKnowledge           - loads entries for the current chat (migrating a legacy global store once)
+ * saveEpistemicKnowledge           - persists entries to the current chat's metadata
+ * clearEpistemicKnowledge          - removes all entries for the current chat
  * extractEpistemicKnowledge        - runs the extraction pass for the current scene
  * extractAndPartitionGroupEpistemic - runs one extraction pass and partitions entries by subject for group members
  * injectEpistemicKnowledge         - pushes the knowledge block into the prompt; warn=true prompts budget growth
@@ -67,7 +68,13 @@ import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
-import { partitionEpistemicEntriesBySubject, setSmartMemoryLogger } from './memory-utils.js';
+import {
+  partitionEpistemicEntriesBySubject,
+  matchSubjectToMember,
+  normalizeEpistemicSubject,
+  setSmartMemoryLogger,
+} from './memory-utils.js';
+import { resolveChatEpistemic } from './epistemic-utils.js';
 
 // memory-utils is intentionally free of the SillyTavern runtime so it can be
 // unit-tested under plain Node. Wire the real logger so its ambiguity warnings
@@ -105,6 +112,18 @@ function getEffectiveEpistemicBudget(settings) {
 }
 
 /**
+ * Returns the highest message index reflected in the chat's extracted state,
+ * used for the "as of turn #N" header on injected blocks.
+ *
+ * @returns {number|null}
+ */
+function getLastSeenMsg() {
+  const context = getContext();
+  const cutoff = context.chatMetadata?.[META_KEY]?.lastExtractCutoff;
+  return Number.isInteger(cutoff) ? cutoff : null;
+}
+
+/**
  * Persists a new per-chat budget override to chatMetadata (fire-and-forget).
  *
  * @param {number} newBudget
@@ -137,7 +156,7 @@ export function shrinkEpistemicBudgetIfPossible(characterName, respondingCharNam
   if (typeof override !== 'number') return; // no override set, nothing to shrink
 
   const entries = loadEpistemicKnowledge(characterName);
-  const block = buildEpistemicBlock(entries, respondingCharName, settings);
+  const block = buildEpistemicBlock(entries, respondingCharName, settings, getLastSeenMsg());
   const needed = block ? estimateTokens(block) : 0;
   const floor = settings.epistemic_inject_budget ?? 200;
   const ideal = Math.max(floor, needed + 100);
@@ -163,47 +182,85 @@ export function isEpistemicEnabled() {
 // ---- Storage ----------------------------------------------------------------
 
 /**
- * Loads the epistemic knowledge entries for a character from extension_settings.
+ * Loads the chat-scoped epistemic knowledge entries for the current chat.
+ *
+ * Entries are stored in `chatMetadata[META_KEY].epistemic_knowledge` so that
+ * different chats and AU branches with the same character can never
+ * cross-contaminate secrets. The `characterName` argument is retained for
+ * signature compatibility and to migrate a legacy per-character global store.
  *
  * Entry shape:
  *   { id, type, subject, target, content, ts, source_messages }
  *
- * @param {string} characterName
+ * @param {string} characterName - Card character name (used only for legacy migration).
  * @returns {Array<Object>}
  */
 export function loadEpistemicKnowledge(characterName) {
-  if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.epistemic_knowledge ?? [];
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  const meta = context.chatMetadata[META_KEY];
+
+  // One-time migration source: a pre-existing chat (or pre-upgrade settings)
+  // may hold this character's knowledge in the global extension_settings store.
+  const legacy = characterName
+    ? extension_settings[MODULE_NAME]?.characters?.[characterName]?.epistemic_knowledge
+    : null;
+
+  const { entries, migrated } = resolveChatEpistemic(meta, legacy);
+
+  if (migrated) {
+    // Clear the global copy so it can never leak into a different chat or AU
+    // branch with the same character.
+    const s = extension_settings[MODULE_NAME];
+    if (s?.characters?.[characterName]) {
+      s.characters[characterName].epistemic_knowledge = [];
+      saveSettingsDebounced();
+    }
+    context.saveMetadata()?.catch?.(console.error);
+  }
+
+  return entries;
 }
 
 /**
- * Persists the epistemic knowledge entries for a character to extension_settings.
- * Merges with the existing character object so no other fields are overwritten.
+ * Persists the chat-scoped epistemic knowledge entries for the current chat.
  *
- * @param {string} characterName
+ * Writes to chatMetadata only - never to the global settings store - so
+ * chat-specific secrets stay with their chat.
+ *
+ * @param {string} characterName - Retained for signature compatibility.
  * @param {Array<Object>} entries
  */
 export function saveEpistemicKnowledge(characterName, entries) {
-  if (!characterName || !Array.isArray(entries)) return;
-  const s = extension_settings[MODULE_NAME];
-  if (!s.characters) s.characters = {};
-  const existing = s.characters[characterName] ?? {};
-  s.characters[characterName] = { ...existing, epistemic_knowledge: entries };
-  saveSettingsDebounced();
+  if (!Array.isArray(entries)) return;
+  void characterName;
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].epistemic_knowledge = entries;
+  context.saveMetadata()?.catch?.(console.error);
 }
 
 /**
- * Removes all epistemic knowledge entries for a character.
- * Should be called alongside clearCharacterMemories and clearRelationshipHistory.
+ * Removes all chat-scoped epistemic knowledge entries for the current chat.
+ * Also clears any legacy global copy for the character so migrated data does
+ * not reappear in a later chat.
  *
  * @param {string} characterName
  */
 export function clearEpistemicKnowledge(characterName) {
-  if (!characterName) return;
+  const context = getContext();
+  if (context.chatMetadata?.[META_KEY]) {
+    context.chatMetadata[META_KEY].epistemic_knowledge = [];
+    context.saveMetadata()?.catch?.(console.error);
+  }
+
   const s = extension_settings[MODULE_NAME];
-  if (!s.characters?.[characterName]) return;
-  s.characters[characterName].epistemic_knowledge = [];
-  saveSettingsDebounced();
+  if (characterName && s?.characters?.[characterName]) {
+    s.characters[characterName].epistemic_knowledge = [];
+    saveSettingsDebounced();
+  }
 }
 
 // ---- Deduplication ----------------------------------------------------------
@@ -319,6 +376,30 @@ function filterDuplicateEpistemicEntries(parsed, existing, embeddings) {
 }
 
 /**
+ * Canonicalises parsed entry subjects to the card character name for solo chats.
+ *
+ * Weak models rarely echo the full card name in the subject field - a card named
+ * "Elara Voss" often produces entries with subject "Elara". Injection filters
+ * entries by subject, so an unmatched short form would be silently dropped.
+ * Rewriting the subject to the card name keeps those entries retrievable.
+ *
+ * Only subjects that resolve to `characterName` via matchSubjectToMember are
+ * touched; unrelated subjects are left as-is so a multi-character scene does not
+ * misattribute entries to the card character.
+ *
+ * @param {Object[]} entries - Freshly parsed entries (mutated in place).
+ * @param {string} characterName - Card character name (storage key).
+ */
+function normalizeParsedSubjects(entries, characterName) {
+  if (!characterName) return;
+  for (const entry of entries ?? []) {
+    if (entry && typeof entry.subject === 'string') {
+      entry.subject = normalizeEpistemicSubject(entry.subject, characterName);
+    }
+  }
+}
+
+/**
  * Runs the epistemic extraction pass for a completed scene.
  *
  * Called at scene breaks only - not every extraction cycle. Epistemic facts are
@@ -382,6 +463,10 @@ export async function extractEpistemicKnowledge(
       return 0;
     }
 
+    // Normalize short-form subjects ("Elara" -> "Elara Voss") to the card name
+    // so per-character injection still finds them in a solo chat.
+    normalizeParsedSubjects(parsed, characterName);
+
     // Assign ids and source range.
     stampEpistemicEntries(parsed, sceneMessages);
 
@@ -410,16 +495,16 @@ export async function extractEpistemicKnowledge(
  * resulting entries by subject.
  *
  * Group scenes contain several named characters in a single model response.
- * Unlike the solo path - which stores every entry under one card key and
- * filters by subject at injection time - this stores each character's entries
- * in their own `extension_settings.characters[name].epistemic_knowledge` slot
- * so every group member's perspective is preserved.
+ * All members' entries are stored in the chat-scoped
+ * `chatMetadata[META_KEY].epistemic_knowledge` array (entries carry a subject
+ * field), so the whole group's perspectives stay with this chat and can never
+ * cross-contaminate another chat or AU branch with the same characters.
  *
- * Existing entries are combined for the prompt (with their member origin
- * tracked) so `[retire] <n>` indices can be applied back to the right store.
+ * `[retire] <n>` indices refer to the combined chat-scoped entry list and are
+ * applied back to that single list.
  *
  * @param {Object[]} sceneMessages - Messages from the completed scene.
- * @param {string[]} groupMemberNames - Active group members (storage keys).
+ * @param {string[]} groupMemberNames - Active group members (subject keys).
  * @returns {Promise<number>} Number of new entries added across all members.
  */
 export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemberNames) {
@@ -437,20 +522,12 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
     const sceneParticipants = getSceneParticipants(sceneMessages);
     const participants = [...new Set([...sceneParticipants, ...memberNames])];
 
-    // Load every member's existing entries and remember where each came from.
-    const existingByMember = new Map();
-    const combinedExisting = [];
-    for (const name of memberNames) {
-      const entries = loadEpistemicKnowledge(name);
-      existingByMember.set(name, entries);
-      for (const entry of entries) combinedExisting.push({ entry, name });
-    }
+    // Chat-scoped: every member's entries live in one array for this chat.
+    // loadEpistemicKnowledge returns the chat array regardless of which member
+    // key is passed, so reading once is enough.
+    const existing = [...loadEpistemicKnowledge(memberNames[0])];
 
-    const prompt = buildEpistemicExtractionPrompt(
-      chatExcerpt,
-      participants,
-      combinedExisting.map(({ entry }) => entry),
-    );
+    const prompt = buildEpistemicExtractionPrompt(chatExcerpt, participants, existing);
 
     const response = await generateMemoryExtract(prompt, {
       responseLength: settings.epistemic_response_length ?? 400,
@@ -463,13 +540,8 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
     const retireIndices = parseEpistemicRetireIndices(response);
     const retiredCount = retireIndices.size;
 
-    // Apply retire indices back to the member that owned each entry.
-    const survivingByMember = new Map(memberNames.map((name) => [name, []]));
-    combinedExisting.forEach(({ entry, name }, index) => {
-      if (!retireIndices.has(index + 1)) {
-        survivingByMember.get(name).push(entry);
-      }
-    });
+    // Retire indices refer to the combined chat-scoped list.
+    const survivingExisting = existing.filter((_, i) => !retireIndices.has(i + 1));
 
     const parsed = parseEpistemicResponse(response);
     if (parsed.length === 0 && retiredCount === 0) {
@@ -479,8 +551,7 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
 
     stampEpistemicEntries(parsed, sceneMessages);
 
-    const survivingAll = [...survivingByMember.values()].flat();
-    const embeddings = await fetchEpistemicEmbeddings(survivingAll, parsed);
+    const embeddings = await fetchEpistemicEmbeddings(survivingExisting, parsed);
 
     const { grouped, skipped } = partitionEpistemicEntriesBySubject(parsed, memberNames);
     if (skipped.length > 0) {
@@ -489,28 +560,19 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
       );
     }
 
-    let addedTotal = 0;
-    for (const name of memberNames) {
-      const original = existingByMember.get(name) ?? [];
-      const survivors = survivingByMember.get(name) ?? [];
-      const incoming = grouped.get(name) ?? [];
-      const newEntries = filterDuplicateEpistemicEntries(incoming, survivors, embeddings);
-      const changed = newEntries.length > 0 || survivors.length !== original.length;
-      if (changed) {
-        saveEpistemicKnowledge(name, [...survivors, ...newEntries]);
-      }
-      addedTotal += newEntries.length;
-    }
+    const incoming = [...grouped.values()].flat();
+    const newEntries = filterDuplicateEpistemicEntries(incoming, survivingExisting, embeddings);
 
-    if (addedTotal === 0 && retiredCount === 0) {
+    if (newEntries.length === 0 && retiredCount === 0) {
       smLog('[SmartMemory] Group epistemic: all candidates were duplicates.');
       return 0;
     }
 
+    saveEpistemicKnowledge(memberNames[0], [...survivingExisting, ...newEntries]);
     smLog(
-      `[SmartMemory] Group epistemic: added ${addedTotal} new entries, retired ${retiredCount} across ${memberNames.length} members.`,
+      `[SmartMemory] Group epistemic: added ${newEntries.length} new entries, retired ${retiredCount} across ${memberNames.length} members.`,
     );
-    return addedTotal;
+    return newEntries.length;
   } catch (err) {
     smLog('[SmartMemory] Group epistemic extraction failed:', err.message);
     return 0;
@@ -531,11 +593,16 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
  * @param {Object[]} entries - All epistemic entries for this character.
  * @param {string} respondingChar - Name of the character being injected for.
  * @param {Object} settings - extension_settings[MODULE_NAME].
+ * @param {number|null} [lastSeenMsg] - Highest message index reflected in the entries.
  * @returns {string} Formatted injection block, or empty string if nothing to inject.
  */
-function buildEpistemicBlock(entries, respondingChar, settings) {
-  // Filter to entries where this character is the subject.
-  const relevant = entries.filter((e) => e.subject.toLowerCase() === respondingChar.toLowerCase());
+function buildEpistemicBlock(entries, respondingChar, settings, lastSeenMsg = null) {
+  // Filter to entries where this character is the subject. Uses the shared
+  // matcher rather than a strict string compare so a card named "Elara Voss"
+  // still picks up entries the model emitted with the short form "Elara".
+  const relevant = entries.filter(
+    (e) => matchSubjectToMember(e.subject, [respondingChar]) !== null,
+  );
   if (relevant.length === 0) return '';
 
   const byType = {
@@ -546,7 +613,10 @@ function buildEpistemicBlock(entries, respondingChar, settings) {
     hiding: relevant.filter((e) => e.type === 'hiding'),
   };
 
-  const lines = [`What ${respondingChar} knows and believes:`];
+  const lines = [
+    `[Perspectives & Secrets as of turn #${lastSeenMsg ?? 'current'}]:`,
+    `What ${respondingChar} knows and believes:`,
+  ];
 
   if (byType.knows.length > 0) {
     lines.push(`Knows:`);
@@ -620,7 +690,7 @@ export function injectEpistemicKnowledge(
     return;
   }
 
-  const block = buildEpistemicBlock(entries, respondingCharName, settings);
+  const block = buildEpistemicBlock(entries, respondingCharName, settings, getLastSeenMsg());
   if (!block) {
     clear();
     return;
