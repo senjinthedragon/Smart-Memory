@@ -1150,12 +1150,16 @@ export function truncateSummaryToBudget(summary, budget) {
  * Resolves an epistemic subject to one of the group's canonical member names.
  *
  * Weak models rarely echo a full member name in the subject field: they write
- * the first name, a token, or a partial form ("Elara" for "Elara Voss", "Kael"
- * for "Kael Draven", "Picard" for "Jean-Luc Picard"). This matcher accepts, in
- * order of confidence:
- * - an exact case-insensitive name match
- * - a whitespace-separated token of the member (first name / surname)
- * - a prefix/suffix match ("Elara" against "Elara Voss")
+ * the first name, a surname, a partial form, or add a title ("Lady Elara" for
+ * "Elara Voss", "Kael Draven" for "Kael", "Picard" for "Jean-Luc Picard").
+ * Both sides are cleaned first (possessives, punctuation, casing) and honorific
+ * titles are stripped, then matching is bidirectional:
+ *
+ * - exact match after cleaning
+ * - member tokens include the subject ("Elara" -> "Elara Voss")
+ * - subject tokens include the member ("Kael Draven" -> "Kael")
+ * - cleaned member without title equals cleaned subject without title
+ *   ("Lady Elara" -> "Elara")
  *
  * Arbitrary substring matching is deliberately NOT used: "Evan" must not match
  * "Evangeline Cole". When more than one member matches the subject, the match is
@@ -1168,35 +1172,48 @@ export function truncateSummaryToBudget(summary, budget) {
  *   matches or the match is ambiguous.
  */
 export function matchSubjectToMember(subject, memberNames) {
-  const s = String(subject ?? '')
-    .trim()
-    .toLowerCase();
-  if (!s) return null;
+  const cleanedSubject = cleanPersonName(subject);
+  if (!cleanedSubject) return null;
 
   const names = Array.isArray(memberNames) ? memberNames.filter(Boolean) : [];
   if (names.length === 0) return null;
 
-  // 1. Exact case-insensitive match.
-  for (const member of names) {
-    if (String(member).toLowerCase() === s) return member;
-  }
+  const subjectTokens = nameTokens(cleanedSubject);
+  const subjectNoTitle = stripHonorifics(cleanedSubject);
+  const subjectNoTitleTokens = nameTokens(subjectNoTitle);
 
-  // 2. Complete whitespace-separated token, or a prefix/suffix bounded by a
-  //    space. `name.includes(subject)` is intentionally NOT used - it produces
-  //    substring false positives like "Evan" -> "Evangeline Cole".
   const matches = [];
+  const matchedKeys = new Set();
+
   for (const member of names) {
-    const m = String(member).toLowerCase();
-    const tokens = m.split(/\s+/).filter(Boolean);
-    if (tokens.includes(s) || m.startsWith(`${s} `) || m.endsWith(` ${s}`)) {
-      matches.push(member);
+    const cleanedMember = cleanPersonName(member);
+    if (!cleanedMember) continue;
+
+    const memberTokens = nameTokens(cleanedMember);
+    const memberNoTitle = stripHonorifics(cleanedMember);
+    const memberNoTitleTokens = nameTokens(memberNoTitle);
+
+    const exact = cleanedMember === cleanedSubject;
+    const exactNoTitle =
+      Boolean(subjectNoTitle) && Boolean(memberNoTitle) && subjectNoTitle === memberNoTitle;
+    // "Elara" is contained in "Elara Voss" (and "Lady Elara" in "Elara Voss").
+    const memberIncludesSubject = tokensIncludeAll(memberTokens, subjectNoTitleTokens);
+    // "Kael Draven" contains the member "Kael" (and the member "Lady Elara"
+    // contains "Elara" once the title is stripped).
+    const subjectIncludesMember = tokensIncludeAll(subjectTokens, memberNoTitleTokens);
+
+    if (exact || exactNoTitle || memberIncludesSubject || subjectIncludesMember) {
+      if (!matchedKeys.has(cleanedMember)) {
+        matchedKeys.add(cleanedMember);
+        matches.push(member);
+      }
     }
   }
 
   if (matches.length === 0) return null;
 
-  // 3. Ambiguity guard: more than one member matched, so the subject cannot be
-  //    attributed without risk. Refuse rather than silently pick the first.
+  // Ambiguity guard: more than one member matched, so the subject cannot be
+  // attributed without risk. Refuse rather than silently pick the first.
   if (matches.length > 1) {
     smLog(
       `[SmartMemory] Ambiguous epistemic subject "${subject}" matched multiple members - skipped to prevent misattribution.`,
@@ -1205,6 +1222,73 @@ export function matchSubjectToMember(subject, memberNames) {
   }
 
   return matches[0];
+}
+
+// Honorific/title words stripped before comparing epistemic subjects to member
+// names. A title is never part of the identity we need to resolve.
+const EPISTEMIC_HONORIFIC_TITLES = new Set([
+  'lady',
+  'lord',
+  'sir',
+  'captain',
+  'dr',
+  'doctor',
+  'king',
+  'queen',
+  'prince',
+  'princess',
+]);
+
+/**
+ * Cleans a person name for epistemic subject matching: lowercases, strips
+ * possessive "'s"/"’s", replaces punctuation (including hyphens) with spaces,
+ * and collapses whitespace.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+function cleanPersonName(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/['’]s(?=[\s.,;:!?'"”’)\]]|$)/g, '')
+    .replace(/[^\p{L}\p{N}\s_-]/gu, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Splits an already-cleaned name into non-empty tokens.
+ * @param {string} cleaned
+ * @returns {string[]}
+ */
+function nameTokens(cleaned) {
+  return String(cleaned ?? '')
+    .split(' ')
+    .filter(Boolean);
+}
+
+/**
+ * Removes honorific/title tokens from a cleaned name.
+ * @param {string} cleaned
+ * @returns {string}
+ */
+function stripHonorifics(cleaned) {
+  return nameTokens(cleaned)
+    .filter((token) => !EPISTEMIC_HONORIFIC_TITLES.has(token))
+    .join(' ');
+}
+
+/**
+ * Returns true when every token in `subset` appears in `container`.
+ * An empty subset is not considered a match.
+ *
+ * @param {string[]} container
+ * @param {string[]} subset
+ * @returns {boolean}
+ */
+function tokensIncludeAll(container, subset) {
+  return subset.length > 0 && subset.every((token) => container.includes(token));
 }
 
 /**

@@ -190,3 +190,47 @@ test('epistemic: an empty legacy store leaves the chat empty', () => {
   assert.deepEqual(result.entries, []);
   assert.equal(meta.epistemic_knowledge, undefined);
 });
+
+// =========================================================================
+// N3: rollback rewinds the extraction cursor
+// =========================================================================
+
+test('rollback: rewinds lastExtractCutoff to the rollback target', () => {
+  const meta = { state_ledger: {}, lastExtractCutoff: 12 };
+  takeSnapshotOnMeta(meta, 9);
+  takeSnapshotOnMeta(meta, 10);
+
+  rollbackSnapshotOnMeta(meta, 8);
+
+  // The latest snapshot at or before 8 is 9? No - 9 > 8, so none qualifies.
+  // The cursor must still rewind so the rewritten branch is re-extracted.
+  assert.equal(meta.lastExtractCutoff, 8);
+});
+
+test('rollback: rewinds lastExtractCutoff to the surviving snapshot turn', () => {
+  const meta = { state_ledger: {}, lastExtractCutoff: 12 };
+  takeSnapshotOnMeta(meta, 7);
+  takeSnapshotOnMeta(meta, 10);
+
+  rollbackSnapshotOnMeta(meta, 9);
+
+  assert.equal(meta.lastExtractCutoff, 9);
+});
+
+test('rollback: does not advance a cutoff that is already behind the target', () => {
+  const meta = { state_ledger: {}, lastExtractCutoff: 2 };
+  takeSnapshotOnMeta(meta, 7);
+
+  rollbackSnapshotOnMeta(meta, 9);
+
+  assert.equal(meta.lastExtractCutoff, 2);
+});
+
+test('rollback: clamps lastExtractCutoff at zero for the first turn', () => {
+  const meta = { state_ledger: {}, lastExtractCutoff: 5 };
+  takeSnapshotOnMeta(meta, 0);
+
+  rollbackSnapshotOnMeta(meta, -1);
+
+  assert.equal(meta.lastExtractCutoff, 0);
+});

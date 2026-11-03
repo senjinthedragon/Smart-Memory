@@ -75,6 +75,7 @@ import {
   setSmartMemoryLogger,
 } from './memory-utils.js';
 import { resolveChatEpistemic } from './epistemic-utils.js';
+import { takeStateSnapshot } from './state-ledger.js';
 
 // memory-utils is intentionally free of the SillyTavern runtime so it can be
 // unit-tested under plain Node. Wire the real logger so its ambiguity warnings
@@ -224,6 +225,18 @@ export function loadEpistemicKnowledge(characterName) {
 }
 
 /**
+ * Records a message-anchored state snapshot after a manual epistemic edit.
+ * Without this, the next swipe/delete rollback would restore an older snapshot
+ * and silently discard the user's edit.
+ */
+function snapshotCurrentState() {
+  const context = getContext();
+  const length = context.chat?.length ?? 0;
+  if (length === 0) return;
+  takeStateSnapshot(Math.max(0, length - 1));
+}
+
+/**
  * Persists the chat-scoped epistemic knowledge entries for the current chat.
  *
  * Writes to chatMetadata only - never to the global settings store - so
@@ -240,6 +253,7 @@ export function saveEpistemicKnowledge(characterName, entries) {
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].epistemic_knowledge = entries;
   context.saveMetadata()?.catch?.(console.error);
+  snapshotCurrentState();
 }
 
 /**
@@ -261,6 +275,7 @@ export function clearEpistemicKnowledge(characterName) {
     s.characters[characterName].epistemic_knowledge = [];
     saveSettingsDebounced();
   }
+  snapshotCurrentState();
 }
 
 // ---- Deduplication ----------------------------------------------------------
@@ -738,8 +753,8 @@ export function injectEpistemicKnowledge(
     setExtensionPrompt(
       PROMPT_KEY_EPISTEMIC,
       content,
-      settings.epistemic_position ?? extension_prompt_types.IN_PROMPT,
-      settings.epistemic_depth ?? 0,
+      settings.epistemic_position ?? extension_prompt_types.IN_CHAT,
+      settings.epistemic_depth ?? 2,
       false,
       settings.epistemic_role ?? extension_prompt_roles.SYSTEM,
     );

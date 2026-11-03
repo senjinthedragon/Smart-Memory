@@ -56,6 +56,7 @@ import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
 import { takeSnapshotOnMeta, rollbackSnapshotOnMeta } from './state-snapshot.js';
+import { inferRetconStateUpdate } from './continuity-utils.js';
 
 // ---- Field schema -----------------------------------------------------------
 
@@ -136,6 +137,29 @@ export function getStateCard(name, type) {
 }
 
 /**
+ * Returns the chat index to anchor a manual-edit snapshot at. Manual edits
+ * happen at the current chat tip; returning -1 when the chat is empty keeps
+ * us from writing a meaningless snapshot for a chat with no turns.
+ *
+ * @returns {number}
+ */
+function currentChatIndex() {
+  const context = getContext();
+  const length = context.chat?.length ?? 0;
+  return length > 0 ? length - 1 : -1;
+}
+
+/**
+ * Records a message-anchored snapshot after a manual card edit. Without this,
+ * the next swipe/delete rollback would restore an older snapshot and discard
+ * the user's manual change.
+ */
+function snapshotAfterManualEdit() {
+  const index = currentChatIndex();
+  if (index >= 0) takeStateSnapshot(index);
+}
+
+/**
  * Upserts a state card into the ledger. Merges fields on top of any existing
  * card rather than replacing it - sparse update semantics.
  *
@@ -151,6 +175,7 @@ export async function setStateCard(name, type, fields) {
   // descriptor removes matching items, and `''` clears the field outright.
   ledger[key] = mergeStateCardFields(ledger[key] ?? {}, fields);
   await saveStateLedger(ledger);
+  snapshotAfterManualEdit();
 }
 
 /**
@@ -167,6 +192,7 @@ export async function deleteStateCard(name, type) {
   if (!(key in ledger)) return;
   delete ledger[key];
   await saveStateLedger(ledger);
+  snapshotAfterManualEdit();
 }
 
 /**
@@ -202,6 +228,35 @@ export async function migrateStateLedgerKey(name, oldType, newType) {
  */
 export async function clearStateLedger() {
   await saveStateLedger({});
+}
+
+/**
+ * Applies a resolved/accepted durable retcon to the state ledger.
+ *
+ * When the retcon describes a state-card attribute (an injury, outfit, mood,
+ * location, goal, or carried item), the inferred entity's card is updated so
+ * the baseline follows the state the story has settled on. Retcons that do not
+ * map to the schema (e.g. eye colour) are ignored here and handled by the
+ * long-term memory supersession path instead.
+ *
+ * @param {Object} retcon
+ * @returns {boolean} True when a state card field was updated.
+ */
+export function applyRetconToStateLedger(retcon) {
+  const update = inferRetconStateUpdate(retcon);
+  if (!update) return false;
+
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  const meta = context.chatMetadata[META_KEY];
+  if (!meta.state_ledger || typeof meta.state_ledger !== 'object') meta.state_ledger = {};
+
+  const key = ledgerKey(update.name, update.type);
+  meta.state_ledger[key] = mergeStateCardFields(meta.state_ledger[key] ?? {}, update.fields);
+  context.saveMetadata()?.catch?.(console.error);
+  snapshotAfterManualEdit();
+  return true;
 }
 
 // ---- Message-anchored snapshots & rollback ----------------------------------
@@ -415,8 +470,8 @@ export function injectStateLedger(updateTelemetry = false) {
     setExtensionPrompt(
       PROMPT_KEY_STATE_LEDGER,
       content,
-      settings.state_ledger_position ?? extension_prompt_types.IN_PROMPT,
-      settings.state_ledger_depth ?? 0,
+      settings.state_ledger_position ?? extension_prompt_types.IN_CHAT,
+      settings.state_ledger_depth ?? 2,
       false,
       settings.state_ledger_role ?? extension_prompt_roles.SYSTEM,
     );

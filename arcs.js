@@ -66,6 +66,7 @@ import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
+import { takeStateSnapshot } from './state-ledger.js';
 
 // ---- Deduplication ------------------------------------------------------
 
@@ -178,6 +179,17 @@ export function loadArcs() {
 }
 
 /**
+ * Records a message-anchored state snapshot after a manual arc edit. Without
+ * this, the next swipe/delete rollback would restore an older snapshot and
+ * discard the user's manual change.
+ */
+function snapshotAfterManualEdit() {
+  const context = getContext();
+  const length = context.chat?.length ?? 0;
+  if (length > 0) takeStateSnapshot(length - 1);
+}
+
+/**
  * Persists the story arc array to chatMetadata.
  * @param {Array<{content: string, ts: number}>} arcs
  */
@@ -187,6 +199,7 @@ export async function saveArcs(arcs) {
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].storyArcs = arcs;
   await context.saveMetadata();
+  snapshotAfterManualEdit();
 }
 
 /**
@@ -226,6 +239,7 @@ export async function deleteArc(index, characterName = null, groupId = null) {
 
   arcs.splice(index, 1);
   await saveArcs(arcs);
+  snapshotAfterManualEdit();
 }
 
 /**

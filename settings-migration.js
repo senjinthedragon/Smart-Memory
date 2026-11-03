@@ -24,43 +24,58 @@
  * without loading SillyTavern's runtime modules (script.js, extensions.js).
  * settings.js imports and calls them from loadSettings().
  *
- * migrateEpistemicStateLedgerPlacement - moves legacy IN_CHAT depth-1 injections
- *   for the epistemic and state-ledger tiers to the in-prompt placement.
+ * migrateEpistemicStateLedgerPlacement - normalises the epistemic and
+ *   state-ledger injection placement to IN_CHAT depth 2.
  */
 
 /**
- * Migrates the legacy epistemic/state-ledger injection placement.
+ * Migrates the epistemic/state-ledger injection placement to the intended
+ * near-the-end position.
  *
- * Older defaults injected both tiers at IN_CHAT depth 1 (position 1, depth 1),
- * which let stale extracted state override the active dialogue turn. This moves
- * untouched old defaults to the in-prompt placement (position 2, depth 2). A
- * user who explicitly changed the position or depth is left alone.
+ * Depth only applies to IN_CHAT (position 1) in SillyTavern. IN_PROMPT
+ * (position 2) ignores depth entirely and places the block at the very top of
+ * the prompt, which is not what either tier wants. Two historical defaults are
+ * normalised:
  *
- * Persists a one-time migration flag `migrated_legacy_placement = true` so
- * that subsequent reloads never revert a user who deliberately chooses
- * position 1 and depth 1 after migration.
+ *   - legacy default:  IN_CHAT depth 1  (position 1, depth 1)
+ *   - interim default: IN_PROMPT depth 0/2 (position 2, depth 0 or 2)
+ *
+ * Both move to IN_CHAT depth 2, so the block sits near the end of the prompt and
+ * the configured depth is actually honoured. An explicit custom position/depth
+ * (e.g. position 0 or depth 4) is preserved.
+ *
+ * Persists a one-time migration flag `migrated_legacy_placement = true` so that
+ * subsequent reloads never revert a user who deliberately chooses the old
+ * placement after migration. When the flag is already set, settings are left
+ * completely untouched.
  *
  * Mutates and returns the supplied settings object.
  *
  * @param {Object} settings - The extension_settings[MODULE_NAME] object.
- * @param {{ IN_PROMPT?: number }} [promptTypes] - extension_prompt_types (IN_PROMPT defaults to 2).
- * @param {number} [targetDepth=2] - Default depth (defaults to 2).
+ * @param {{ IN_CHAT?: number }} [promptTypes] - extension_prompt_types (IN_CHAT defaults to 1).
+ * @param {number} [targetDepth=2] - Target depth (defaults to 2).
  * @returns {Object} The same settings object.
  */
 export function migrateEpistemicStateLedgerPlacement(settings, promptTypes = {}, targetDepth = 2) {
   if (!settings || typeof settings !== 'object') return settings;
   if (settings.migrated_legacy_placement) return settings;
 
-  const inPrompt = Number.isFinite(promptTypes.IN_PROMPT) ? promptTypes.IN_PROMPT : 2;
+  const inChat = Number.isFinite(promptTypes.IN_CHAT) ? promptTypes.IN_CHAT : 1;
   const depth = Number.isFinite(targetDepth) ? targetDepth : 2;
 
-  if (settings.epistemic_position === 1 && settings.epistemic_depth === 1) {
-    settings.epistemic_position = inPrompt;
-    settings.epistemic_depth = depth;
-  }
-  if (settings.state_ledger_position === 1 && settings.state_ledger_depth === 1) {
-    settings.state_ledger_position = inPrompt;
-    settings.state_ledger_depth = depth;
+  // The two defaults that need normalising. Compare position and depth together
+  // so an explicit custom choice is never overwritten.
+  const isLegacyPlacement = (position, currentDepth) => position === 1 && currentDepth === 1;
+  const isInterimPlacement = (position, currentDepth) =>
+    position === 2 && (currentDepth === 0 || currentDepth === 2);
+
+  for (const tier of ['epistemic', 'state_ledger']) {
+    const position = settings[`${tier}_position`];
+    const currentDepth = settings[`${tier}_depth`];
+    if (isLegacyPlacement(position, currentDepth) || isInterimPlacement(position, currentDepth)) {
+      settings[`${tier}_position`] = inChat;
+      settings[`${tier}_depth`] = depth;
+    }
   }
 
   settings.migrated_legacy_placement = true;

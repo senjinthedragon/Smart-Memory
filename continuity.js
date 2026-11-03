@@ -64,8 +64,9 @@ import {
 import { power_user } from '../../../../scripts/power-user.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_REPAIR, generateMemoryId } from './constants.js';
 import { buildContinuityPrompt } from './prompts.js';
-import { loadCharacterMemories } from './longterm.js';
+import { loadCharacterMemories, applyRetconToLongterm } from './longterm.js';
 import { loadSessionMemories } from './session.js';
+import { applyRetconToStateLedger } from './state-ledger.js';
 import { setContinuityBadge } from './ui.js';
 import { smLog } from './logging.js';
 import {
@@ -78,6 +79,8 @@ import {
   buildDurableRetconNote,
   advanceRetconLifetimes,
   invalidateAcceptedRetcons,
+  getResolvedRetconFact,
+  inferRetconStateUpdate,
   RETCON_TURNS,
 } from './continuity-utils.js';
 
@@ -92,6 +95,8 @@ export {
   buildDurableRetconNote,
   advanceRetconLifetimes,
   invalidateAcceptedRetcons,
+  getResolvedRetconFact,
+  inferRetconStateUpdate,
   RETCON_TURNS,
 };
 
@@ -148,6 +153,101 @@ function saveDurableRetcons(retcons) {
 }
 
 /**
+ * Returns the names of the active chat's characters, used to route a resolved
+ * retcon's new baseline fact into the correct long-term memory store(s).
+ *
+ * @returns {string[]}
+ */
+function getActiveCharacterNames() {
+  const context = getContext();
+  if (context.groupId) {
+    const group = (context.groups ?? []).find(
+      (candidate) => String(candidate?.id) === String(context.groupId),
+    );
+    if (group) {
+      const disabled = new Set(group.disabled_members ?? []);
+      return (group.members ?? [])
+        .filter((avatar) => !disabled.has(avatar))
+        .map((avatar) => (context.characters ?? []).find((char) => char?.avatar === avatar)?.name)
+        .filter(Boolean);
+    }
+  }
+  const active = context.characters?.[context.characterId];
+  return active?.name ? [active.name] : [];
+}
+
+/**
+ * Picks the character store(s) a retcon applies to. A fact that names a group
+ * member only touches that member's memories; a solo chat falls back to the
+ * only available character.
+ *
+ * @param {string[]} names
+ * @param {string} fact
+ * @returns {string[]}
+ */
+function selectRetconTargets(names, fact) {
+  const list = [...new Set((names ?? []).filter(Boolean))];
+  if (list.length === 0) return [];
+
+  const factText = String(fact ?? '').toLowerCase();
+  const matching = list.filter((name) =>
+    String(name)
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((token) => token.length >= 2)
+      .some((token) => factText.includes(token)),
+  );
+  if (matching.length > 0) return matching;
+  return list.length === 1 ? list : [];
+}
+
+/**
+ * Applies a resolved or user-accepted retcon to chat state so the old baseline
+ * stops asserting the superseded fact. This is what keeps a repetition loop
+ * from re-flagging the same contradiction after the retcon's lifetime ends.
+ *
+ * - Long-term memories: the memory matching `retcon.fact` is retired via
+ *   `superseded_by`, and the resolved fact becomes the new active baseline.
+ * - State ledger: when the retcon describes a state-card attribute, the
+ *   entity's card field is updated.
+ *
+ * @param {Object} retcon
+ * @param {string|string[]|null} [characterName=null] - Explicit character(s), or
+ *   null to resolve against the active chat's characters.
+ */
+function resolveRetconIntoState(retcon, characterName = null) {
+  if (!retcon || typeof retcon !== 'object') return;
+
+  const oldFact = String(retcon.fact ?? '').trim();
+  const resolvedFact = getResolvedRetconFact(retcon);
+  // A retcon without a distinct changed state has nothing to install - leaving
+  // the baseline alone avoids creating a duplicate of the old fact.
+  if (!oldFact || !resolvedFact) return;
+  if (oldFact.toLowerCase() === resolvedFact.toLowerCase()) return;
+
+  const names =
+    characterName == null
+      ? getActiveCharacterNames()
+      : Array.isArray(characterName)
+        ? characterName.filter(Boolean)
+        : [characterName];
+
+  for (const name of selectRetconTargets(names, oldFact)) {
+    try {
+      applyRetconToLongterm(name, retcon);
+    } catch (err) {
+      console.error('[SmartMemory] Failed to apply resolved retcon to long-term memory:', err);
+    }
+  }
+
+  try {
+    applyRetconToStateLedger(retcon);
+  } catch (err) {
+    console.error('[SmartMemory] Failed to apply resolved retcon to state ledger:', err);
+  }
+}
+
+/**
  * Adds durable retcon entries for confirmed contradictions. Each entry lives
  * for RETCON_TURNS AI turns (or until the user accepts the change) so the
  * continuity note is no longer a fragile one-shot.
@@ -197,16 +297,41 @@ export function addDurableRetcons(issues, asOfMsg) {
 
 /**
  * Advances every active retcon by one AI turn, dropping those that have
- * reached the end of their lifespan (auto-resolved as canon).
+ * reached the end of their lifespan (auto-resolved as canon). Expired retcons
+ * are written into state first so the old baseline fact is superseded by the
+ * newly canonised state.
  *
- * Called once per committed AI turn.
+ * Called once per committed AI turn (once per full group round).
  *
+ * @param {string|string[]|null} [characterName=null] - Character(s) whose
+ *   long-term store should receive the resolved fact. Null resolves against the
+ *   active chat.
  * @returns {number} Number of active retcons remaining.
  */
-export function advanceDurableRetcons() {
+export function advanceDurableRetcons(characterName = null) {
   const retcons = loadDurableRetcons();
   if (retcons.length === 0) return 0;
   const advanced = advanceRetconLifetimes(retcons);
+  const survivingIds = new Set(advanced.map((retcon) => retcon?.id).filter(Boolean));
+  const survivingFacts = new Set(
+    advanced
+      .map((retcon) =>
+        String(retcon?.fact ?? '')
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean),
+  );
+  for (const retcon of retcons) {
+    if (!retcon) continue;
+    const factKey = String(retcon.fact ?? '')
+      .trim()
+      .toLowerCase();
+    if ((retcon.id && survivingIds.has(retcon.id)) || (factKey && survivingFacts.has(factKey))) {
+      continue;
+    }
+    resolveRetconIntoState(retcon, characterName);
+  }
   saveDurableRetcons(advanced);
   return advanced.length;
 }
@@ -214,18 +339,27 @@ export function advanceDurableRetcons() {
 /**
  * Drops retcons the user has implicitly accepted by echoing the flagged quote
  * in their reply. When the user writes the changed state themselves, the
- * repair is moot and the retcon is invalidated.
+ * repair is moot; the accepted state becomes the new baseline so it is never
+ * re-flagged.
  *
  * @param {string} userText - Text of the user's most recent turn.
+ * @param {string|string[]|null} [characterName=null] - Character(s) whose
+ *   long-term store should receive the resolved fact.
  * @returns {number} Number of retcons removed.
  */
-export function invalidateAcceptedDurableRetcons(userText) {
+export function invalidateAcceptedDurableRetcons(userText, characterName = null) {
   const retcons = loadDurableRetcons();
   if (retcons.length === 0) return 0;
   const remaining = invalidateAcceptedRetcons(retcons, userText);
   if (remaining.length !== retcons.length) {
+    // invalidateAcceptedRetcons filters the input, so surviving entries are the
+    // same object references and identity comparison is exact even for legacy
+    // retcons without an id.
+    const remainingSet = new Set(remaining);
+    const accepted = retcons.filter((retcon) => retcon && !remainingSet.has(retcon));
+    for (const retcon of accepted) resolveRetconIntoState(retcon, characterName);
     saveDurableRetcons(remaining);
-    return retcons.length - remaining.length;
+    return accepted.length;
   }
   return 0;
 }
@@ -563,6 +697,39 @@ export function applyPendingRepair() {
   );
 
   smLog('[SmartMemory] Continuity note injected for the next response.');
+  return true;
+}
+
+/**
+ * Re-injects only the standing durable-retcon note, without arming the
+ * one-shot anchored note. Used for every group member after the first in a
+ * round so the shared continuity reminder reaches all responders while the
+ * one-shot repair stays single-use.
+ *
+ * @returns {boolean} True when a durable note was injected.
+ */
+export function applyDurableRetconNote() {
+  if (getContinuityMode() !== 'repair') {
+    setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
+    return false;
+  }
+
+  const durableNote = buildDurableRetconNote(loadDurableRetcons());
+  if (!durableNote) {
+    setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
+    return false;
+  }
+
+  const settings = extension_settings[MODULE_NAME] ?? {};
+  const depth = Number.isFinite(settings.repair_depth) ? settings.repair_depth : 1;
+  setExtensionPrompt(
+    PROMPT_KEY_REPAIR,
+    durableNote,
+    extension_prompt_types.IN_CHAT,
+    depth,
+    false,
+    extension_prompt_roles.SYSTEM,
+  );
   return true;
 }
 

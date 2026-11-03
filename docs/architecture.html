@@ -1,1559 +1,2081 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="Technical architecture of Smart Memory - a multi-tier memory extraction, deduplication, and injection pipeline for SillyTavern. Covers extraction tiers, injection slots, deduplication, and hardware profiles." />
-<meta name="keywords" content="SillyTavern, extension, AI memory, architecture, memory extraction, context injection, deduplication, hardware profiles, Ollama, local AI" />
-<meta name="author" content="Senjin the Dragon" />
-<meta name="robots" content="index, follow" />
-<link rel="canonical" href="https://smartmemory.hatchling.org/architecture.html" />
-<meta property="og:type" content="website" />
-<meta property="og:url" content="https://smartmemory.hatchling.org/architecture.html" />
-<meta property="og:title" content="Smart Memory — System Architecture" />
-<meta property="og:description" content="Technical architecture of Smart Memory: multi-tier extraction, deduplication, context injection pipeline, and hardware profile system for SillyTavern." />
-<meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="Smart Memory — System Architecture" />
-<meta name="twitter:description" content="Technical architecture of Smart Memory: multi-tier extraction, deduplication, context injection pipeline, and hardware profile system for SillyTavern." />
-<title>Smart Memory — System Architecture</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg:        #0a0d12;
-    --bg-2:      #0f131a;
-    --panel:     #141923;
-    --panel-2:   #1a2030;
-    --line:      #232a3a;
-    --line-2:    #2e364a;
-    --ink:       #e6ecf5;
-    --ink-2:     #aeb6c7;
-    --ink-3:     #6b7385;
-    --mono:      "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-    --sans:      "Inter", system-ui, sans-serif;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Technical architecture of Smart Memory - a multi-tier memory extraction, deduplication, and injection pipeline for SillyTavern. Covers extraction tiers, injection slots, deduplication, and hardware profiles."
+    />
+    <meta
+      name="keywords"
+      content="SillyTavern, extension, AI memory, architecture, memory extraction, context injection, deduplication, hardware profiles, Ollama, local AI"
+    />
+    <meta name="author" content="Senjin the Dragon" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://smartmemory.hatchling.org/architecture.html" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://smartmemory.hatchling.org/architecture.html" />
+    <meta property="og:title" content="Smart Memory — System Architecture" />
+    <meta
+      property="og:description"
+      content="Technical architecture of Smart Memory: multi-tier extraction, deduplication, context injection pipeline, and hardware profile system for SillyTavern."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Smart Memory — System Architecture" />
+    <meta
+      name="twitter:description"
+      content="Technical architecture of Smart Memory: multi-tier extraction, deduplication, context injection pipeline, and hardware profile system for SillyTavern."
+    />
+    <title>Smart Memory — System Architecture</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0a0d12;
+        --bg-2: #0f131a;
+        --panel: #141923;
+        --panel-2: #1a2030;
+        --line: #232a3a;
+        --line-2: #2e364a;
+        --ink: #e6ecf5;
+        --ink-2: #aeb6c7;
+        --ink-3: #6b7385;
+        --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+        --sans: 'Inter', system-ui, sans-serif;
 
-    /* HDR-safe palette — chroma trimmed to stay inside sRGB gamut
+        /* HDR-safe palette — chroma trimmed to stay inside sRGB gamut
        so HDR/wide-gamut browsers cannot over-brighten clamped colors. */
-    --c-events:  oklch(0.74 0.11 75);   /* amber */
-    --c-orch:    oklch(0.74 0.11 200);  /* cyan */
-    --c-gen:     oklch(0.74 0.11 150);  /* green */
-    --c-hw:      oklch(0.74 0.11 40);   /* orange */
-    --c-t1:      oklch(0.74 0.11 290);  /* violet */
-    --c-t2:      oklch(0.74 0.11 310);  /* magenta-violet */
-    --c-t3:      oklch(0.74 0.11 330);  /* magenta */
-    --c-t4:      oklch(0.74 0.11 350);  /* pink */
-    --c-dedup:   oklch(0.74 0.11 10);   /* coral */
-    --c-consol:  oklch(0.74 0.11 215);  /* periwinkle */
-    --c-mig:     oklch(0.74 0.11 100);  /* lime */
-    --c-store:   oklch(0.74 0.11 175);  /* teal */
-    --c-tokens:  oklch(0.76 0.11 90);   /* yellow */
-    --c-inject:  oklch(0.74 0.11 240);  /* blue */
-    --c-macro:   oklch(0.74 0.11 270);  /* indigo */
-    --c-recap:   oklch(0.74 0.11 55);   /* warm amber */
-    --c-test:    oklch(0.74 0.11 130);  /* spring green */
-    --c-final:   oklch(0.86 0.10 95);   /* bright */
-  }
+        --c-events: oklch(0.74 0.11 75); /* amber */
+        --c-orch: oklch(0.74 0.11 200); /* cyan */
+        --c-gen: oklch(0.74 0.11 150); /* green */
+        --c-hw: oklch(0.74 0.11 40); /* orange */
+        --c-t1: oklch(0.74 0.11 290); /* violet */
+        --c-t2: oklch(0.74 0.11 310); /* magenta-violet */
+        --c-t3: oklch(0.74 0.11 330); /* magenta */
+        --c-t4: oklch(0.74 0.11 350); /* pink */
+        --c-dedup: oklch(0.74 0.11 10); /* coral */
+        --c-consol: oklch(0.74 0.11 215); /* periwinkle */
+        --c-mig: oklch(0.74 0.11 100); /* lime */
+        --c-store: oklch(0.74 0.11 175); /* teal */
+        --c-tokens: oklch(0.76 0.11 90); /* yellow */
+        --c-inject: oklch(0.74 0.11 240); /* blue */
+        --c-macro: oklch(0.74 0.11 270); /* indigo */
+        --c-recap: oklch(0.74 0.11 55); /* warm amber */
+        --c-test: oklch(0.74 0.11 130); /* spring green */
+        --c-final: oklch(0.86 0.1 95); /* bright */
+      }
 
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--ink);
-    font-family: var(--sans);
-    font-feature-settings: "ss01","cv11";
-    -webkit-font-smoothing: antialiased;
-    background-image:
-      radial-gradient(1200px 800px at 10% -10%, oklch(0.25 0.06 260 / 0.35), transparent 60%),
-      radial-gradient(1100px 700px at 110% 30%, oklch(0.25 0.06 320 / 0.25), transparent 60%),
-      radial-gradient(1000px 700px at 50% 120%, oklch(0.25 0.06 180 / 0.25), transparent 60%);
-    background-attachment: fixed;
-  }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-feature-settings: 'ss01', 'cv11';
+        -webkit-font-smoothing: antialiased;
+        background-image:
+          radial-gradient(1200px 800px at 10% -10%, oklch(0.25 0.06 260 / 0.35), transparent 60%),
+          radial-gradient(1100px 700px at 110% 30%, oklch(0.25 0.06 320 / 0.25), transparent 60%),
+          radial-gradient(1000px 700px at 50% 120%, oklch(0.25 0.06 180 / 0.25), transparent 60%);
+        background-attachment: fixed;
+      }
 
-  /* faint dotted grid */
-  body::before {
-    content: "";
-    position: fixed; inset: 0;
-    background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
-    background-size: 24px 24px;
-    pointer-events: none;
-    z-index: 0;
-  }
+      /* faint dotted grid */
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+        background-size: 24px 24px;
+        pointer-events: none;
+        z-index: 0;
+      }
 
-  .canvas {
-    position: relative;
-    z-index: 1;
-    max-width: 1680px;
-    margin: 0 auto;
-    padding: 56px 48px 96px;
-  }
+      .canvas {
+        position: relative;
+        z-index: 1;
+        max-width: 1680px;
+        margin: 0 auto;
+        padding: 56px 48px 96px;
+      }
 
-  /* SVG connector layer sits behind cards but in front of the body grid */
-  #connectors {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 0;
-    overflow: visible;
-  }
-  .masthead, .legend, .arch-grid, footer { position: relative; z-index: 2; }
-  .section, .final-node, .row-2, .row-2-eq { position: relative; z-index: 2; }
+      /* SVG connector layer sits behind cards but in front of the body grid */
+      #connectors {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 0;
+        overflow: visible;
+      }
+      .masthead,
+      .legend,
+      .arch-grid,
+      footer {
+        position: relative;
+        z-index: 2;
+      }
+      .section,
+      .final-node,
+      .row-2,
+      .row-2-eq {
+        position: relative;
+        z-index: 2;
+      }
 
-  /* ── Masthead ───────────────────────────────────────────── */
-  .masthead {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 32px;
-    align-items: end;
-    padding-bottom: 28px;
-    border-bottom: 1px solid var(--line);
-    margin-bottom: 40px;
-  }
-  .masthead .eyebrow {
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--ink-3);
-    margin-bottom: 14px;
-  }
-  .masthead h1 {
-    font-size: 56px;
-    line-height: 0.95;
-    margin: 0;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    background: linear-gradient(in oklch 120deg,
-      oklch(0.82 0.03 250) 0%,
-      oklch(0.72 0.09 268) 50%,
-      oklch(0.62 0.09 320) 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  .masthead .sub {
-    color: var(--ink-2);
-    font-size: 16px;
-    max-width: 760px;
-    margin-top: 14px;
-    line-height: 1.5;
-  }
-  .masthead .meta {
-    text-align: right;
-    color: var(--ink-3);
-    font-family: var(--mono);
-    font-size: 11px;
-    line-height: 1.7;
-  }
-  .meta .row { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
-  .meta .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-final); box-shadow: 0 0 12px var(--c-final); }
-  .meta .k { color: var(--ink-3); }
-  .meta .v { color: var(--ink); }
+      /* ── Masthead ───────────────────────────────────────────── */
+      .masthead {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 32px;
+        align-items: end;
+        padding-bottom: 28px;
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 40px;
+      }
+      .masthead .eyebrow {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-bottom: 14px;
+      }
+      .masthead h1 {
+        font-size: 56px;
+        line-height: 0.95;
+        margin: 0;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        background: linear-gradient(
+          in oklch 120deg,
+          oklch(0.82 0.03 250) 0%,
+          oklch(0.72 0.09 268) 50%,
+          oklch(0.62 0.09 320) 100%
+        );
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .masthead .sub {
+        color: var(--ink-2);
+        font-size: 16px;
+        max-width: 760px;
+        margin-top: 14px;
+        line-height: 1.5;
+      }
+      .masthead .meta {
+        text-align: right;
+        color: var(--ink-3);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.7;
+      }
+      .meta .row {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        align-items: center;
+      }
+      .meta .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--c-final);
+        box-shadow: 0 0 12px var(--c-final);
+      }
+      .meta .k {
+        color: var(--ink-3);
+      }
+      .meta .v {
+        color: var(--ink);
+      }
 
-  /* ── Legend ─────────────────────────────────────────────── */
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 18px;
-    padding: 14px 18px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: linear-gradient(180deg, var(--panel), var(--panel-2));
-    margin-bottom: 36px;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--ink-2);
-  }
-  .legend .item { display: inline-flex; align-items: center; gap: 8px; }
-  .legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+      /* ── Legend ─────────────────────────────────────────────── */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        padding: 14px 18px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        margin-bottom: 36px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-2);
+      }
+      .legend .item {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .legend .sw {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
 
-  /* ── Sections ──────────────────────────────────────────── */
-  .section {
-    --accent: var(--ink);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background:
-      linear-gradient(180deg, color-mix(in oklch, var(--accent) 4%, var(--panel)) 0%, var(--panel-2) 60%);
-    padding: 22px 22px 24px;
-    position: relative;
-    overflow: hidden;
-  }
-  .section::before {
-    content: "";
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 3px;
-    background: var(--accent);
-    box-shadow: 0 0 18px color-mix(in oklch, var(--accent) 70%, transparent);
-  }
-  .section-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 18px;
-    margin-bottom: 18px;
-    padding-bottom: 14px;
-    border-bottom: 1px dashed var(--line-2);
-  }
-  .section-head .title-wrap { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  .section-head .num {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--accent);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    padding: 4px 8px;
-    border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent);
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--accent) 8%, transparent);
-  }
-  .section-head h2 {
-    margin: 0;
-    font-size: 22px;
-    letter-spacing: -0.01em;
-    font-weight: 700;
-  }
-  .section-head .blurb {
-    color: var(--ink-3);
-    font-size: 12px;
-    font-family: var(--mono);
-    max-width: 540px;
-    text-align: right;
-    line-height: 1.55;
-  }
+      /* ── Sections ──────────────────────────────────────────── */
+      .section {
+        --accent: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: linear-gradient(
+          180deg,
+          color-mix(in oklch, var(--accent) 4%, var(--panel)) 0%,
+          var(--panel-2) 60%
+        );
+        padding: 22px 22px 24px;
+        position: relative;
+        overflow: hidden;
+      }
+      .section::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--accent);
+        box-shadow: 0 0 18px color-mix(in oklch, var(--accent) 70%, transparent);
+      }
+      .section-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 18px;
+        padding-bottom: 14px;
+        border-bottom: 1px dashed var(--line-2);
+      }
+      .section-head .title-wrap {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .section-head .num {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--accent);
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        padding: 4px 8px;
+        border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent);
+        border-radius: 999px;
+        background: color-mix(in oklch, var(--accent) 8%, transparent);
+      }
+      .section-head h2 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: -0.01em;
+        font-weight: 700;
+      }
+      .section-head .blurb {
+        color: var(--ink-3);
+        font-size: 12px;
+        font-family: var(--mono);
+        max-width: 540px;
+        text-align: right;
+        line-height: 1.55;
+      }
 
-  /* node grid */
-  .nodes { display: grid; gap: 12px; }
-  .nodes.cols-2 { grid-template-columns: repeat(2, 1fr); }
-  .nodes.cols-3 { grid-template-columns: repeat(3, 1fr); }
-  .nodes.cols-4 { grid-template-columns: repeat(4, 1fr); }
+      /* node grid */
+      .nodes {
+        display: grid;
+        gap: 12px;
+      }
+      .nodes.cols-2 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .nodes.cols-3 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .nodes.cols-4 {
+        grid-template-columns: repeat(4, 1fr);
+      }
 
-  /* node card */
-  .node {
-    border: 1px solid var(--line-2);
-    border-radius: 10px;
-    background: var(--bg-2);
-    padding: 14px 14px 14px 16px;
-    position: relative;
-    transition: transform .15s ease, border-color .15s ease;
-  }
-  .node:hover { border-color: var(--accent); transform: translateY(-1px); }
-  .node .ntitle {
-    display: flex; align-items: center; gap: 10px;
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--ink);
-    margin-bottom: 8px;
-  }
-  .node .ntitle .tag {
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--accent);
-    border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);
-    background: color-mix(in oklch, var(--accent) 6%, transparent);
-    padding: 2px 6px;
-    border-radius: 4px;
-    letter-spacing: 0.06em;
-  }
-  .node .ntitle .file {
-    font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--ink-3);
-    margin-left: auto;
-  }
-  .node ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--ink-2);
-    line-height: 1.6;
-  }
-  .node ul li {
-    padding-left: 14px;
-    position: relative;
-  }
-  .node ul li::before {
-    content: "";
-    position: absolute;
-    left: 2px; top: 8px;
-    width: 5px; height: 1px;
-    background: var(--ink-3);
-  }
-  .node ul li.k { color: color-mix(in oklch, var(--accent) 70%, var(--ink)); }
-  .node ul li.mute { color: var(--ink-3); }
+      /* node card */
+      .node {
+        border: 1px solid var(--line-2);
+        border-radius: 10px;
+        background: var(--bg-2);
+        padding: 14px 14px 14px 16px;
+        position: relative;
+        transition:
+          transform 0.15s ease,
+          border-color 0.15s ease;
+      }
+      .node:hover {
+        border-color: var(--accent);
+        transform: translateY(-1px);
+      }
+      .node .ntitle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 13px;
+        color: var(--ink);
+        margin-bottom: 8px;
+      }
+      .node .ntitle .tag {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--accent);
+        border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);
+        background: color-mix(in oklch, var(--accent) 6%, transparent);
+        padding: 2px 6px;
+        border-radius: 4px;
+        letter-spacing: 0.06em;
+      }
+      .node .ntitle .file {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--ink-3);
+        margin-left: auto;
+      }
+      .node ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-2);
+        line-height: 1.6;
+      }
+      .node ul li {
+        padding-left: 14px;
+        position: relative;
+      }
+      .node ul li::before {
+        content: '';
+        position: absolute;
+        left: 2px;
+        top: 8px;
+        width: 5px;
+        height: 1px;
+        background: var(--ink-3);
+      }
+      .node ul li.k {
+        color: color-mix(in oklch, var(--accent) 70%, var(--ink));
+      }
+      .node ul li.mute {
+        color: var(--ink-3);
+      }
 
-  /* big-zone wrapping for tiers / storage */
-  .zone {
-    border: 1px dashed var(--line-2);
-    border-radius: 10px;
-    padding: 14px;
-    background: linear-gradient(180deg, transparent, color-mix(in oklch, var(--accent) 3%, transparent));
-  }
-  .zone-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 12px;
-  }
-  .zone-head .zh-title {
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-  .zone-head .zh-note {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--ink-3);
-  }
+      /* big-zone wrapping for tiers / storage */
+      .zone {
+        border: 1px dashed var(--line-2);
+        border-radius: 10px;
+        padding: 14px;
+        background: linear-gradient(
+          180deg,
+          transparent,
+          color-mix(in oklch, var(--accent) 3%, transparent)
+        );
+      }
+      .zone-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 12px;
+      }
+      .zone-head .zh-title {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .zone-head .zh-note {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-3);
+      }
 
-  /* layout grid for the whole architecture */
-  .arch-grid {
-    display: grid;
-    gap: 22px;
-  }
-  .row-2 { display: grid; gap: 22px; grid-template-columns: 1.4fr 1fr; }
-  .row-2-eq { display: grid; gap: 22px; grid-template-columns: 1fr 1fr; }
+      /* layout grid for the whole architecture */
+      .arch-grid {
+        display: grid;
+        gap: 22px;
+      }
+      .row-2 {
+        display: grid;
+        gap: 22px;
+        grid-template-columns: 1.4fr 1fr;
+      }
+      .row-2-eq {
+        display: grid;
+        gap: 22px;
+        grid-template-columns: 1fr 1fr;
+      }
 
-  /* Section-specific accents */
-  .s-events   { --accent: var(--c-events); }
-  .s-orch     { --accent: var(--c-orch); }
-  .s-gen      { --accent: var(--c-gen); }
-  .s-hw       { --accent: var(--c-hw); }
-  .s-pipe     { --accent: var(--c-t2); }
-  .s-t1       { --accent: var(--c-t1); }
-  .s-t2       { --accent: var(--c-t2); }
-  .s-t3       { --accent: var(--c-t3); }
-  .s-t4       { --accent: var(--c-t4); }
-  .s-dedup    { --accent: var(--c-dedup); }
-  .s-consol   { --accent: var(--c-consol); }
-  .s-mig      { --accent: var(--c-mig); }
-  .s-store    { --accent: var(--c-store); }
-  .s-tokens   { --accent: var(--c-tokens); }
-  .s-inject   { --accent: var(--c-inject); }
-  .s-macro    { --accent: var(--c-macro); }
-  .s-recap    { --accent: var(--c-recap); }
-  .s-test     { --accent: var(--c-test); }
-  .s-final    { --accent: var(--c-final); }
+      /* Section-specific accents */
+      .s-events {
+        --accent: var(--c-events);
+      }
+      .s-orch {
+        --accent: var(--c-orch);
+      }
+      .s-gen {
+        --accent: var(--c-gen);
+      }
+      .s-hw {
+        --accent: var(--c-hw);
+      }
+      .s-pipe {
+        --accent: var(--c-t2);
+      }
+      .s-t1 {
+        --accent: var(--c-t1);
+      }
+      .s-t2 {
+        --accent: var(--c-t2);
+      }
+      .s-t3 {
+        --accent: var(--c-t3);
+      }
+      .s-t4 {
+        --accent: var(--c-t4);
+      }
+      .s-dedup {
+        --accent: var(--c-dedup);
+      }
+      .s-consol {
+        --accent: var(--c-consol);
+      }
+      .s-mig {
+        --accent: var(--c-mig);
+      }
+      .s-store {
+        --accent: var(--c-store);
+      }
+      .s-tokens {
+        --accent: var(--c-tokens);
+      }
+      .s-inject {
+        --accent: var(--c-inject);
+      }
+      .s-macro {
+        --accent: var(--c-macro);
+      }
+      .s-recap {
+        --accent: var(--c-recap);
+      }
+      .s-test {
+        --accent: var(--c-test);
+      }
+      .s-final {
+        --accent: var(--c-final);
+      }
 
-  /* flow arrow rail — now hidden; replaced by SVG connectors */
-  .rail { display: none; }
-  .rail.legacy {
-    display: grid;
-    grid-template-columns: 24px 1fr;
-    gap: 14px;
-    align-items: center;
-    margin: -4px 0 -4px 12px;
-    color: var(--ink-3);
-    font-family: var(--mono);
-    font-size: 10.5px;
-    letter-spacing: 0.06em;
-  }
-  .rail .glyph {
-    color: color-mix(in oklch, var(--rail-color, var(--ink-3)) 90%, white);
-    text-align: center;
-    font-size: 16px;
-    line-height: 1;
-  }
-  .rail span em {
-    font-style: normal;
-    color: var(--ink-2);
-  }
+      /* flow arrow rail — now hidden; replaced by SVG connectors */
+      .rail {
+        display: none;
+      }
+      .rail.legacy {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 14px;
+        align-items: center;
+        margin: -4px 0 -4px 12px;
+        color: var(--ink-3);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.06em;
+      }
+      .rail .glyph {
+        color: color-mix(in oklch, var(--rail-color, var(--ink-3)) 90%, white);
+        text-align: center;
+        font-size: 16px;
+        line-height: 1;
+      }
+      .rail span em {
+        font-style: normal;
+        color: var(--ink-2);
+      }
 
-  /* final node */
-  .final-node {
-    border: 1px solid color-mix(in oklch, var(--c-final) 60%, transparent);
-    border-radius: 14px;
-    padding: 28px 28px;
-    background:
-      radial-gradient(400px 200px at 50% 0%, color-mix(in oklch, var(--c-final) 15%, transparent), transparent 70%),
-      linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
-    text-align: center;
-    position: relative;
-    overflow: hidden;
-  }
-  .final-node::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      linear-gradient(90deg, transparent 0%, color-mix(in oklch, var(--c-final) 30%, transparent) 50%, transparent 100%);
-    height: 1px;
-    top: 0;
-  }
-  .final-node .label {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--c-final);
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    margin-bottom: 10px;
-  }
-  .final-node .name {
-    font-weight: 800;
-    font-size: 30px;
-    letter-spacing: -0.01em;
-  }
-  .final-node .note {
-    margin-top: 10px;
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--ink-2);
-  }
+      /* final node */
+      .final-node {
+        border: 1px solid color-mix(in oklch, var(--c-final) 60%, transparent);
+        border-radius: 14px;
+        padding: 28px 28px;
+        background:
+          radial-gradient(
+            400px 200px at 50% 0%,
+            color-mix(in oklch, var(--c-final) 15%, transparent),
+            transparent 70%
+          ),
+          linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+      .final-node::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          color-mix(in oklch, var(--c-final) 30%, transparent) 50%,
+          transparent 100%
+        );
+        height: 1px;
+        top: 0;
+      }
+      .final-node .label {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--c-final);
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .final-node .name {
+        font-weight: 800;
+        font-size: 30px;
+        letter-spacing: -0.01em;
+      }
+      .final-node .note {
+        margin-top: 10px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--ink-2);
+      }
 
-  /* footnote / data-flow connectors row */
-  .flow-row {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 10px;
-    margin: 8px 0 -4px;
-  }
-  .flow-chip {
-    border: 1px solid var(--line-2);
-    border-left: 2px solid var(--accent, var(--ink-3));
-    border-radius: 6px;
-    background: var(--bg-2);
-    padding: 8px 10px;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--ink-2);
-    line-height: 1.45;
-  }
-  .flow-chip b {
-    color: var(--accent, var(--ink));
-    font-weight: 600;
-    display: block;
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    margin-bottom: 3px;
-  }
+      /* footnote / data-flow connectors row */
+      .flow-row {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+        margin: 8px 0 -4px;
+      }
+      .flow-chip {
+        border: 1px solid var(--line-2);
+        border-left: 2px solid var(--accent, var(--ink-3));
+        border-radius: 6px;
+        background: var(--bg-2);
+        padding: 8px 10px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--ink-2);
+        line-height: 1.45;
+      }
+      .flow-chip b {
+        color: var(--accent, var(--ink));
+        font-weight: 600;
+        display: block;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 3px;
+      }
 
-  /* footer */
-  footer {
-    margin-top: 56px;
-    padding-top: 24px;
-    border-top: 1px solid var(--line);
-    display: flex;
-    justify-content: space-between;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--ink-3);
-    letter-spacing: 0.06em;
-  }
-  footer .stamp { color: var(--ink-2); }
-  footer a { color: var(--ink-3); text-decoration: none; }
-  footer a:hover { color: var(--ink-2); }
+      /* footer */
+      footer {
+        margin-top: 56px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-3);
+        letter-spacing: 0.06em;
+      }
+      footer .stamp {
+        color: var(--ink-2);
+      }
+      footer a {
+        color: var(--ink-3);
+        text-decoration: none;
+      }
+      footer a:hover {
+        color: var(--ink-2);
+      }
 
-  /* small breakpoint adjustments */
-  @media (max-width: 1100px) {
-    .row-2, .row-2-eq { grid-template-columns: 1fr; }
-    .nodes.cols-3, .nodes.cols-4 { grid-template-columns: repeat(2, 1fr); }
-    .masthead { grid-template-columns: 1fr; }
-    .masthead .meta { text-align: left; }
-    .meta .row { justify-content: flex-start; }
-    .masthead h1 { font-size: 40px; }
-  }
-  @media (max-width: 640px) {
-    .nodes.cols-2, .nodes.cols-3, .nodes.cols-4 { grid-template-columns: 1fr; }
-    .canvas { padding: 32px 18px 64px; }
-  }
-</style>
-</head>
-<body>
-<div class="canvas">
+      /* small breakpoint adjustments */
+      @media (max-width: 1100px) {
+        .row-2,
+        .row-2-eq {
+          grid-template-columns: 1fr;
+        }
+        .nodes.cols-3,
+        .nodes.cols-4 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .masthead {
+          grid-template-columns: 1fr;
+        }
+        .masthead .meta {
+          text-align: left;
+        }
+        .meta .row {
+          justify-content: flex-start;
+        }
+        .masthead h1 {
+          font-size: 40px;
+        }
+      }
+      @media (max-width: 640px) {
+        .nodes.cols-2,
+        .nodes.cols-3,
+        .nodes.cols-4 {
+          grid-template-columns: 1fr;
+        }
+        .canvas {
+          padding: 32px 18px 64px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="canvas">
+      <svg id="connectors" aria-hidden="true"></svg>
 
-  <svg id="connectors" aria-hidden="true"></svg>
-
-  <!-- ── Masthead ───────────────────────────────────────── -->
-  <header class="masthead">
-    <div>
-      <div class="eyebrow">SillyTavern Extension · System Architecture · v1.8.3</div>
-      <h1>Smart Memory</h1>
-      <p class="sub">A multi-tier memory extraction, deduplication, and injection pipeline for long-form
-      LLM roleplay. Hardware-adaptive, model-agnostic, and resilient to mid-flight chat switches and swipes.</p>
-    </div>
-    <div class="meta">
-      <div class="row"><span class="dot"></span><span class="k">status</span><span class="v">production</span></div>
-      <div class="row"><span class="k">tiers</span><span class="v">4 extraction + dedup + consolidation + injection</span></div>
-      <div class="row"><span class="k">profiles</span><span class="v">A · Ollama/WebLLM &nbsp; B · Main/OpenAI</span></div>
-      <div class="row"><span class="k">storage</span><span class="v">extension_settings + chatMetadata</span></div>
-      <div class="row"><span class="k">injection slots</span><span class="v">13 named</span></div>
-    </div>
-  </header>
-
-  <!-- Legend -->
-  <div class="legend">
-    <span class="item"><span class="sw" style="background:var(--c-events)"></span>Events</span>
-    <span class="item"><span class="sw" style="background:var(--c-orch)"></span>Orchestration</span>
-    <span class="item"><span class="sw" style="background:var(--c-gen)"></span>Generation</span>
-    <span class="item"><span class="sw" style="background:var(--c-hw)"></span>Hardware Profile</span>
-    <span class="item"><span class="sw" style="background:var(--c-t1)"></span>T1 · Compaction</span>
-    <span class="item"><span class="sw" style="background:var(--c-t2)"></span>T2 · Scene Layer</span>
-    <span class="item"><span class="sw" style="background:var(--c-t3)"></span>T3 · Batch Extraction</span>
-    <span class="item"><span class="sw" style="background:var(--c-t4)"></span>T4 · Derived Layers</span>
-    <span class="item"><span class="sw" style="background:var(--c-dedup)"></span>Deduplication</span>
-    <span class="item"><span class="sw" style="background:var(--c-consol)"></span>Consolidation</span>
-    <span class="item"><span class="sw" style="background:var(--c-mig)"></span>Migration</span>
-    <span class="item"><span class="sw" style="background:var(--c-store)"></span>Storage</span>
-    <span class="item"><span class="sw" style="background:var(--c-tokens)"></span>Token Mgmt</span>
-    <span class="item"><span class="sw" style="background:var(--c-inject)"></span>Injection</span>
-    <span class="item"><span class="sw" style="background:var(--c-macro)"></span>Macros</span>
-    <span class="item"><span class="sw" style="background:var(--c-final)"></span>Final Prompt</span>
-  </div>
-
-  <div class="arch-grid">
-
-    <!-- ── 01 EVENTS ───────────────────────────────────────── -->
-    <section class="section s-events" data-arch="events">
-      <div class="section-head">
-        <div class="title-wrap">
-          <span class="num">01 · Input</span>
-          <h2>⚡ SillyTavern Events</h2>
+      <!-- ── Masthead ───────────────────────────────────────── -->
+      <header class="masthead">
+        <div>
+          <div class="eyebrow">SillyTavern Extension · System Architecture · v1.8.3</div>
+          <h1>Smart Memory</h1>
+          <p class="sub">
+            A multi-tier memory extraction, deduplication, and injection pipeline for long-form LLM
+            roleplay. Hardware-adaptive, model-agnostic, and resilient to mid-flight chat switches
+            and swipes.
+          </p>
         </div>
-        <div class="blurb">Entry points wired into ST's event bus — solo + group flows + swipe interruption.</div>
+        <div class="meta">
+          <div class="row">
+            <span class="dot"></span><span class="k">status</span><span class="v">production</span>
+          </div>
+          <div class="row">
+            <span class="k">tiers</span
+            ><span class="v">4 extraction + dedup + consolidation + injection</span>
+          </div>
+          <div class="row">
+            <span class="k">profiles</span
+            ><span class="v">A · Ollama/WebLLM &nbsp; B · Main/OpenAI</span>
+          </div>
+          <div class="row">
+            <span class="k">storage</span><span class="v">extension_settings + chatMetadata</span>
+          </div>
+          <div class="row">
+            <span class="k">injection slots</span><span class="v">13 named</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Legend -->
+      <div class="legend">
+        <span class="item"><span class="sw" style="background: var(--c-events)"></span>Events</span>
+        <span class="item"
+          ><span class="sw" style="background: var(--c-orch)"></span>Orchestration</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-gen)"></span>Generation</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-hw)"></span>Hardware Profile</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-t1)"></span>T1 · Compaction</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-t2)"></span>T2 · Scene Layer</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-t3)"></span>T3 · Batch Extraction</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-t4)"></span>T4 · Derived Layers</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-dedup)"></span>Deduplication</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-consol)"></span>Consolidation</span
+        >
+        <span class="item"><span class="sw" style="background: var(--c-mig)"></span>Migration</span>
+        <span class="item"><span class="sw" style="background: var(--c-store)"></span>Storage</span>
+        <span class="item"
+          ><span class="sw" style="background: var(--c-tokens)"></span>Token Mgmt</span
+        >
+        <span class="item"
+          ><span class="sw" style="background: var(--c-inject)"></span>Injection</span
+        >
+        <span class="item"><span class="sw" style="background: var(--c-macro)"></span>Macros</span>
+        <span class="item"
+          ><span class="sw" style="background: var(--c-final)"></span>Final Prompt</span
+        >
       </div>
-      <div class="nodes cols-4">
-        <div class="node">
-          <div class="ntitle">Message rendered <span class="tag">EV1</span></div>
-          <ul>
-            <li>CHARACTER_MESSAGE_RENDERED</li>
-            <li class="mute">makeLast — runs after all other extensions</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Chat lifecycle <span class="tag">EV2</span></div>
-          <ul>
-            <li>CHAT_CHANGED</li>
-            <li>CHAT_LOADED</li>
-            <li class="mute">debounced</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Group orchestration <span class="tag">EV3</span></div>
-          <ul>
-            <li>GROUP_WRAPPER_STARTED</li>
-            <li>GROUP_MEMBER_DRAFTED</li>
-            <li>GROUP_WRAPPER_FINISHED</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Swipe abort <span class="tag">EV4</span></div>
-          <ul>
-            <li>MESSAGE_SWIPED</li>
-            <li class="k">→ abort in-flight LLM call</li>
-          </ul>
-        </div>
-      </div>
-    </section>
 
-    <div class="rail" style="--rail-color: var(--c-orch)">
-      <span class="glyph">↓</span><span><em>dispatch</em> → orchestration scheduler</span>
-    </div>
-
-    <!-- ── 02 ORCHESTRATION ────────────────────────────────── -->
-    <section class="section s-orch" data-arch="orch">
-      <div class="section-head">
-        <div class="title-wrap">
-          <span class="num">02 · Control</span>
-          <h2>🎛️ Orchestration — <code style="font-family:var(--mono);font-size:18px;color:var(--ink-2)">index.js</code></h2>
-        </div>
-        <div class="blurb">Solo vs. group flows, message-count gating, and clean abort on mid-operation chat change.</div>
-      </div>
-      <div class="nodes cols-3">
-        <div class="node">
-          <div class="ntitle">Solo chat flow <span class="tag">OR1</span></div>
-          <ul>
-            <li>messagesSinceLastExtraction counter</li>
-            <li class="mute">batches every N messages</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Group chat flow <span class="tag">OR2</span></div>
-          <ul>
-            <li>sceneMessageBuffer · roundResponders</li>
-            <li class="mute">per-round batching</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">CHAT_SWITCHED sentinel <span class="tag">OR3</span></div>
-          <ul>
-            <li>clean abort on mid-operation chat change</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── 03 + 04 GEN + HW ────────────────────────────────── -->
-    <div class="row-2">
-      <section class="section s-gen" data-arch="gen">
-        <div class="section-head">
-          <div class="title-wrap">
-            <span class="num">03 · LLM Generation</span>
-            <h2>🤖 generate.js</h2>
-          </div>
-          <div class="blurb">Backend-agnostic. All reasoning tokens stripped before parsers see output.</div>
-        </div>
-        <div class="nodes cols-2">
-          <div class="node">
-            <div class="ntitle">Main API <span class="tag">GM</span></div>
-            <ul><li>generateRaw</li></ul>
-          </div>
-          <div class="node">
-            <div class="ntitle">Ollama <span class="tag">GO</span></div>
-            <ul>
-              <li>/api/chat</li>
-              <li class="k">8192-token budget</li>
-            </ul>
-          </div>
-          <div class="node">
-            <div class="ntitle">OpenAI-compat <span class="tag">GO2</span></div>
-            <ul><li>/v1/chat/completions</li></ul>
-          </div>
-          <div class="node">
-            <div class="ntitle">WebLLM <span class="tag">GW</span></div>
-            <ul><li>in-browser inference</li></ul>
-          </div>
-        </div>
-        <div class="flow-row" style="grid-template-columns: 1fr; margin-top:12px">
-          <div class="flow-chip" style="--accent: var(--c-gen)">
-            <b>Think-block stripper · GT</b>
-            ⟨think⟩…⟨/think⟩ removed from every backend response <em>before</em> the extraction parsers see output.
-          </div>
-        </div>
-      </section>
-
-      <section class="section s-hw" data-arch="hw">
-        <div class="section-head">
-          <div class="title-wrap">
-            <span class="num">04 · Config</span>
-            <h2>⚙️ Hardware Profile</h2>
-          </div>
-          <div class="blurb">Auto-detected. Caps, thresholds, and policy depend on inferred model class.</div>
-        </div>
-        <div class="nodes cols-2">
-          <div class="node">
-            <div class="ntitle">Profile A <span class="tag">Ollama · WebLLM</span></div>
-            <ul>
-              <li>conservative per-type caps (2/pass)</li>
-              <li>manual continuity only</li>
-              <li>noun-derived triggers only</li>
-            </ul>
-          </div>
-          <div class="node">
-            <div class="ntitle">Profile B <span class="tag">Main · OpenAI-compat</span></div>
-            <ul>
-              <li>richer extraction (4/pass)</li>
-              <li>auto continuity check post-turn</li>
-              <li>auto canon regen on arc resolve</li>
-              <li>LLM-suggested context triggers</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <div class="rail" style="--rail-color: var(--c-t2)">
-      <span class="glyph">↓</span><span>generation results &nbsp;·&nbsp; <em>extraction prompts dispatched sequentially</em> &nbsp;·&nbsp; profile caps applied</span>
-    </div>
-
-    <!-- ── 05 EXTRACTION PIPELINE ──────────────────────────── -->
-    <section class="section s-pipe" data-arch="pipe">
-      <div class="section-head">
-        <div class="title-wrap">
-          <span class="num">05 · Extraction Pipeline</span>
-          <h2>⚙️ Four Tiers · Sequential</h2>
-        </div>
-        <div class="blurb">No <code style="font-family:var(--mono)">Promise.all</code>. Ollama serialises; parallel risks OOM on 8&nbsp;GB VRAM.</div>
-      </div>
-
-      <div class="arch-grid" style="gap:14px">
-
-        <!-- Tier 1 -->
-        <div class="zone" style="--accent: var(--c-t1)">
-          <div class="zone-head">
-            <span class="zh-title">Tier 1 · Compaction</span>
-            <span class="zh-note">progressive · extends summary, never rewrites</span>
-          </div>
-          <div class="nodes cols-1">
-            <div class="node" style="--accent: var(--c-t1)">
-              <div class="ntitle">Rolling summary <span class="tag">PC</span><span class="file">compaction.js</span></div>
-              <ul>
-                <li>Token-threshold check (configurable %)</li>
-                <li>Progressive UPDATE_SUMMARY prompt</li>
-                <li>extends existing summary, does not rewrite</li>
-                <li class="k">summaryEnd index tracks last included message</li>
-              </ul>
+      <div class="arch-grid">
+        <!-- ── 01 EVENTS ───────────────────────────────────────── -->
+        <section class="section s-events" data-arch="events">
+          <div class="section-head">
+            <div class="title-wrap">
+              <span class="num">01 · Input</span>
+              <h2>⚡ SillyTavern Events</h2>
             </div>
-          </div>
-        </div>
-
-        <!-- Tier 2 -->
-        <div class="zone" style="--accent: var(--c-t2)">
-          <div class="zone-head">
-            <span class="zh-title">Tier 2 · Scene Layer</span>
-            <span class="zh-note">scene-break detection drives downstream epistemic pass</span>
-          </div>
-          <div class="nodes cols-2">
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">Scene breaks <span class="tag">PS</span><span class="file">scenes.js</span></div>
-              <ul>
-                <li>heuristic patterns (location, time, cast)</li>
-                <li>+ optional AI yes/no check</li>
-                <li>2–3 sentence mini-summary per scene</li>
-                <li class="k">links source_memory_ids → scene entry</li>
-              </ul>
+            <div class="blurb">
+              Entry points wired into ST's event bus — solo + group flows + swipe interruption.
             </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">Epistemic map <span class="tag">PE</span><span class="file">epistemic.js</span></div>
-              <ul>
-                <li>fires once per scene break</li>
-                <li>per-character knowledge map</li>
-                <li>[knows] [suspects] [believes] [unaware]</li>
-                <li>[hiding] (subject → target)</li>
-                <li class="k">stored per-char · per-target</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tier 3 -->
-        <div class="zone" style="--accent: var(--c-t3)">
-          <div class="zone-head">
-            <span class="zh-title">Tier 3 · Batch Extraction</span>
-            <span class="zh-note">every N messages · feeds dedup pipeline</span>
           </div>
           <div class="nodes cols-4">
-            <div class="node" style="--accent: var(--c-t3)">
-              <div class="ntitle">Session <span class="tag">PB1</span><span class="file">session.js</span></div>
+            <div class="node">
+              <div class="ntitle">Message rendered <span class="tag">EV1</span></div>
               <ul>
-                <li>[scene] [revelation]</li>
-                <li>[development] [detail]</li>
-                <li class="k">dedup: cosine 0.82 / Jaccard 0.65</li>
-                <li class="mute">stored in chatMetadata</li>
+                <li>CHARACTER_MESSAGE_RENDERED</li>
+                <li class="mute">makeLast — runs after all other extensions</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-t3)">
-              <div class="ntitle">Long-term <span class="tag">PB2</span><span class="file">longterm.js</span></div>
+            <div class="node">
+              <div class="ntitle">Chat lifecycle <span class="tag">EV2</span></div>
               <ul>
-                <li>[fact] [relationship] [preference] [event]</li>
-                <li>+ relationship history (trusting·high…)</li>
-                <li>dedup + supersession detection</li>
-                <li>confidence decay over passes</li>
-                <li class="mute">extension_settings per character</li>
+                <li>CHAT_CHANGED</li>
+                <li>CHAT_LOADED</li>
+                <li class="mute">debounced</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-t3)">
-              <div class="ntitle">Arcs <span class="tag">PB3</span><span class="file">arcs.js</span></div>
+            <div class="node">
+              <div class="ntitle">Group orchestration <span class="tag">EV3</span></div>
               <ul>
-                <li>open plot threads</li>
-                <li>arc narrative summaries on resolve</li>
-                <li>persistent arcs survive across chats</li>
-                <li>100-msg sliding window</li>
-                <li class="mute">extension_settings + chatMetadata</li>
+                <li>GROUP_WRAPPER_STARTED</li>
+                <li>GROUP_MEMBER_DRAFTED</li>
+                <li>GROUP_WRAPPER_FINISHED</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-t3)">
-              <div class="ntitle">State ledger <span class="tag">PB4</span><span class="file">state-ledger.js</span></div>
+            <div class="node">
+              <div class="ntitle">Swipe abort <span class="tag">EV4</span></div>
               <ul>
-                <li>mutable entity state snapshots</li>
-                <li>character: location · mood · injuries · goal</li>
-                <li>object: condition · owner</li>
-                <li>place: occupants · hazards</li>
-                <li>faction: leadership · objective</li>
-                <li class="mute">chatMetadata (not persistent)</li>
+                <li>MESSAGE_SWIPED</li>
+                <li class="k">→ abort in-flight LLM call</li>
               </ul>
             </div>
           </div>
+        </section>
+
+        <div class="rail" style="--rail-color: var(--c-orch)">
+          <span class="glyph">↓</span><span><em>dispatch</em> → orchestration scheduler</span>
         </div>
 
-        <!-- Tier 4 -->
-        <div class="zone" style="--accent: var(--c-t4)">
-          <div class="zone-head">
-            <span class="zh-title">Tier 4 · Derived Layers</span>
-            <span class="zh-note">built from upstream tier output, regenerated on cadence</span>
+        <!-- ── 02 ORCHESTRATION ────────────────────────────────── -->
+        <section class="section s-orch" data-arch="orch">
+          <div class="section-head">
+            <div class="title-wrap">
+              <span class="num">02 · Control</span>
+              <h2>
+                🎛️ Orchestration —
+                <code style="font-family: var(--mono); font-size: 18px; color: var(--ink-2)"
+                  >index.js</code
+                >
+              </h2>
+            </div>
+            <div class="blurb">
+              Solo vs. group flows, message-count gating, and clean abort on mid-operation chat
+              change.
+            </div>
           </div>
           <div class="nodes cols-3">
-            <div class="node" style="--accent: var(--c-t4)">
-              <div class="ntitle">Profiles <span class="tag">PD1</span><span class="file">profiles.js</span></div>
+            <div class="node">
+              <div class="ntitle">Solo chat flow <span class="tag">OR1</span></div>
               <ul>
-                <li>character · world · relationship matrix</li>
-                <li>regenerated every N messages</li>
-                <li>stale after 30 min (configurable)</li>
-                <li class="mute">chatMetadata.profiles</li>
+                <li>messagesSinceLastExtraction counter</li>
+                <li class="mute">batches every N messages</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-t4)">
-              <div class="ntitle">Canon <span class="tag">PD2</span><span class="file">canon.js</span></div>
+            <div class="node">
+              <div class="ntitle">Group chat flow <span class="tag">OR2</span></div>
               <ul>
-                <li>stable prose narrative</li>
-                <li>built from resolved arc summaries</li>
-                <li>+ long-term memories (confidence ≥ 2)</li>
-                <li>manual trigger</li>
-                <li class="mute">extension_settings per character</li>
+                <li>sceneMessageBuffer · roundResponders</li>
+                <li class="mute">per-round batching</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-t4)">
-              <div class="ntitle">Continuity <span class="tag">PD3</span><span class="file">continuity.js</span></div>
+            <div class="node">
+              <div class="ntitle">CHAT_SWITCHED sentinel <span class="tag">OR3</span></div>
               <ul>
-                <li>contradiction detection vs.</li>
-                <li class="mute">character card + long-term + session</li>
-                <li>optional one-shot repair note</li>
-                <li class="k">auto on Profile B · manual on Profile A</li>
+                <li>clean abort on mid-operation chat change</li>
               </ul>
             </div>
           </div>
-        </div>
+        </section>
 
-      </div>
-    </section>
-
-    <div class="rail" style="--rail-color: var(--c-dedup)">
-      <span class="glyph">↓</span><span><em>extraction candidates</em> → dedup &amp; supersession</span>
-    </div>
-
-    <!-- ── 06 DEDUPLICATION ────────────────────────────────── -->
-    <section class="section s-dedup" data-arch="dedup">
-      <div class="section-head">
-        <div class="title-wrap">
-          <span class="num">06 · Dedup</span>
-          <h2>🔍 Deduplication — <code style="font-family:var(--mono);font-size:18px;color:var(--ink-2)">embeddings.js + similarity.js</code></h2>
-        </div>
-        <div class="blurb">Embeddings preferred, Jaccard fallback. Classifier decides keep / supersede / re-confirm / drop.</div>
-      </div>
-
-      <div class="nodes cols-4">
-        <div class="node">
-          <div class="ntitle">Semantic embeddings <span class="tag">DE1</span></div>
-          <ul>
-            <li>Ollama /api/embed</li>
-            <li>or OpenAI /v1/embeddings</li>
-            <li class="mute">API key in ST secrets store</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Cosine similarity <span class="tag">DE2</span></div>
-          <ul>
-            <li class="k">dup ≥ 0.82 · same-topic ≥ 0.55 (Profile A)</li>
-            <li class="k">dup ≥ 0.85 · same-topic ≥ 0.52 (Profile B)</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Jaccard fallback <span class="tag">DE3</span></div>
-          <ul>
-            <li>word-overlap</li>
-            <li class="k">dup ≥ 0.65 · same-topic ≥ 0.40</li>
-            <li class="mute">auto when embeddings unavailable</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">batchVerify classifier <span class="tag">DE4</span></div>
-          <ul>
-            <li class="k">passed (new)</li>
-            <li class="k">superseded (state-change update)</li>
-            <li class="k">uncertain (model confirmation)</li>
-            <li class="k">rejected (duplicate)</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Supersession chains <span class="tag">DE5</span></div>
-          <ul>
-            <li>valid_from / valid_to message indices</li>
-            <li>retired memories preserved</li>
-            <li class="mute">excluded from injection</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Confidence decay <span class="tag">DE6</span></div>
-          <ul>
-            <li>unconfirmed counter per memory</li>
-            <li>boost + reset on re-extraction</li>
-            <li class="k">drop after 10 unconfirmed passes</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">In-session vector cache <span class="tag">DE7</span></div>
-          <ul>
-            <li>normalized text → float[] vector</li>
-            <li class="mute">cleared on chat change</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Flow</div>
-          <ul>
-            <li class="k">DE1 → DE2 + DE7</li>
-            <li class="k">DE3 ⇢ DE2 (fallback)</li>
-            <li class="k">DE2 → DE4 → DE5 + DE6</li>
-            <li class="mute">classified writes → Consolidation</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── 07 CONSOLIDATION ───────────────────── -->
-    <section class="section s-consol" data-arch="consol">
-      <div class="section-head">
-        <div class="title-wrap">
-          <span class="num">07 · Consolidation</span>
-          <h2>🧩 Consolidation — <code style="font-family:var(--mono);font-size:18px;color:var(--ink-2)">consolidation.js</code></h2>
-        </div>
-        <div class="blurb">Fires after dedup classification, before storage write. Per-type thresholds; LLM merges near-identical entries into richer single ones.</div>
-      </div>
-
-      <div class="nodes cols-3">
-        <div class="node">
-          <div class="ntitle">Trigger <span class="tag">CN1</span></div>
-          <ul>
-            <li>fires when entry count for a type crosses its threshold</li>
-            <li>per-type counters tracked independently</li>
-            <li class="mute">runs after dedup · before storage write</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Merge prompt <span class="tag">CN2</span></div>
-          <ul>
-            <li>collects candidates for a single type</li>
-            <li>asks model to merge near-identical / redundant entries</li>
-            <li class="k">output: fewer, richer entries</li>
-            <li class="mute">replaced entries retired via supersession</li>
-          </ul>
-        </div>
-        <div class="node">
-          <div class="ntitle">Scope <span class="tag">CN3</span></div>
-          <ul>
-            <li>runs for both long-term and session memory</li>
-            <li class="mute">independent per-tier passes</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="arch-grid" style="gap:14px; margin-top:14px">
-        <div class="zone" style="--accent: var(--c-consol)">
-          <div class="zone-head">
-            <span class="zh-title">Long-term thresholds</span>
-            <span class="zh-note">per type · independent counters</span>
-          </div>
-          <div class="nodes cols-4">
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">fact <span class="tag">CN-L1</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">stable knowledge synthesis</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">relationship <span class="tag">CN-L2</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">descriptors collapsed</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">preference <span class="tag">CN-L3</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">duplicates folded</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">event <span class="tag">CN-L4</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">co-occurring events combined</li></ul>
-            </div>
-          </div>
-        </div>
-
-        <div class="zone" style="--accent: var(--c-consol)">
-          <div class="zone-head">
-            <span class="zh-title">Session thresholds</span>
-            <span class="zh-note">per type · independent counters</span>
-          </div>
-          <div class="nodes cols-4">
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">scene <span class="tag">CN-S1</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">contiguous scenes folded</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">revelation <span class="tag">CN-S2</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">overlapping reveals merged</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">development <span class="tag">CN-S3</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">arc beats coalesced</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-consol)">
-              <div class="ntitle">detail <span class="tag">CN-S4</span></div>
-              <ul><li>threshold-gated merge pass</li><li class="mute">redundant details collapsed</li></ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── 07 MIGRATION + 08 STORAGE ───────────────────────── -->
-    <div class="row-2">
-      <section class="section s-store" data-arch="store">
-        <div class="section-head">
-          <div class="title-wrap">
-            <span class="num">08 · Storage</span>
-            <h2>💾 Two-Tier Storage</h2>
-          </div>
-          <div class="blurb">Persistent identity vs. ephemeral session state. Reset semantics differ by tier.</div>
-        </div>
-
-        <div class="arch-grid" style="gap:14px">
-          <div class="zone" style="--accent: var(--c-store)">
-            <div class="zone-head">
-              <span class="zh-title">Persistent · extension_settings</span>
-              <span class="zh-note">survives all sessions, all chats</span>
-            </div>
-            <div class="nodes cols-3">
-              <div class="node" style="--accent: var(--c-store)">
-                <div class="ntitle">Long-term memories <span class="tag">SP1</span></div>
-                <ul><li>fact · relationship · preference · event</li></ul>
+        <!-- ── 03 + 04 GEN + HW ────────────────────────────────── -->
+        <div class="row-2">
+          <section class="section s-gen" data-arch="gen">
+            <div class="section-head">
+              <div class="title-wrap">
+                <span class="num">03 · LLM Generation</span>
+                <h2>🤖 generate.js</h2>
               </div>
-              <div class="node" style="--accent: var(--c-store)">
-                <div class="ntitle">Relationship history <span class="tag">SP2</span></div>
-                <ul><li>descriptor + magnitude pairs</li><li class="mute">per character pair</li></ul>
-              </div>
-              <div class="node" style="--accent: var(--c-store)">
-                <div class="ntitle">Entity registry <span class="tag">SP3</span></div>
-                <ul><li>name · type · aliases</li><li>state card templates</li></ul>
-              </div>
-              <div class="node" style="--accent: var(--c-store)">
-                <div class="ntitle">Epistemic knowledge <span class="tag">SP4</span></div>
-                <ul><li>knows · suspects · believes · unaware · hiding</li><li class="mute">per character · per target</li></ul>
-              </div>
-              <div class="node" style="--accent: var(--c-store)">
-                <div class="ntitle">Persistent arcs <span class="tag">SP5</span></div>
-                <ul><li>cross-chat open threads</li></ul>
-              </div>
-              <div class="node" style="--accent: var(--c-store)">
-                <div class="ntitle">Canon document <span class="tag">SP6</span></div>
-                <ul><li>stable narrative prose</li></ul>
+              <div class="blurb">
+                Backend-agnostic. All reasoning tokens stripped before parsers see output.
               </div>
             </div>
-          </div>
-
-          <div class="zone" style="--accent: var(--c-t3)">
-            <div class="zone-head">
-              <span class="zh-title">Per-chat · chatMetadata</span>
-              <span class="zh-note">per conversation · reset on Fresh Start</span>
-            </div>
-            <div class="nodes cols-3">
-              <div class="node" style="--accent: var(--c-t3)">
-                <div class="ntitle">Short-term summary <span class="tag">SC1</span></div>
-                <ul><li>rolling progressive compaction</li></ul>
+            <div class="nodes cols-2">
+              <div class="node">
+                <div class="ntitle">Main API <span class="tag">GM</span></div>
+                <ul>
+                  <li>generateRaw</li>
+                </ul>
               </div>
-              <div class="node" style="--accent: var(--c-t3)">
-                <div class="ntitle">Session memories <span class="tag">SC2</span></div>
-                <ul><li>granular within-session details</li></ul>
+              <div class="node">
+                <div class="ntitle">Ollama <span class="tag">GO</span></div>
+                <ul>
+                  <li>/api/chat</li>
+                  <li class="k">8192-token budget</li>
+                </ul>
               </div>
-              <div class="node" style="--accent: var(--c-t3)">
-                <div class="ntitle">Scene history <span class="tag">SC3</span></div>
-                <ul><li>ordered mini-summaries</li></ul>
+              <div class="node">
+                <div class="ntitle">OpenAI-compat <span class="tag">GO2</span></div>
+                <ul>
+                  <li>/v1/chat/completions</li>
+                </ul>
               </div>
-              <div class="node" style="--accent: var(--c-t3)">
-                <div class="ntitle">Chat-scoped arcs <span class="tag">SC4</span></div>
-                <ul><li>open threads this conversation</li></ul>
-              </div>
-              <div class="node" style="--accent: var(--c-t3)">
-                <div class="ntitle">State ledger <span class="tag">SC5</span></div>
-                <ul><li>mutable entity snapshots</li></ul>
-              </div>
-              <div class="node" style="--accent: var(--c-t3)">
-                <div class="ntitle">Character profiles <span class="tag">SC6</span></div>
-                <ul><li>character · world · relations matrix</li></ul>
+              <div class="node">
+                <div class="ntitle">WebLLM <span class="tag">GW</span></div>
+                <ul>
+                  <li>in-browser inference</li>
+                </ul>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
+            <div class="flow-row" style="grid-template-columns: 1fr; margin-top: 12px">
+              <div class="flow-chip" style="--accent: var(--c-gen)">
+                <b>Think-block stripper · GT</b>
+                ⟨think⟩…⟨/think⟩ removed from every backend response <em>before</em> the extraction
+                parsers see output.
+              </div>
+            </div>
+          </section>
 
-      <section class="section s-mig" data-arch="mig">
-        <div class="section-head">
-          <div class="title-wrap">
-            <span class="num">09 · Migrations</span>
-            <h2>🔄 Schema Migration</h2>
-          </div>
-          <div class="blurb">graph-migration.js — never destructive.</div>
-        </div>
-        <div class="nodes cols-1">
-          <div class="node">
-            <div class="ntitle">Versioned store <span class="tag">MIG</span></div>
-            <ul>
-              <li>SCHEMA_VERSION stored per-character + per-chat</li>
-              <li>CHARACTER_MIGRATIONS + CHAT_MIGRATIONS registries</li>
-              <li>applied sequentially on every chat / character load</li>
-              <li class="k">never removes steps — old chats upgradeable from v0</li>
-            </ul>
-          </div>
+          <section class="section s-hw" data-arch="hw">
+            <div class="section-head">
+              <div class="title-wrap">
+                <span class="num">04 · Config</span>
+                <h2>⚙️ Hardware Profile</h2>
+              </div>
+              <div class="blurb">
+                Auto-detected. Caps, thresholds, and policy depend on inferred model class.
+              </div>
+            </div>
+            <div class="nodes cols-2">
+              <div class="node">
+                <div class="ntitle">Profile A <span class="tag">Ollama · WebLLM</span></div>
+                <ul>
+                  <li>conservative per-type caps (2/pass)</li>
+                  <li>manual continuity only</li>
+                  <li>noun-derived triggers only</li>
+                </ul>
+              </div>
+              <div class="node">
+                <div class="ntitle">Profile B <span class="tag">Main · OpenAI-compat</span></div>
+                <ul>
+                  <li>richer extraction (4/pass)</li>
+                  <li>auto continuity check post-turn</li>
+                  <li>auto canon regen on arc resolve</li>
+                  <li>LLM-suggested context triggers</li>
+                </ul>
+              </div>
+            </div>
+          </section>
         </div>
 
-        <div style="margin-top:14px">
-          <div class="section-head" style="margin-bottom:12px; padding-bottom:10px">
+        <div class="rail" style="--rail-color: var(--c-t2)">
+          <span class="glyph">↓</span
+          ><span
+            >generation results &nbsp;·&nbsp;
+            <em>extraction prompts dispatched sequentially</em> &nbsp;·&nbsp; profile caps
+            applied</span
+          >
+        </div>
+
+        <!-- ── 05 EXTRACTION PIPELINE ──────────────────────────── -->
+        <section class="section s-pipe" data-arch="pipe">
+          <div class="section-head">
             <div class="title-wrap">
-              <span class="num" style="--accent: var(--c-tokens); color: var(--c-tokens); border-color: color-mix(in oklch, var(--c-tokens) 50%, transparent); background: color-mix(in oklch, var(--c-tokens) 8%, transparent)">10 · Token Mgmt</span>
-              <h2 style="font-size:18px">📊 Budgets</h2>
+              <span class="num">05 · Extraction Pipeline</span>
+              <h2>⚙️ Four Tiers · Sequential</h2>
+            </div>
+            <div class="blurb">
+              No <code style="font-family: var(--mono)">Promise.all</code>. Ollama serialises;
+              parallel risks OOM on 8&nbsp;GB VRAM.
             </div>
           </div>
-          <div class="nodes cols-1" style="--accent: var(--c-tokens)">
-            <div class="node" style="--accent: var(--c-tokens)">
-              <div class="ntitle">Sliders <span class="tag">TK1</span></div>
+
+          <div class="arch-grid" style="gap: 14px">
+            <!-- Tier 1 -->
+            <div class="zone" style="--accent: var(--c-t1)">
+              <div class="zone-head">
+                <span class="zh-title">Tier 1 · Compaction</span>
+                <span class="zh-note">progressive · extends summary, never rewrites</span>
+              </div>
+              <div class="nodes cols-1">
+                <div class="node" style="--accent: var(--c-t1)">
+                  <div class="ntitle">
+                    Rolling summary <span class="tag">PC</span
+                    ><span class="file">compaction.js</span>
+                  </div>
+                  <ul>
+                    <li>Token-threshold check (configurable %)</li>
+                    <li>Progressive UPDATE_SUMMARY prompt</li>
+                    <li>extends existing summary, does not rewrite</li>
+                    <li class="k">summaryEnd index tracks last included message</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tier 2 -->
+            <div class="zone" style="--accent: var(--c-t2)">
+              <div class="zone-head">
+                <span class="zh-title">Tier 2 · Scene Layer</span>
+                <span class="zh-note">scene-break detection drives downstream epistemic pass</span>
+              </div>
+              <div class="nodes cols-2">
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    Scene breaks <span class="tag">PS</span><span class="file">scenes.js</span>
+                  </div>
+                  <ul>
+                    <li>heuristic patterns (location, time, cast)</li>
+                    <li>+ optional AI yes/no check</li>
+                    <li>2–3 sentence mini-summary per scene</li>
+                    <li class="k">links source_memory_ids → scene entry</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    Epistemic map <span class="tag">PE</span><span class="file">epistemic.js</span>
+                  </div>
+                  <ul>
+                    <li>fires once per scene break</li>
+                    <li>per-character knowledge map</li>
+                    <li>[knows] [suspects] [believes] [unaware]</li>
+                    <li>[hiding] (subject → target)</li>
+                    <li class="k">stored per-char · per-target</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tier 3 -->
+            <div class="zone" style="--accent: var(--c-t3)">
+              <div class="zone-head">
+                <span class="zh-title">Tier 3 · Batch Extraction</span>
+                <span class="zh-note">every N messages · feeds dedup pipeline</span>
+              </div>
+              <div class="nodes cols-4">
+                <div class="node" style="--accent: var(--c-t3)">
+                  <div class="ntitle">
+                    Session <span class="tag">PB1</span><span class="file">session.js</span>
+                  </div>
+                  <ul>
+                    <li>[scene] [revelation]</li>
+                    <li>[development] [detail]</li>
+                    <li class="k">dedup: cosine 0.82 / Jaccard 0.65</li>
+                    <li class="mute">stored in chatMetadata</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t3)">
+                  <div class="ntitle">
+                    Long-term <span class="tag">PB2</span><span class="file">longterm.js</span>
+                  </div>
+                  <ul>
+                    <li>[fact] [relationship] [preference] [event]</li>
+                    <li>+ relationship history (trusting·high…)</li>
+                    <li>dedup + supersession detection</li>
+                    <li>confidence decay over passes</li>
+                    <li class="mute">extension_settings per character</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t3)">
+                  <div class="ntitle">
+                    Arcs <span class="tag">PB3</span><span class="file">arcs.js</span>
+                  </div>
+                  <ul>
+                    <li>open plot threads</li>
+                    <li>arc narrative summaries on resolve</li>
+                    <li>persistent arcs survive across chats</li>
+                    <li>100-msg sliding window</li>
+                    <li class="mute">extension_settings + chatMetadata</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t3)">
+                  <div class="ntitle">
+                    State ledger <span class="tag">PB4</span
+                    ><span class="file">state-ledger.js</span>
+                  </div>
+                  <ul>
+                    <li>mutable entity state snapshots</li>
+                    <li>character: location · mood · injuries · goal</li>
+                    <li>object: condition · owner</li>
+                    <li>place: occupants · hazards</li>
+                    <li>faction: leadership · objective</li>
+                    <li class="mute">chatMetadata (not persistent)</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tier 4 -->
+            <div class="zone" style="--accent: var(--c-t4)">
+              <div class="zone-head">
+                <span class="zh-title">Tier 4 · Derived Layers</span>
+                <span class="zh-note">built from upstream tier output, regenerated on cadence</span>
+              </div>
+              <div class="nodes cols-3">
+                <div class="node" style="--accent: var(--c-t4)">
+                  <div class="ntitle">
+                    Profiles <span class="tag">PD1</span><span class="file">profiles.js</span>
+                  </div>
+                  <ul>
+                    <li>character · world · relationship matrix</li>
+                    <li>regenerated every N messages</li>
+                    <li>stale after 30 min (configurable)</li>
+                    <li class="mute">chatMetadata.profiles</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t4)">
+                  <div class="ntitle">
+                    Canon <span class="tag">PD2</span><span class="file">canon.js</span>
+                  </div>
+                  <ul>
+                    <li>stable prose narrative</li>
+                    <li>built from resolved arc summaries</li>
+                    <li>+ long-term memories (confidence ≥ 2)</li>
+                    <li>manual trigger</li>
+                    <li class="mute">extension_settings per character</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t4)">
+                  <div class="ntitle">
+                    Continuity <span class="tag">PD3</span><span class="file">continuity.js</span>
+                  </div>
+                  <ul>
+                    <li>contradiction detection vs.</li>
+                    <li class="mute">character card + long-term + session</li>
+                    <li>optional one-shot repair note</li>
+                    <li class="k">auto on Profile B · manual on Profile A</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="rail" style="--rail-color: var(--c-dedup)">
+          <span class="glyph">↓</span
+          ><span><em>extraction candidates</em> → dedup &amp; supersession</span>
+        </div>
+
+        <!-- ── 06 DEDUPLICATION ────────────────────────────────── -->
+        <section class="section s-dedup" data-arch="dedup">
+          <div class="section-head">
+            <div class="title-wrap">
+              <span class="num">06 · Dedup</span>
+              <h2>
+                🔍 Deduplication —
+                <code style="font-family: var(--mono); font-size: 18px; color: var(--ink-2)"
+                  >embeddings.js + similarity.js</code
+                >
+              </h2>
+            </div>
+            <div class="blurb">
+              Embeddings preferred, Jaccard fallback. Classifier decides keep / supersede /
+              re-confirm / drop.
+            </div>
+          </div>
+
+          <div class="nodes cols-4">
+            <div class="node">
+              <div class="ntitle">Semantic embeddings <span class="tag">DE1</span></div>
               <ul>
-                <li>10 per-tier budget sliders</li>
-                <li>Simple mode: shared total cap</li>
-                <li>Advanced mode: independent per-tier</li>
+                <li>Ollama /api/embed</li>
+                <li>or OpenAI /v1/embeddings</li>
+                <li class="mute">API key in ST secrets store</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-tokens)">
-              <div class="ntitle">Trim stats <span class="tag">TK2</span></div>
+            <div class="node">
+              <div class="ntitle">Cosine similarity <span class="tag">DE2</span></div>
               <ul>
-                <li>injected vs full token counts</li>
-                <li>one-time trim toast (post-load only)</li>
-                <li class="mute">short-term exempt (self-corrects)</li>
+                <li class="k">dup ≥ 0.82 · same-topic ≥ 0.55 (Profile A)</li>
+                <li class="k">dup ≥ 0.85 · same-topic ≥ 0.52 (Profile B)</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-tokens)">
-              <div class="ntitle">Auto-tune <span class="tag">TK3</span></div>
+            <div class="node">
+              <div class="ntitle">Jaccard fallback <span class="tag">DE3</span></div>
               <ul>
-                <li>demand-driven adjustment</li>
-                <li class="k">observed trim stats × 1.15 headroom</li>
-                <li>snap to nearest 50 tokens</li>
+                <li>word-overlap</li>
+                <li class="k">dup ≥ 0.65 · same-topic ≥ 0.40</li>
+                <li class="mute">auto when embeddings unavailable</li>
               </ul>
             </div>
-            <div class="node" style="--accent: var(--c-tokens)">
-              <div class="ntitle">Adaptive budgets <span class="tag">TK4</span></div>
+            <div class="node">
+              <div class="ntitle">batchVerify classifier <span class="tag">DE4</span></div>
               <ul>
-                <li>turn classifier: dialogue · action · transition · intimate</li>
-                <li>per-tier multipliers applied per turn</li>
+                <li class="k">passed (new)</li>
+                <li class="k">superseded (state-change update)</li>
+                <li class="k">uncertain (model confirmation)</li>
+                <li class="k">rejected (duplicate)</li>
+              </ul>
+            </div>
+            <div class="node">
+              <div class="ntitle">Supersession chains <span class="tag">DE5</span></div>
+              <ul>
+                <li>valid_from / valid_to message indices</li>
+                <li>retired memories preserved</li>
+                <li class="mute">excluded from injection</li>
+              </ul>
+            </div>
+            <div class="node">
+              <div class="ntitle">Confidence decay <span class="tag">DE6</span></div>
+              <ul>
+                <li>unconfirmed counter per memory</li>
+                <li>boost + reset on re-extraction</li>
+                <li class="k">drop after 10 unconfirmed passes</li>
+              </ul>
+            </div>
+            <div class="node">
+              <div class="ntitle">In-session vector cache <span class="tag">DE7</span></div>
+              <ul>
+                <li>normalized text → float[] vector</li>
+                <li class="mute">cleared on chat change</li>
+              </ul>
+            </div>
+            <div class="node">
+              <div class="ntitle">Flow</div>
+              <ul>
+                <li class="k">DE1 → DE2 + DE7</li>
+                <li class="k">DE3 ⇢ DE2 (fallback)</li>
+                <li class="k">DE2 → DE4 → DE5 + DE6</li>
+                <li class="mute">classified writes → Consolidation</li>
               </ul>
             </div>
           </div>
-        </div>
-      </section>
-    </div>
+        </section>
 
-    <div class="rail" style="--rail-color: var(--c-inject)">
-      <span class="glyph">↓</span><span><em>read on inject</em> · budgets clamped · 13 named slots populated</span>
-    </div>
+        <!-- ── 07 CONSOLIDATION ───────────────────── -->
+        <section class="section s-consol" data-arch="consol">
+          <div class="section-head">
+            <div class="title-wrap">
+              <span class="num">07 · Consolidation</span>
+              <h2>
+                🧩 Consolidation —
+                <code style="font-family: var(--mono); font-size: 18px; color: var(--ink-2)"
+                  >consolidation.js</code
+                >
+              </h2>
+            </div>
+            <div class="blurb">
+              Fires after dedup classification, before storage write. Per-type thresholds; LLM
+              merges near-identical entries into richer single ones.
+            </div>
+          </div>
 
-    <!-- ── 10 INJECTION ────────────────────────────────────── -->
-    <section class="section s-inject" data-arch="inject">
-      <div class="section-head">
-        <div class="title-wrap">
-          <span class="num">11 · Injection</span>
-          <h2>💉 setExtensionPrompt · 13 named slots</h2>
+          <div class="nodes cols-3">
+            <div class="node">
+              <div class="ntitle">Trigger <span class="tag">CN1</span></div>
+              <ul>
+                <li>fires when entry count for a type crosses its threshold</li>
+                <li>per-type counters tracked independently</li>
+                <li class="mute">runs after dedup · before storage write</li>
+              </ul>
+            </div>
+            <div class="node">
+              <div class="ntitle">Merge prompt <span class="tag">CN2</span></div>
+              <ul>
+                <li>collects candidates for a single type</li>
+                <li>asks model to merge near-identical / redundant entries</li>
+                <li class="k">output: fewer, richer entries</li>
+                <li class="mute">replaced entries retired via supersession</li>
+              </ul>
+            </div>
+            <div class="node">
+              <div class="ntitle">Scope <span class="tag">CN3</span></div>
+              <ul>
+                <li>runs for both long-term and session memory</li>
+                <li class="mute">independent per-tier passes</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="arch-grid" style="gap: 14px; margin-top: 14px">
+            <div class="zone" style="--accent: var(--c-consol)">
+              <div class="zone-head">
+                <span class="zh-title">Long-term thresholds</span>
+                <span class="zh-note">per type · independent counters</span>
+              </div>
+              <div class="nodes cols-4">
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">fact <span class="tag">CN-L1</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">stable knowledge synthesis</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">relationship <span class="tag">CN-L2</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">descriptors collapsed</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">preference <span class="tag">CN-L3</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">duplicates folded</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">event <span class="tag">CN-L4</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">co-occurring events combined</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="zone" style="--accent: var(--c-consol)">
+              <div class="zone-head">
+                <span class="zh-title">Session thresholds</span>
+                <span class="zh-note">per type · independent counters</span>
+              </div>
+              <div class="nodes cols-4">
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">scene <span class="tag">CN-S1</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">contiguous scenes folded</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">revelation <span class="tag">CN-S2</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">overlapping reveals merged</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">development <span class="tag">CN-S3</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">arc beats coalesced</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-consol)">
+                  <div class="ntitle">detail <span class="tag">CN-S4</span></div>
+                  <ul>
+                    <li>threshold-gated merge pass</li>
+                    <li class="mute">redundant details collapsed</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── 07 MIGRATION + 08 STORAGE ───────────────────────── -->
+        <div class="row-2">
+          <section class="section s-store" data-arch="store">
+            <div class="section-head">
+              <div class="title-wrap">
+                <span class="num">08 · Storage</span>
+                <h2>💾 Two-Tier Storage</h2>
+              </div>
+              <div class="blurb">
+                Persistent identity vs. ephemeral session state. Reset semantics differ by tier.
+              </div>
+            </div>
+
+            <div class="arch-grid" style="gap: 14px">
+              <div class="zone" style="--accent: var(--c-store)">
+                <div class="zone-head">
+                  <span class="zh-title">Persistent · extension_settings</span>
+                  <span class="zh-note">survives all sessions, all chats</span>
+                </div>
+                <div class="nodes cols-3">
+                  <div class="node" style="--accent: var(--c-store)">
+                    <div class="ntitle">Long-term memories <span class="tag">SP1</span></div>
+                    <ul>
+                      <li>fact · relationship · preference · event</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-store)">
+                    <div class="ntitle">Relationship history <span class="tag">SP2</span></div>
+                    <ul>
+                      <li>descriptor + magnitude pairs</li>
+                      <li class="mute">per character pair</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-store)">
+                    <div class="ntitle">Entity registry <span class="tag">SP3</span></div>
+                    <ul>
+                      <li>name · type · aliases</li>
+                      <li>state card templates</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-store)">
+                    <div class="ntitle">Epistemic knowledge <span class="tag">SP4</span></div>
+                    <ul>
+                      <li>knows · suspects · believes · unaware · hiding</li>
+                      <li class="mute">per character · per target</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-store)">
+                    <div class="ntitle">Persistent arcs <span class="tag">SP5</span></div>
+                    <ul>
+                      <li>cross-chat open threads</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-store)">
+                    <div class="ntitle">Canon document <span class="tag">SP6</span></div>
+                    <ul>
+                      <li>stable narrative prose</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div class="zone" style="--accent: var(--c-t3)">
+                <div class="zone-head">
+                  <span class="zh-title">Per-chat · chatMetadata</span>
+                  <span class="zh-note">per conversation · reset on Fresh Start</span>
+                </div>
+                <div class="nodes cols-3">
+                  <div class="node" style="--accent: var(--c-t3)">
+                    <div class="ntitle">Short-term summary <span class="tag">SC1</span></div>
+                    <ul>
+                      <li>rolling progressive compaction</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-t3)">
+                    <div class="ntitle">Session memories <span class="tag">SC2</span></div>
+                    <ul>
+                      <li>granular within-session details</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-t3)">
+                    <div class="ntitle">Scene history <span class="tag">SC3</span></div>
+                    <ul>
+                      <li>ordered mini-summaries</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-t3)">
+                    <div class="ntitle">Chat-scoped arcs <span class="tag">SC4</span></div>
+                    <ul>
+                      <li>open threads this conversation</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-t3)">
+                    <div class="ntitle">State ledger <span class="tag">SC5</span></div>
+                    <ul>
+                      <li>mutable entity snapshots</li>
+                    </ul>
+                  </div>
+                  <div class="node" style="--accent: var(--c-t3)">
+                    <div class="ntitle">Character profiles <span class="tag">SC6</span></div>
+                    <ul>
+                      <li>character · world · relations matrix</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section s-mig" data-arch="mig">
+            <div class="section-head">
+              <div class="title-wrap">
+                <span class="num">09 · Migrations</span>
+                <h2>🔄 Schema Migration</h2>
+              </div>
+              <div class="blurb">graph-migration.js — never destructive.</div>
+            </div>
+            <div class="nodes cols-1">
+              <div class="node">
+                <div class="ntitle">Versioned store <span class="tag">MIG</span></div>
+                <ul>
+                  <li>SCHEMA_VERSION stored per-character + per-chat</li>
+                  <li>CHARACTER_MIGRATIONS + CHAT_MIGRATIONS registries</li>
+                  <li>applied sequentially on every chat / character load</li>
+                  <li class="k">never removes steps — old chats upgradeable from v0</li>
+                </ul>
+              </div>
+            </div>
+
+            <div style="margin-top: 14px">
+              <div class="section-head" style="margin-bottom: 12px; padding-bottom: 10px">
+                <div class="title-wrap">
+                  <span
+                    class="num"
+                    style="
+                      --accent: var(--c-tokens);
+                      color: var(--c-tokens);
+                      border-color: color-mix(in oklch, var(--c-tokens) 50%, transparent);
+                      background: color-mix(in oklch, var(--c-tokens) 8%, transparent);
+                    "
+                    >10 · Token Mgmt</span
+                  >
+                  <h2 style="font-size: 18px">📊 Budgets</h2>
+                </div>
+              </div>
+              <div class="nodes cols-1" style="--accent: var(--c-tokens)">
+                <div class="node" style="--accent: var(--c-tokens)">
+                  <div class="ntitle">Sliders <span class="tag">TK1</span></div>
+                  <ul>
+                    <li>10 per-tier budget sliders</li>
+                    <li>Simple mode: shared total cap</li>
+                    <li>Advanced mode: independent per-tier</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-tokens)">
+                  <div class="ntitle">Trim stats <span class="tag">TK2</span></div>
+                  <ul>
+                    <li>injected vs full token counts</li>
+                    <li>one-time trim toast (post-load only)</li>
+                    <li class="mute">short-term exempt (self-corrects)</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-tokens)">
+                  <div class="ntitle">Auto-tune <span class="tag">TK3</span></div>
+                  <ul>
+                    <li>demand-driven adjustment</li>
+                    <li class="k">observed trim stats × 1.15 headroom</li>
+                    <li>snap to nearest 50 tokens</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-tokens)">
+                  <div class="ntitle">Adaptive budgets <span class="tag">TK4</span></div>
+                  <ul>
+                    <li>turn classifier: dialogue · action · transition · intimate</li>
+                    <li>per-tier multipliers applied per turn</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-        <div class="blurb">Anchored slots vs. depth-relative slots vs. unified single-block mode.</div>
+
+        <div class="rail" style="--rail-color: var(--c-inject)">
+          <span class="glyph">↓</span
+          ><span><em>read on inject</em> · budgets clamped · 13 named slots populated</span>
+        </div>
+
+        <!-- ── 10 INJECTION ────────────────────────────────────── -->
+        <section class="section s-inject" data-arch="inject">
+          <div class="section-head">
+            <div class="title-wrap">
+              <span class="num">11 · Injection</span>
+              <h2>💉 setExtensionPrompt · 13 named slots</h2>
+            </div>
+            <div class="blurb">
+              Anchored slots vs. depth-relative slots vs. unified single-block mode.
+            </div>
+          </div>
+
+          <div class="arch-grid" style="gap: 14px">
+            <div class="zone" style="--accent: var(--c-inject)">
+              <div class="zone-head">
+                <span class="zh-title">IN_PROMPT · anchored at character-card depth</span>
+                <span class="zh-note">4 slots</span>
+              </div>
+              <div class="nodes cols-4">
+                <div class="node" style="--accent: var(--c-inject)">
+                  <div class="ntitle">smart_memory_short <span class="tag">IJ1</span></div>
+                  <ul>
+                    <li>summary</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-inject)">
+                  <div class="ntitle">smart_memory_long <span class="tag">IJ2</span></div>
+                  <ul>
+                    <li>long-term memories</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-inject)">
+                  <div class="ntitle">
+                    smart_memory_profiles <span class="tag">IJ8 · depth 1</span>
+                  </div>
+                  <ul>
+                    <li>entity snapshots</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-inject)">
+                  <div class="ntitle">
+                    smart_memory_canon <span class="tag">IJ9 · depth 0</span>
+                  </div>
+                  <ul>
+                    <li>narrative document</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="zone" style="--accent: var(--c-t2)">
+              <div class="zone-head">
+                <span class="zh-title">IN_CHAT · depth-relative to current message</span>
+                <span class="zh-note">8 slots</span>
+              </div>
+              <div class="nodes cols-4">
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    smart_memory_triggered <span class="tag">IJ3 · depth 4</span>
+                  </div>
+                  <ul>
+                    <li>contextual relevance reinjection</li>
+                    <li class="mute">memories overlapping current turn</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">smart_memory_session <span class="tag">IJ4</span></div>
+                  <ul>
+                    <li>session memories</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    smart_memory_scenes <span class="tag">IJ5 · depth 6</span>
+                  </div>
+                  <ul>
+                    <li>scene history</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">smart_memory_arcs <span class="tag">IJ6 · depth 2</span></div>
+                  <ul>
+                    <li>story arcs</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    smart_memory_relationships <span class="tag">IJ7 · depth 5</span>
+                  </div>
+                  <ul>
+                    <li>relationship state</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    smart_memory_epistemic <span class="tag">IJ10 · depth 1</span>
+                  </div>
+                  <ul>
+                    <li>character knowledge map</li>
+                    <li class="mute">injected per responding char only</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    smart_memory_state_ledger <span class="tag">IJ11 · depth 1</span>
+                  </div>
+                  <ul>
+                    <li>mutable entity state</li>
+                  </ul>
+                </div>
+                <div class="node" style="--accent: var(--c-t2)">
+                  <div class="ntitle">
+                    smart_memory_repair <span class="tag">IJ12 · depth 0</span>
+                  </div>
+                  <ul>
+                    <li>one-shot continuity correction</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="zone" style="--accent: var(--c-final)">
+              <div class="zone-head">
+                <span class="zh-title">Unified Mode · optional</span>
+                <span class="zh-note">replaces all individual slots</span>
+              </div>
+              <div class="nodes cols-1">
+                <div class="node" style="--accent: var(--c-final)">
+                  <div class="ntitle">
+                    smart_memory_unified <span class="tag">IJ13 · IN_PROMPT · depth 0</span>
+                  </div>
+                  <ul>
+                    <li>single merged context block</li>
+                    <li class="k">
+                      Canon → Profiles → Long-term → Short-term → Scenes → Session → Arcs
+                    </li>
+                    <li class="mute">content cache bridges infrequent tiers</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── 11 + 12 MACRO + RECAP + MTEST ───────────────────── -->
+        <div class="row-2-eq">
+          <section class="section s-macro" data-arch="macros">
+            <div class="section-head">
+              <div class="title-wrap">
+                <span class="num">12 · Macros</span>
+                <h2>🔧 macros.js</h2>
+              </div>
+              <div class="blurb">
+                {{smartmemory-*}} tokens that resolve at prompt-assembly time.
+              </div>
+            </div>
+            <div class="nodes cols-1">
+              <div class="node">
+                <div class="ntitle">Token registry <span class="tag">MA1</span></div>
+                <ul>
+                  <li>11 {{smartmemory-*}} tokens</li>
+                  <li class="k">10 per-tier + {{smartmemory-unified}}</li>
+                </ul>
+              </div>
+              <div class="node">
+                <div class="ntitle">Auto-detection <span class="tag">MA2a</span></div>
+                <ul>
+                  <li>scans character card fields for {{smartmemory-*}} tokens</li>
+                  <li class="mute">
+                    system_prompt · description · personality · scenario · mes_example
+                  </li>
+                  <li>activates only the slots whose tokens are present</li>
+                </ul>
+              </div>
+              <div class="node">
+                <div class="ntitle">Force macro injection mode <span class="tag">MA2b</span></div>
+                <ul>
+                  <li>user-toggled setting</li>
+                  <li>bypasses auto-detection</li>
+                  <li class="k">activates all macros unconditionally — instruct templates</li>
+                </ul>
+              </div>
+              <div class="node">
+                <div class="ntitle">Cache bridge <span class="tag">MA3</span></div>
+                <ul>
+                  <li>content cache updated by inject functions</li>
+                  <li>macro always returns latest output</li>
+                  <li class="mute">individual macros inactive when unified is on</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <section class="section s-recap" data-arch="recap">
+            <div class="section-head">
+              <div class="title-wrap">
+                <span class="num">13 · Auxiliary</span>
+                <h2>🌅 Recap &amp; 🧪 Model Test</h2>
+              </div>
+              <div class="blurb">
+                Out-of-band UX surfaces — recap on return, validation harness for model selection.
+              </div>
+            </div>
+            <div class="nodes cols-1">
+              <div class="node">
+                <div class="ntitle">
+                  Away Recap <span class="tag">RECAP</span><span class="file">recap.js</span>
+                </div>
+                <ul>
+                  <li>tracks lastActive timestamp per chat</li>
+                  <li>on return after threshold hours:</li>
+                  <li class="k">generates "Previously on…" summary</li>
+                  <li class="mute">displayed as dismissible modal overlay</li>
+                </ul>
+              </div>
+              <div class="node" style="--accent: var(--c-test)">
+                <div class="ntitle">
+                  Extraction Model Test <span class="tag">MTEST</span
+                  ><span class="file">model-test.js</span>
+                </div>
+                <ul>
+                  <li>3 fixed scenarios — all 5 tiers always run</li>
+                  <li class="k">
+                    Main: 30-message fantasy investigation → long-term · session · arcs
+                  </li>
+                  <li class="k">Epistemic: village healer scene → Perspectives + Secrets</li>
+                  <li class="k">State: dungeon heist excerpt → State Ledger</li>
+                  <li>shows raw model output + quality hints</li>
+                  <li class="mute">never writes to session or memories</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="rail" style="--rail-color: var(--c-final)">
+          <span class="glyph">↓</span
+          ><span>slots populated · macros resolved · recap modal (if active) attached</span>
+        </div>
+
+        <!-- ── 13 FINAL ────────────────────────────────────────── -->
+        <div class="final-node" data-arch="final">
+          <div class="label">⟶ &nbsp;Output&nbsp; ⟵</div>
+          <div class="name">🧠 Final Prompt → LLM Model</div>
+          <div class="note">
+            13 named slots · resolved macros · clamped budgets · optional repair note · optional
+            recap overlay
+          </div>
+        </div>
       </div>
 
-        <div class="arch-grid" style="gap:14px">
-        <div class="zone" style="--accent: var(--c-inject)">
-          <div class="zone-head">
-            <span class="zh-title">IN_PROMPT · anchored at character-card depth</span>
-            <span class="zh-note">4 slots</span>
-          </div>
-          <div class="nodes cols-4">
-            <div class="node" style="--accent: var(--c-inject)">
-              <div class="ntitle">smart_memory_short <span class="tag">IJ1</span></div>
-              <ul><li>summary</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-inject)">
-              <div class="ntitle">smart_memory_long <span class="tag">IJ2</span></div>
-              <ul><li>long-term memories</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-inject)">
-              <div class="ntitle">smart_memory_profiles <span class="tag">IJ8 · depth 1</span></div>
-              <ul><li>entity snapshots</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-inject)">
-              <div class="ntitle">smart_memory_canon <span class="tag">IJ9 · depth 0</span></div>
-              <ul><li>narrative document</li></ul>
-            </div>
-          </div>
+      <footer>
+        <div>
+          <a href="https://github.com/senjinthedragon/Smart-Memory"
+            >github.com/senjinthedragon/Smart-Memory</a
+          >
+          <span style="margin: 0 10px; color: var(--line-2)">·</span>
+          © 2026 Senjin the Dragon
+          <span style="margin: 0 10px; color: var(--line-2)">·</span>
+          <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>
         </div>
-
-        <div class="zone" style="--accent: var(--c-t2)">
-          <div class="zone-head">
-            <span class="zh-title">IN_CHAT · depth-relative to current message</span>
-            <span class="zh-note">8 slots</span>
-          </div>
-          <div class="nodes cols-4">
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_triggered <span class="tag">IJ3 · depth 4</span></div>
-              <ul>
-                <li>contextual relevance reinjection</li>
-                <li class="mute">memories overlapping current turn</li>
-              </ul>
-            </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_session <span class="tag">IJ4</span></div>
-              <ul><li>session memories</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_scenes <span class="tag">IJ5 · depth 6</span></div>
-              <ul><li>scene history</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_arcs <span class="tag">IJ6 · depth 2</span></div>
-              <ul><li>story arcs</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_relationships <span class="tag">IJ7 · depth 5</span></div>
-              <ul><li>relationship state</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_epistemic <span class="tag">IJ10 · depth 1</span></div>
-              <ul>
-                <li>character knowledge map</li>
-                <li class="mute">injected per responding char only</li>
-              </ul>
-            </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_state_ledger <span class="tag">IJ11 · depth 1</span></div>
-              <ul><li>mutable entity state</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-t2)">
-              <div class="ntitle">smart_memory_repair <span class="tag">IJ12 · depth 0</span></div>
-              <ul><li>one-shot continuity correction</li></ul>
-            </div>
-          </div>
-        </div>
-
-        <div class="zone" style="--accent: var(--c-final)">
-          <div class="zone-head">
-            <span class="zh-title">Unified Mode · optional</span>
-            <span class="zh-note">replaces all individual slots</span>
-          </div>
-          <div class="nodes cols-1">
-            <div class="node" style="--accent: var(--c-final)">
-              <div class="ntitle">smart_memory_unified <span class="tag">IJ13 · IN_PROMPT · depth 0</span></div>
-              <ul>
-                <li>single merged context block</li>
-                <li class="k">Canon → Profiles → Long-term → Short-term → Scenes → Session → Arcs</li>
-                <li class="mute">content cache bridges infrequent tiers</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── 11 + 12 MACRO + RECAP + MTEST ───────────────────── -->
-    <div class="row-2-eq">
-      <section class="section s-macro" data-arch="macros">
-        <div class="section-head">
-          <div class="title-wrap">
-            <span class="num">12 · Macros</span>
-            <h2>🔧 macros.js</h2>
-          </div>
-          <div class="blurb">{{smartmemory-*}} tokens that resolve at prompt-assembly time.</div>
-        </div>
-        <div class="nodes cols-1">
-          <div class="node">
-            <div class="ntitle">Token registry <span class="tag">MA1</span></div>
-            <ul>
-              <li>11 {{smartmemory-*}} tokens</li>
-              <li class="k">10 per-tier + {{smartmemory-unified}}</li>
-            </ul>
-          </div>
-          <div class="node">
-            <div class="ntitle">Auto-detection <span class="tag">MA2a</span></div>
-            <ul>
-              <li>scans character card fields for {{smartmemory-*}} tokens</li>
-              <li class="mute">system_prompt · description · personality · scenario · mes_example</li>
-              <li>activates only the slots whose tokens are present</li>
-            </ul>
-          </div>
-          <div class="node">
-            <div class="ntitle">Force macro injection mode <span class="tag">MA2b</span></div>
-            <ul>
-              <li>user-toggled setting</li>
-              <li>bypasses auto-detection</li>
-              <li class="k">activates all macros unconditionally — instruct templates</li>
-            </ul>
-          </div>
-          <div class="node">
-            <div class="ntitle">Cache bridge <span class="tag">MA3</span></div>
-            <ul>
-              <li>content cache updated by inject functions</li>
-              <li>macro always returns latest output</li>
-              <li class="mute">individual macros inactive when unified is on</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section class="section s-recap" data-arch="recap">
-        <div class="section-head">
-          <div class="title-wrap">
-            <span class="num">13 · Auxiliary</span>
-            <h2>🌅 Recap &amp; 🧪 Model Test</h2>
-          </div>
-          <div class="blurb">Out-of-band UX surfaces — recap on return, validation harness for model selection.</div>
-        </div>
-        <div class="nodes cols-1">
-          <div class="node">
-            <div class="ntitle">Away Recap <span class="tag">RECAP</span><span class="file">recap.js</span></div>
-            <ul>
-              <li>tracks lastActive timestamp per chat</li>
-              <li>on return after threshold hours:</li>
-              <li class="k">generates "Previously on…" summary</li>
-              <li class="mute">displayed as dismissible modal overlay</li>
-            </ul>
-          </div>
-          <div class="node" style="--accent: var(--c-test)">
-            <div class="ntitle">Extraction Model Test <span class="tag">MTEST</span><span class="file">model-test.js</span></div>
-            <ul>
-              <li>3 fixed scenarios — all 5 tiers always run</li>
-              <li class="k">Main: 30-message fantasy investigation → long-term · session · arcs</li>
-              <li class="k">Epistemic: village healer scene → Perspectives + Secrets</li>
-              <li class="k">State: dungeon heist excerpt → State Ledger</li>
-              <li>shows raw model output + quality hints</li>
-              <li class="mute">never writes to session or memories</li>
-            </ul>
-          </div>
-        </div>
-      </section>
+        <div>v1.8.3 · profile-aware · 4-tier extraction · 13-slot injection</div>
+      </footer>
     </div>
 
-    <div class="rail" style="--rail-color: var(--c-final)">
-      <span class="glyph">↓</span><span>slots populated · macros resolved · recap modal (if active) attached</span>
-    </div>
+    <script>
+      (function () {
+        const canvas = document.querySelector('.canvas');
+        const svg = document.getElementById('connectors');
+        const NS = 'http://www.w3.org/2000/svg';
+        const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
-    <!-- ── 13 FINAL ────────────────────────────────────────── -->
-    <div class="final-node" data-arch="final">
-      <div class="label">⟶ &nbsp;Output&nbsp; ⟵</div>
-      <div class="name">🧠 Final Prompt → LLM Model</div>
-      <div class="note">13 named slots · resolved macros · clamped budgets · optional repair note · optional recap overlay</div>
-    </div>
+        function rect(sel) {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const cb = canvas.getBoundingClientRect();
+          const rb = el.getBoundingClientRect();
+          return {
+            top: rb.top - cb.top,
+            left: rb.left - cb.left,
+            bottom: rb.bottom - cb.top,
+            right: rb.right - cb.left,
+            width: rb.width,
+            height: rb.height,
+            cx: rb.left - cb.left + rb.width / 2,
+            cy: rb.top - cb.top + rb.height / 2,
+          };
+        }
 
-  </div>
+        // Connection map — color-graded from source to destination accent
+        const links = [
+          // central spine
+          {
+            from: '[data-arch="events"]',
+            to: '[data-arch="orch"]',
+            cFrom: '--c-events',
+            cTo: '--c-orch',
+          },
+          // orchestration fans out to generation + hardware profile
+          {
+            from: '[data-arch="orch"]',
+            to: '[data-arch="gen"]',
+            cFrom: '--c-orch',
+            cTo: '--c-gen',
+            fromFx: 0.32,
+            toFx: 0.55,
+          },
+          {
+            from: '[data-arch="orch"]',
+            to: '[data-arch="hw"]',
+            cFrom: '--c-orch',
+            cTo: '--c-hw',
+            fromFx: 0.68,
+            toFx: 0.45,
+          },
+          // both feed the extraction pipeline
+          {
+            from: '[data-arch="gen"]',
+            to: '[data-arch="pipe"]',
+            cFrom: '--c-gen',
+            cTo: '--c-t2',
+            fromFx: 0.55,
+            toFx: 0.3,
+          },
+          {
+            from: '[data-arch="hw"]',
+            to: '[data-arch="pipe"]',
+            cFrom: '--c-hw',
+            cTo: '--c-t2',
+            fromFx: 0.45,
+            toFx: 0.7,
+          },
+          // pipeline → dedup → consolidation → storage
+          {
+            from: '[data-arch="pipe"]',
+            to: '[data-arch="dedup"]',
+            cFrom: '--c-t4',
+            cTo: '--c-dedup',
+          },
+          {
+            from: '[data-arch="dedup"]',
+            to: '[data-arch="consol"]',
+            cFrom: '--c-dedup',
+            cTo: '--c-consol',
+          },
+          {
+            from: '[data-arch="consol"]',
+            to: '[data-arch="store"]',
+            cFrom: '--c-consol',
+            cTo: '--c-store',
+            fromFx: 0.4,
+            toFx: 0.5,
+          },
+          // migrations join storage horizontally; mig column also feeds injection
+          {
+            from: '[data-arch="mig"]',
+            to: '[data-arch="store"]',
+            cFrom: '--c-mig',
+            cTo: '--c-store',
+            horizontal: true,
+          },
+          {
+            from: '[data-arch="store"]',
+            to: '[data-arch="inject"]',
+            cFrom: '--c-store',
+            cTo: '--c-inject',
+            fromFx: 0.55,
+            toFx: 0.35,
+          },
+          {
+            from: '[data-arch="mig"]',
+            to: '[data-arch="inject"]',
+            cFrom: '--c-tokens',
+            cTo: '--c-inject',
+            fromFx: 0.5,
+            toFx: 0.7,
+          },
+          // injection fans out
+          {
+            from: '[data-arch="inject"]',
+            to: '[data-arch="macros"]',
+            cFrom: '--c-inject',
+            cTo: '--c-macro',
+            fromFx: 0.3,
+            toFx: 0.5,
+          },
+          {
+            from: '[data-arch="inject"]',
+            to: '[data-arch="recap"]',
+            cFrom: '--c-inject',
+            cTo: '--c-recap',
+            fromFx: 0.7,
+            toFx: 0.5,
+          },
+          // tail merges into final
+          {
+            from: '[data-arch="macros"]',
+            to: '[data-arch="final"]',
+            cFrom: '--c-macro',
+            cTo: '--c-final',
+            toFx: 0.3,
+          },
+          {
+            from: '[data-arch="recap"]',
+            to: '[data-arch="final"]',
+            cFrom: '--c-recap',
+            cTo: '--c-final',
+            toFx: 0.7,
+          },
+        ];
 
-  <footer>
-    <div>
-      <a href="https://github.com/senjinthedragon/Smart-Memory">github.com/senjinthedragon/Smart-Memory</a>
-      <span style="margin: 0 10px; color: var(--line-2)">·</span>
-      © 2026 Senjin the Dragon
-      <span style="margin: 0 10px; color: var(--line-2)">·</span>
-      <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>
-    </div>
-    <div>v1.8.3 · profile-aware · 4-tier extraction · 13-slot injection</div>
-  </footer>
-</div>
+        function buildDefs() {
+          while (svg.firstChild) svg.removeChild(svg.firstChild);
+          const defs = document.createElementNS(NS, 'defs');
 
-<script>
-(function () {
-  const canvas = document.querySelector('.canvas');
-  const svg = document.getElementById('connectors');
-  const NS = 'http://www.w3.org/2000/svg';
-  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+          links.forEach((lnk, i) => {
+            const grad = document.createElementNS(NS, 'linearGradient');
+            grad.setAttribute('id', `lg${i}`);
+            grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+            const s1 = document.createElementNS(NS, 'stop');
+            s1.setAttribute('offset', '0');
+            s1.setAttribute('stop-color', css(lnk.cFrom));
+            s1.setAttribute('stop-opacity', '0.95');
+            const s2 = document.createElementNS(NS, 'stop');
+            s2.setAttribute('offset', '1');
+            s2.setAttribute('stop-color', css(lnk.cTo));
+            s2.setAttribute('stop-opacity', '0.95');
+            grad.appendChild(s1);
+            grad.appendChild(s2);
+            defs.appendChild(grad);
+          });
 
-  function rect(sel) {
-    const el = document.querySelector(sel);
-    if (!el) return null;
-    const cb = canvas.getBoundingClientRect();
-    const rb = el.getBoundingClientRect();
-    return {
-      top: rb.top - cb.top,
-      left: rb.left - cb.left,
-      bottom: rb.bottom - cb.top,
-      right: rb.right - cb.left,
-      width: rb.width,
-      height: rb.height,
-      cx: rb.left - cb.left + rb.width / 2,
-      cy: rb.top - cb.top + rb.height / 2,
-    };
-  }
-
-  // Connection map — color-graded from source to destination accent
-  const links = [
-    // central spine
-    { from:'[data-arch="events"]',  to:'[data-arch="orch"]',  cFrom:'--c-events', cTo:'--c-orch' },
-    // orchestration fans out to generation + hardware profile
-    { from:'[data-arch="orch"]',    to:'[data-arch="gen"]',   cFrom:'--c-orch',  cTo:'--c-gen', fromFx:0.32, toFx:0.55 },
-    { from:'[data-arch="orch"]',    to:'[data-arch="hw"]',    cFrom:'--c-orch',  cTo:'--c-hw',  fromFx:0.68, toFx:0.45 },
-    // both feed the extraction pipeline
-    { from:'[data-arch="gen"]',     to:'[data-arch="pipe"]',  cFrom:'--c-gen',   cTo:'--c-t2',  fromFx:0.55, toFx:0.30 },
-    { from:'[data-arch="hw"]',      to:'[data-arch="pipe"]',  cFrom:'--c-hw',    cTo:'--c-t2',  fromFx:0.45, toFx:0.70 },
-    // pipeline → dedup → consolidation → storage
-    { from:'[data-arch="pipe"]',    to:'[data-arch="dedup"]', cFrom:'--c-t4',    cTo:'--c-dedup' },
-    { from:'[data-arch="dedup"]',   to:'[data-arch="consol"]',cFrom:'--c-dedup', cTo:'--c-consol' },
-    { from:'[data-arch="consol"]',  to:'[data-arch="store"]', cFrom:'--c-consol',cTo:'--c-store', fromFx:0.40, toFx:0.5 },
-    // migrations join storage horizontally; mig column also feeds injection
-    { from:'[data-arch="mig"]',     to:'[data-arch="store"]', cFrom:'--c-mig',   cTo:'--c-store', horizontal:true },
-    { from:'[data-arch="store"]',   to:'[data-arch="inject"]',cFrom:'--c-store', cTo:'--c-inject', fromFx:0.55, toFx:0.35 },
-    { from:'[data-arch="mig"]',     to:'[data-arch="inject"]',cFrom:'--c-tokens',cTo:'--c-inject', fromFx:0.50, toFx:0.70 },
-    // injection fans out
-    { from:'[data-arch="inject"]',  to:'[data-arch="macros"]',cFrom:'--c-inject',cTo:'--c-macro', fromFx:0.30, toFx:0.50 },
-    { from:'[data-arch="inject"]',  to:'[data-arch="recap"]', cFrom:'--c-inject',cTo:'--c-recap', fromFx:0.70, toFx:0.50 },
-    // tail merges into final
-    { from:'[data-arch="macros"]',  to:'[data-arch="final"]', cFrom:'--c-macro', cTo:'--c-final', toFx:0.30 },
-    { from:'[data-arch="recap"]',   to:'[data-arch="final"]', cFrom:'--c-recap', cTo:'--c-final', toFx:0.70 },
-  ];
-
-  function buildDefs() {
-    while (svg.firstChild) svg.removeChild(svg.firstChild);
-    const defs = document.createElementNS(NS, 'defs');
-
-    links.forEach((lnk, i) => {
-      const grad = document.createElementNS(NS, 'linearGradient');
-      grad.setAttribute('id', `lg${i}`);
-      grad.setAttribute('gradientUnits', 'userSpaceOnUse');
-      const s1 = document.createElementNS(NS, 'stop');
-      s1.setAttribute('offset', '0');
-      s1.setAttribute('stop-color', css(lnk.cFrom));
-      s1.setAttribute('stop-opacity', '0.95');
-      const s2 = document.createElementNS(NS, 'stop');
-      s2.setAttribute('offset', '1');
-      s2.setAttribute('stop-color', css(lnk.cTo));
-      s2.setAttribute('stop-opacity', '0.95');
-      grad.appendChild(s1);
-      grad.appendChild(s2);
-      defs.appendChild(grad);
-    });
-
-    // soft glow
-    const f = document.createElementNS(NS, 'filter');
-    f.setAttribute('id', 'glow');
-    f.setAttribute('x', '-200%'); f.setAttribute('y', '-200%');
-    f.setAttribute('width', '500%'); f.setAttribute('height', '500%');
-    f.innerHTML = `
+          // soft glow
+          const f = document.createElementNS(NS, 'filter');
+          f.setAttribute('id', 'glow');
+          f.setAttribute('x', '-200%');
+          f.setAttribute('y', '-200%');
+          f.setAttribute('width', '500%');
+          f.setAttribute('height', '500%');
+          f.innerHTML = `
       <feGaussianBlur stdDeviation="2" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     `;
-    defs.appendChild(f);
+          defs.appendChild(f);
 
-    // dot glow
-    const fd = document.createElementNS(NS, 'filter');
-    fd.setAttribute('id', 'dotglow');
-    fd.setAttribute('x', '-100%'); fd.setAttribute('y', '-100%');
-    fd.setAttribute('width', '300%'); fd.setAttribute('height', '300%');
-    fd.innerHTML = `
+          // dot glow
+          const fd = document.createElementNS(NS, 'filter');
+          fd.setAttribute('id', 'dotglow');
+          fd.setAttribute('x', '-100%');
+          fd.setAttribute('y', '-100%');
+          fd.setAttribute('width', '300%');
+          fd.setAttribute('height', '300%');
+          fd.innerHTML = `
       <feGaussianBlur stdDeviation="3" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     `;
-    defs.appendChild(fd);
+          defs.appendChild(fd);
 
-    svg.appendChild(defs);
-  }
+          svg.appendChild(defs);
+        }
 
-  function render() {
-    if (!svg.querySelector('defs')) buildDefs();
+        function render() {
+          if (!svg.querySelector('defs')) buildDefs();
 
-    const w = canvas.offsetWidth;
-    const h = canvas.scrollHeight;
-    svg.setAttribute('width', w);
-    svg.setAttribute('height', h);
-    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+          const w = canvas.offsetWidth;
+          const h = canvas.scrollHeight;
+          svg.setAttribute('width', w);
+          svg.setAttribute('height', h);
+          svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
 
-    // remove anything except <defs>
-    [...svg.children].forEach((c) => {
-      if ((c.tagName || '').toLowerCase() !== 'defs') svg.removeChild(c);
-    });
+          // remove anything except <defs>
+          [...svg.children].forEach((c) => {
+            if ((c.tagName || '').toLowerCase() !== 'defs') svg.removeChild(c);
+          });
 
-    // Two-pass: halos first, lines on top, then dots
-    const paths = [];
+          // Two-pass: halos first, lines on top, then dots
+          const paths = [];
 
-    links.forEach((lnk, i) => {
-      const a = rect(lnk.from);
-      const b = rect(lnk.to);
-      if (!a || !b) return;
+          links.forEach((lnk, i) => {
+            const a = rect(lnk.from);
+            const b = rect(lnk.to);
+            if (!a || !b) return;
 
-      let sx, sy, ex, ey, c1x, c1y, c2x, c2y;
+            let sx, sy, ex, ey, c1x, c1y, c2x, c2y;
 
-      if (lnk.horizontal) {
-        const aLeft = a.right < b.left;
-        if (aLeft) { sx = a.right; sy = a.cy; ex = b.left;  ey = b.cy; }
-        else       { sx = a.left;  sy = a.cy; ex = b.right; ey = b.cy; }
-        const dx = ex - sx;
-        c1x = sx + dx * 0.45; c1y = sy;
-        c2x = sx + dx * 0.55; c2y = ey;
-      } else {
-        sx = a.left + a.width * (lnk.fromFx ?? 0.5);
-        sy = a.bottom;
-        ex = b.left + b.width * (lnk.toFx ?? 0.5);
-        ey = b.top;
-        const dy = ey - sy;
-        const slack = Math.max(28, dy * 0.55);
-        c1x = sx; c1y = sy + slack;
-        c2x = ex; c2y = ey - slack;
-      }
+            if (lnk.horizontal) {
+              const aLeft = a.right < b.left;
+              if (aLeft) {
+                sx = a.right;
+                sy = a.cy;
+                ex = b.left;
+                ey = b.cy;
+              } else {
+                sx = a.left;
+                sy = a.cy;
+                ex = b.right;
+                ey = b.cy;
+              }
+              const dx = ex - sx;
+              c1x = sx + dx * 0.45;
+              c1y = sy;
+              c2x = sx + dx * 0.55;
+              c2y = ey;
+            } else {
+              sx = a.left + a.width * (lnk.fromFx ?? 0.5);
+              sy = a.bottom;
+              ex = b.left + b.width * (lnk.toFx ?? 0.5);
+              ey = b.top;
+              const dy = ey - sy;
+              const slack = Math.max(28, dy * 0.55);
+              c1x = sx;
+              c1y = sy + slack;
+              c2x = ex;
+              c2y = ey - slack;
+            }
 
-      // place gradient coords along path direction
-      const grad = svg.querySelector(`#lg${i}`);
-      grad.setAttribute('x1', sx); grad.setAttribute('y1', sy);
-      grad.setAttribute('x2', ex); grad.setAttribute('y2', ey);
+            // place gradient coords along path direction
+            const grad = svg.querySelector(`#lg${i}`);
+            grad.setAttribute('x1', sx);
+            grad.setAttribute('y1', sy);
+            grad.setAttribute('x2', ex);
+            grad.setAttribute('y2', ey);
 
-      const d = `M ${sx.toFixed(2)} ${sy.toFixed(2)} C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${ex.toFixed(2)} ${ey.toFixed(2)}`;
-      paths.push({ d, i, sx, sy, ex, ey, cFrom: lnk.cFrom, cTo: lnk.cTo });
-    });
+            const d = `M ${sx.toFixed(2)} ${sy.toFixed(2)} C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+            paths.push({ d, i, sx, sy, ex, ey, cFrom: lnk.cFrom, cTo: lnk.cTo });
+          });
 
-    // halos (wide, faint) — also serves as glow for short links the filter can't reach
-    paths.forEach(({ d, i }) => {
-      const halo = document.createElementNS(NS, 'path');
-      halo.setAttribute('d', d);
-      halo.setAttribute('fill', 'none');
-      halo.setAttribute('stroke', `url(#lg${i})`);
-      halo.setAttribute('stroke-width', '7');
-      halo.setAttribute('stroke-linecap', 'round');
-      halo.setAttribute('opacity', '0.22');
-      svg.appendChild(halo);
-    });
+          // halos (wide, faint) — also serves as glow for short links the filter can't reach
+          paths.forEach(({ d, i }) => {
+            const halo = document.createElementNS(NS, 'path');
+            halo.setAttribute('d', d);
+            halo.setAttribute('fill', 'none');
+            halo.setAttribute('stroke', `url(#lg${i})`);
+            halo.setAttribute('stroke-width', '7');
+            halo.setAttribute('stroke-linecap', 'round');
+            halo.setAttribute('opacity', '0.22');
+            svg.appendChild(halo);
+          });
 
-    // main strokes
-    paths.forEach(({ d, i }) => {
-      const p = document.createElementNS(NS, 'path');
-      p.setAttribute('d', d);
-      p.setAttribute('fill', 'none');
-      p.setAttribute('stroke', `url(#lg${i})`);
-      p.setAttribute('stroke-width', '1.7');
-      p.setAttribute('stroke-linecap', 'round');
-      p.setAttribute('opacity', '1');
-      p.setAttribute('filter', 'url(#glow)');
-      svg.appendChild(p);
-    });
+          // main strokes
+          paths.forEach(({ d, i }) => {
+            const p = document.createElementNS(NS, 'path');
+            p.setAttribute('d', d);
+            p.setAttribute('fill', 'none');
+            p.setAttribute('stroke', `url(#lg${i})`);
+            p.setAttribute('stroke-width', '1.7');
+            p.setAttribute('stroke-linecap', 'round');
+            p.setAttribute('opacity', '1');
+            p.setAttribute('filter', 'url(#glow)');
+            svg.appendChild(p);
+          });
 
-    // endpoint nodes
-    paths.forEach(({ sx, sy, ex, ey, cFrom, cTo }) => {
-      const mkDot = (x, y, color, r = 3.25) => {
-        const halo = document.createElementNS(NS, 'circle');
-        halo.setAttribute('cx', x); halo.setAttribute('cy', y);
-        halo.setAttribute('r', r + 4);
-        halo.setAttribute('fill', css(color));
-        halo.setAttribute('opacity', '0.18');
-        halo.setAttribute('filter', 'url(#dotglow)');
-        svg.appendChild(halo);
+          // endpoint nodes
+          paths.forEach(({ sx, sy, ex, ey, cFrom, cTo }) => {
+            const mkDot = (x, y, color, r = 3.25) => {
+              const halo = document.createElementNS(NS, 'circle');
+              halo.setAttribute('cx', x);
+              halo.setAttribute('cy', y);
+              halo.setAttribute('r', r + 4);
+              halo.setAttribute('fill', css(color));
+              halo.setAttribute('opacity', '0.18');
+              halo.setAttribute('filter', 'url(#dotglow)');
+              svg.appendChild(halo);
 
-        const ring = document.createElementNS(NS, 'circle');
-        ring.setAttribute('cx', x); ring.setAttribute('cy', y);
-        ring.setAttribute('r', r);
-        ring.setAttribute('fill', '#0a0d12');
-        ring.setAttribute('stroke', css(color));
-        ring.setAttribute('stroke-width', '1.6');
-        svg.appendChild(ring);
+              const ring = document.createElementNS(NS, 'circle');
+              ring.setAttribute('cx', x);
+              ring.setAttribute('cy', y);
+              ring.setAttribute('r', r);
+              ring.setAttribute('fill', '#0a0d12');
+              ring.setAttribute('stroke', css(color));
+              ring.setAttribute('stroke-width', '1.6');
+              svg.appendChild(ring);
 
-        const core = document.createElementNS(NS, 'circle');
-        core.setAttribute('cx', x); core.setAttribute('cy', y);
-        core.setAttribute('r', 1.2);
-        core.setAttribute('fill', css(color));
-        svg.appendChild(core);
-      };
-      mkDot(sx, sy, cFrom);
-      mkDot(ex, ey, cTo);
-    });
-  }
+              const core = document.createElementNS(NS, 'circle');
+              core.setAttribute('cx', x);
+              core.setAttribute('cy', y);
+              core.setAttribute('r', 1.2);
+              core.setAttribute('fill', css(color));
+              svg.appendChild(core);
+            };
+            mkDot(sx, sy, cFrom);
+            mkDot(ex, ey, cTo);
+          });
+        }
 
-  function init() {
-    buildDefs();
-    render();
-  }
+        function init() {
+          buildDefs();
+          render();
+        }
 
-  // initial paint
-  if (document.readyState === 'complete') init();
-  else window.addEventListener('load', init);
+        // initial paint
+        if (document.readyState === 'complete') init();
+        else window.addEventListener('load', init);
 
-  // robust re-paint on layout changes
-  window.addEventListener('resize', render);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
-  new ResizeObserver(render).observe(canvas);
-})();
-</script>
-</body>
+        // robust re-paint on layout changes
+        window.addEventListener('resize', render);
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
+        new ResizeObserver(render).observe(canvas);
+      })();
+    </script>
+  </body>
 </html>

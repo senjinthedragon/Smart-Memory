@@ -66,8 +66,10 @@ import {
   MEMORY_TYPES,
   META_KEY,
   MAX_RETIRED_POOL,
+  generateMemoryId,
 } from './constants.js';
 import { replaceTemplate } from './template-utils.js';
+import { getResolvedRetconFact } from './continuity-utils.js';
 import {
   applyGraphDefaults,
   loadCharacterEntityRegistry,
@@ -258,6 +260,85 @@ export function saveCharacterMemories(characterName, memories) {
     memories,
     lastUpdated: Date.now(),
   };
+}
+
+/**
+ * Normalises memory/fact text for loose matching (case and whitespace only).
+ *
+ * @param {*} text
+ * @returns {string}
+ */
+function normalizeMemoryText(text) {
+  return String(text ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Applies a resolved/accepted durable retcon to a character's long-term store.
+ *
+ * The memory whose content matches the retcon's original fact is retired via
+ * `superseded_by`, and the resolved fact is stored as a new active baseline.
+ * This prevents the continuity checker from re-flagging a contradiction whose
+ * retcon window has ended: the old fact is no longer presented as established.
+ *
+ * @param {string} characterName
+ * @param {Object} retcon
+ * @returns {boolean} True when a memory was superseded or created.
+ */
+export function applyRetconToLongterm(characterName, retcon) {
+  if (!characterName || !retcon || typeof retcon !== 'object') return false;
+
+  const oldFact = normalizeMemoryText(retcon.fact);
+  const resolvedFact = String(getResolvedRetconFact(retcon) ?? '').trim();
+  const normalizedResolved = normalizeMemoryText(resolvedFact);
+  if (!oldFact || !resolvedFact || oldFact === normalizedResolved) return false;
+
+  const memories = loadCharacterMemories(characterName);
+  const active = memories.filter((memory) => !memory.superseded_by);
+
+  const oldMemory =
+    active.find((memory) => normalizeMemoryText(memory.content) === oldFact) ??
+    active.find((memory) => normalizeMemoryText(memory.content).includes(oldFact)) ??
+    active.find((memory) => {
+      const content = normalizeMemoryText(memory.content);
+      return content.length >= 8 && oldFact.includes(content);
+    });
+
+  let resolvedMemory = active.find(
+    (memory) => memory !== oldMemory && normalizeMemoryText(memory.content) === normalizedResolved,
+  );
+
+  if (!resolvedMemory) {
+    resolvedMemory = {
+      id: generateMemoryId(),
+      type: 'fact',
+      content: resolvedFact,
+      ts: Date.now(),
+      consolidated: false,
+      importance: 2,
+      expiration: 'permanent',
+      confidence: 0.9,
+      supersedes: oldMemory ? [oldMemory.id] : [],
+    };
+    if (Number.isInteger(retcon.as_of_msg)) resolvedMemory.valid_from = retcon.as_of_msg;
+    memories.push(resolvedMemory);
+  } else if (oldMemory && resolvedMemory !== oldMemory) {
+    if (!Array.isArray(resolvedMemory.supersedes)) resolvedMemory.supersedes = [];
+    if (!resolvedMemory.supersedes.includes(oldMemory.id)) {
+      resolvedMemory.supersedes.push(oldMemory.id);
+    }
+  }
+
+  if (oldMemory) {
+    oldMemory.superseded_by = resolvedMemory.id;
+    oldMemory.valid_to = Number.isInteger(retcon.as_of_msg) ? retcon.as_of_msg : Date.now();
+  }
+
+  saveCharacterMemories(characterName, memories);
+  saveSettingsDebounced();
+  return true;
 }
 
 /**
