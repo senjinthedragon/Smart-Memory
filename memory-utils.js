@@ -36,6 +36,7 @@
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
  * splitSummarySections      - splits a formatted short-term summary into numbered sections
  * truncateSummaryToBudget   - trims earlier summary sections while preserving Current Moment and Next Beat
+ * matchSubjectToMember      - resolves an epistemic subject to a group member (exact/first-name/partial)
  * partitionEpistemicEntriesBySubject - groups group-chat epistemic entries into per-character buckets
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
@@ -915,22 +916,47 @@ export function adaptiveBudgets(settings, turnType) {
 
 // ---- Summary section helpers ------------------------------------------------
 
-// Matches a numbered summary section header at the start of a line, e.g. "3. Key Events:".
-const SUMMARY_SECTION_RE = /^[ \t]*(\d+)\.\s/gm;
+// Canonical summary section titles, keyed by section number. A numbered line is
+// only treated as a section header when its title matches the canonical title
+// for that number. Without this, numbered lists inside Section 3 (Key Events)
+// - e.g. "8. Fought the bandits" - are mis-identified as Sections 8 and 9, which
+// corrupts truncation by treating story beats as the Current Moment/Next Beat.
+const SUMMARY_SECTION_TITLES = {
+  1: /^scene\s*(?:&|and)\s*setting\b/i,
+  2: /^characters?\s+present\b/i,
+  3: /^key\s+events?\b/i,
+  4: /^relationship\s+dynamics\b/i,
+  5: /^revealed\s+information\b/i,
+  6: /^story\s+threads?\b/i,
+  7: /^user'?s?\s+direction\b/i,
+  8: /^current\s+moment\b/i,
+  9: /^next\s+beat\b/i,
+};
+
+// Matches a numbered line at the start of a line, e.g. "3. Key Events:". The
+// captured remainder is validated against SUMMARY_SECTION_TITLES before use.
+const SUMMARY_SECTION_HEADER_RE = /^[ \t]*(\d+)\.\s*(.*)$/gm;
 
 /**
  * Splits a formatted short-term summary into its numbered sections.
  *
  * Returns the text before the first section as `preamble` and one entry per
- * numbered section. Any text that does not follow the numbered format keeps
- * the whole input in `preamble` with an empty `sections` array.
+ * recognised section. Only lines whose number maps to a canonical section title
+ * count as headers, so numbered lists nested inside a section's body are ignored.
+ * Any text that does not follow the numbered format keeps the whole input in
+ * `preamble` with an empty `sections` array.
  *
  * @param {string} summary
  * @returns {{ preamble: string, sections: Array<{num: number, text: string}> }}
  */
 export function splitSummarySections(summary) {
   const text = String(summary ?? '');
-  const matches = [...text.matchAll(SUMMARY_SECTION_RE)];
+  const matches = [...text.matchAll(SUMMARY_SECTION_HEADER_RE)].filter((match) => {
+    const num = Number(match[1]);
+    const title = SUMMARY_SECTION_TITLES[num];
+    if (!title) return false;
+    return title.test(match[2].trim());
+  });
   if (matches.length === 0) return { preamble: text.trim(), sections: [] };
 
   const preamble = text.slice(0, matches[0].index).trim();
@@ -1061,34 +1087,79 @@ export function truncateSummaryToBudget(summary, budget) {
 }
 
 /**
+ * Resolves an epistemic subject to one of the group's canonical member names.
+ *
+ * Weak models rarely echo a full member name in the subject field: they write
+ * the first name, a token, or a partial form ("Elara" for "Elara Voss", "Kael"
+ * for "Kael Draven", "Picard" for "Jean-Luc Picard"). This matcher accepts, in
+ * order of confidence:
+ * - an exact case-insensitive name match
+ * - a whitespace-separated token of the member of length >= 2 (first name)
+ * - a prefix/suffix match ("Elara" against "Elara Voss")
+ * - a substring match when the subject is at least 4 characters long
+ *
+ * @param {string} subject
+ * @param {string[]} memberNames
+ * @returns {string|null} The canonical member name, or null when no member matches.
+ */
+export function matchSubjectToMember(subject, memberNames) {
+  const s = String(subject ?? '')
+    .trim()
+    .toLowerCase();
+  if (!s) return null;
+
+  const names = Array.isArray(memberNames) ? memberNames.filter(Boolean) : [];
+  if (names.length === 0) return null;
+
+  // 1. Exact case-insensitive match.
+  for (const member of names) {
+    if (String(member).toLowerCase() === s) return member;
+  }
+
+  // 2. Token / first-name, prefix/suffix, and substring matches.
+  for (const member of names) {
+    const m = String(member).toLowerCase();
+    const tokens = m.split(/\s+/).filter(Boolean);
+    if (tokens.some((token) => token.length >= 2 && token === s)) return member;
+    if (m.startsWith(`${s} `) || m.endsWith(` ${s}`)) return member;
+    if (s.length >= 4 && m.includes(s)) return member;
+  }
+
+  return null;
+}
+
+/**
  * Partitions parsed epistemic entries into per-character buckets.
  *
  * Group extraction returns entries for several characters in one response.
  * Each entry is assigned to the group member whose name matches its subject
- * (case-insensitive). Entries whose subject is not a group member are
- * returned in `skipped` so the caller can log them rather than storing them
- * under an arbitrary key.
+ * using matchSubjectToMember (exact, first-name/token, prefix/suffix, or
+ * substring). Entries whose subject is not a group member are returned in
+ * `skipped` so the caller can log them rather than storing them under an
+ * arbitrary key.
  *
  * @param {Array<{subject?: string}>} entries
  * @param {string[]} memberNames
  * @returns {{ grouped: Map<string, Array<Object>>, skipped: Array<Object> }}
  */
 export function partitionEpistemicEntriesBySubject(entries, memberNames) {
-  const canonical = new Map();
-  for (const name of memberNames ?? []) {
-    if (!name) continue;
-    canonical.set(String(name).toLowerCase(), name);
+  const names = [];
+  const seen = new Set();
+  for (const raw of memberNames ?? []) {
+    if (!raw) continue;
+    const name = String(raw);
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
   }
 
   const grouped = new Map();
-  for (const name of canonical.values()) grouped.set(name, []);
+  for (const name of names) grouped.set(name, []);
 
   const skipped = [];
   for (const entry of entries ?? []) {
-    const subject = String(entry?.subject ?? '')
-      .trim()
-      .toLowerCase();
-    const name = canonical.get(subject);
+    const name = matchSubjectToMember(entry?.subject, names);
     if (!name) {
       skipped.push(entry);
       continue;

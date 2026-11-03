@@ -146,6 +146,9 @@ export async function getEmbeddingBatch(texts) {
   const model = settings.embedding_model || 'nomic-embed-text';
   const keep = settings.embedding_keep ?? false;
   const source = settings.embedding_source ?? 'ollama';
+  // Remote endpoints in the browser require SillyTavern's CORS proxy; this lets
+  // the catch block explain the real cause when the request fails.
+  const isRemoteHttp = /^https?:\/\//i.test(baseUrl) && !isLocalUrl(baseUrl);
 
   try {
     let vectors;
@@ -184,16 +187,28 @@ export async function getEmbeddingBatch(texts) {
         result.set(uncached[i], vector);
       }
     }
-  } catch {
+  } catch (err) {
     // Network error, model not found, server not running - callers fall back to Jaccard.
     // Warn once per session so the user knows deduplication quality is degraded.
+    console.error('[SmartMemory] Embedding request failed:', err);
     if (!embeddingWarnedThisSession) {
       embeddingWarnedThisSession = true;
-      toastr?.warning(
-        'Embedding model unreachable - falling back to keyword matching. Check your embedding URL and model name.',
-        'Smart Memory',
-        { timeOut: 8000 },
-      );
+      // A remote endpoint contacted directly from the browser is almost always
+      // blocked by CORS. SillyTavern can proxy it, but only when enabled in
+      // config.yaml. Give the user the exact fix rather than a generic warning.
+      if (isRemoteHttp && isBrowserContext()) {
+        toastr?.error(
+          'Remote embedding API failed (likely blocked by CORS). In SillyTavern, set enableCORSProxy: true in config.yaml and restart, or switch to a local Ollama embedding model.',
+          'Smart Memory',
+          { timeOut: 12000 },
+        );
+      } else {
+        toastr?.warning(
+          'Embedding model unreachable - falling back to keyword matching. Check your embedding URL and model name.',
+          'Smart Memory',
+          { timeOut: 8000 },
+        );
+      }
     }
   }
 

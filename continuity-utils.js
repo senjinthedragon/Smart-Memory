@@ -34,8 +34,53 @@
  * isPendingRepairAnchorValid  - verifies a queued repair still matches its anchor message
  */
 
+import { hasStateChangeMarker } from './similarity.js';
+
 /** Only these contradiction categories are permitted through validation. */
 export const CONTINUITY_CATEGORIES = ['permanent_trait', 'backstory', 'world_rule', 'death'];
+
+// Active in-story transformation / transition verbs. When one of these appears
+// in the same clause as the quoted trait, the trait is being changed on-screen -
+// that is story progression, not a permanent contradiction. The checker prompt
+// asks the model to ignore these, but weak models still report them, so the
+// validator drops them deterministically.
+const TRANSFORMATION_PATTERNS = [
+  /\bturned\b/i,
+  /\bturns\b/i,
+  /\bturning\b/i,
+  /\bbecame\b/i,
+  /\bbecomes\b/i,
+  /\bbecoming\b/i,
+  /\bchanged\b/i,
+  /\bchanges\b/i,
+  /\bchanging\b/i,
+  /\btransformed\b/i,
+  /\btransforms\b/i,
+  /\btransforming\b/i,
+  /\bmutated\b/i,
+  /\bmutates\b/i,
+  /\baltered\b/i,
+  /\baltering\b/i,
+  /\bhealed\b/i,
+  /\bheals\b/i,
+  /\bhealing\b/i,
+  /\bdyed\b/i,
+  /\bdyeing\b/i,
+  /\bredyed\b/i,
+  /\bdisguised\b/i,
+  /\bdisguise\b/i,
+  /\bsevered\b/i,
+  /\bcast (?:a|the) spell\b/i,
+  /\bspell\b/i,
+  /\bcurse\b/i,
+  /\bcursed\b/i,
+  /\benchanted\b/i,
+  /\bpolymorphed\b/i,
+  /\bregrew\b/i,
+  /\bgrew back\b/i,
+  /\bshifted\b/i,
+  /\bshift(?:s|ing)? (?:shape|form|into)\b/i,
+];
 
 const CATEGORY_SET = new Set(CONTINUITY_CATEGORIES);
 
@@ -116,6 +161,62 @@ export function hashText(str) {
 }
 
 /**
+ * Splits text into sentence-ish fragments on sentence punctuation and newlines.
+ * Used to isolate the clause surrounding a quoted trait so transformation
+ * markers can be detected locally rather than across the whole response.
+ * @param {string} text
+ * @returns {string[]}
+ */
+function splitSentences(text) {
+  return String(text ?? '')
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Returns true when the given sentence describes an active, on-screen
+ * transformation or transition - the trait is being changed by the story rather
+ * than silently contradicting an established permanent fact.
+ * @param {string} sentence
+ * @returns {boolean}
+ */
+function sentenceShowsTransformation(sentence) {
+  if (!sentence) return false;
+  if (TRANSFORMATION_PATTERNS.some((pattern) => pattern.test(sentence))) return true;
+  return hasStateChangeMarker(sentence);
+}
+
+/**
+ * Returns true when the recent transcript already depicts this same transition,
+ * meaning the latest response is continuing an established story event rather
+ * than introducing an unmotivated contradiction.
+ * @param {string} recentTranscript
+ * @param {string} quote - Normalized response quote.
+ * @returns {boolean}
+ */
+function transcriptDepictsTransition(recentTranscript, quote) {
+  if (!recentTranscript || !quote) return false;
+
+  const normalizedTranscript = normalize(recentTranscript);
+  // The quoted state already appears in the transcript - the story reached it
+  // before this turn, so it is established progression.
+  if (normalizedTranscript.includes(quote)) return true;
+
+  // Otherwise look for a transformation clause in the transcript that shares
+  // meaningful words with the quote (e.g. "a spell turned her eyes crimson"
+  // paired with a quote about her eyes).
+  const quoteWords = new Set(quote.split(/\s+/).filter((w) => w.length >= 3));
+  return splitSentences(recentTranscript).some((sentence) => {
+    if (!sentenceShowsTransformation(sentence)) return false;
+    const words = normalize(sentence)
+      .split(/\s+/)
+      .filter((w) => w.length >= 3);
+    return words.some((w) => quoteWords.has(w));
+  });
+}
+
+/**
  * Validates a model-reported contradiction against the actual evidence.
  *
  * A contradiction is only accepted when ALL of the following hold:
@@ -123,6 +224,12 @@ export function hashText(str) {
  * - it supplies a substantive why_not_progression explanation
  * - response_quote appears verbatim (normalized) in the latest response
  * - fact appears verbatim (normalized) in the baseline notes
+ * - the quoted trait is not being actively transformed on-screen
+ *
+ * The final check rejects false positives where a permanent trait is described
+ * differently because the story itself is changing it in-scene (a spell turned
+ * her eyes crimson, she dyed her hair, his leg was severed, and so on). That is
+ * progression, not a contradiction.
  *
  * Anything else is treated as unverifiable and dropped. This is the main guard
  * against the checker inventing drift that the transcript disproves.
@@ -130,9 +237,10 @@ export function hashText(str) {
  * @param {Object} issue - Parsed contradiction object.
  * @param {string} latestText - The latest AI response text.
  * @param {string} factsText - The established-facts/baseline block.
+ * @param {string} [recentTranscript=''] - The turns preceding the latest response.
  * @returns {boolean} True when the issue is safe to act on.
  */
-export function validateIssue(issue, latestText, factsText) {
+export function validateIssue(issue, latestText, factsText, recentTranscript = '') {
   if (!issue || typeof issue !== 'object') return false;
 
   const category = String(issue.category ?? '')
@@ -150,6 +258,15 @@ export function validateIssue(issue, latestText, factsText) {
   const fact = normalize(issue.fact);
   if (fact.length < 3) return false;
   if (!normalize(factsText).includes(fact)) return false;
+
+  // Reject active in-story transformations. Find the sentence in the latest
+  // response that contains the quote and check whether it describes a change.
+  const containingSentence =
+    splitSentences(latestText).find((sentence) => normalize(sentence).includes(quote)) ?? '';
+  if (sentenceShowsTransformation(containingSentence)) return false;
+
+  // If the recent transcript already depicts this transition, it is progression.
+  if (transcriptDepictsTransition(recentTranscript, quote)) return false;
 
   return true;
 }
@@ -222,11 +339,14 @@ export function parseContinuityJson(response) {
  * Checks whether a queued repair is still anchored to an unchanged message.
  *
  * The anchor is the last AI message that existed when the continuity check ran.
- * If that message was swiped, edited, or deleted, its text hash no longer
- * matches and the queued note must be discarded - otherwise it could be applied
- * to a story branch it was never written for.
+ * The note is only valid while the conversation is still poised to apply it:
+ * - the anchor must still be an AI message at its recorded index
+ * - its text hash must still match (not swiped, edited, or deleted)
+ * - no later AI turn may exist yet - once another response was generated, the
+ *   note is stale and would be applied to a branch it was never written for
+ * - at most one non-system message (the immediate pending user turn) may follow
  *
- * @param {Array<{mes?: string}>} chat
+ * @param {Array<{mes?: string, is_user?: boolean, is_system?: boolean}>} chat
  * @param {{anchorIdx?: number, anchorHash?: string}|null} pendingRepair
  * @returns {boolean}
  */
@@ -239,6 +359,17 @@ export function isPendingRepairAnchorValid(chat, pendingRepair) {
 
   const anchor = chat[idx];
   if (!anchor || typeof anchor.mes !== 'string') return false;
+  // The anchor must be an assistant turn - a repair note is anchored on the AI
+  // response that triggered it.
+  if (anchor.is_user || anchor.is_system) return false;
 
-  return hashText(anchor.mes) === pendingRepair.anchorHash;
+  if (hashText(anchor.mes) !== pendingRepair.anchorHash) return false;
+
+  const trailing = chat.slice(idx + 1);
+  // Another AI turn was generated after the anchor: the note is stale.
+  if (trailing.some((m) => m && !m.is_user && !m.is_system)) return false;
+  // Only the immediate pending user turn may follow the anchor.
+  if (trailing.filter((m) => m && !m.is_system).length > 1) return false;
+
+  return true;
 }

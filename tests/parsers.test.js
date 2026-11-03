@@ -11,6 +11,7 @@ import {
   parseRelationshipDeltaResponse,
   parseStateCardResponse,
 } from '../parsers.js';
+import { buildStateCardPrompt } from '../prompts.js';
 
 // =========================================================================
 // parseExtractionOutput
@@ -607,4 +608,57 @@ test('parseStateCardResponse: unrelated noise values are still skipped', () => {
   assert.ok(fields);
   assert.equal(fields.active_goal, 'find the key');
   assert.equal('mood' in fields, false);
+});
+
+test('parseStateCardResponse: location=none is an unmentioned placeholder, not a clear', () => {
+  const result = parseStateCardResponse('[state:Kael:character] location=none | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.mood, 'calm');
+  // `none` on an attribute means "unmentioned" - it must neither store nor clear.
+  assert.equal('location' in fields, false);
+  assert.equal(fields.location, undefined);
+});
+
+test('parseStateCardResponse: injuries=healed clears a collection field', () => {
+  const result = parseStateCardResponse('[state:Kael:character] injuries=healed | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.injuries, '');
+  assert.equal(fields.mood, 'calm');
+});
+
+test('parseStateCardResponse: bare !carried_items clears the collection field', () => {
+  const result = parseStateCardResponse('[state:Kael:character] !carried_items | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.carried_items, '');
+  assert.equal(fields.mood, 'calm');
+});
+
+test('parseStateCardResponse: explicit cleared still clears an attribute field', () => {
+  const result = parseStateCardResponse('[state:Kael:character] location=cleared');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.location, '');
+});
+
+test('parseStateCardResponse: injuries=unknown is skipped, neither stored nor cleared', () => {
+  const result = parseStateCardResponse('[state:Kael:character] injuries=unknown | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal('injuries' in fields, false);
+  assert.equal(fields.mood, 'calm');
+});
+
+test('buildStateCardPrompt: documents clearing vs. unmentioned attributes', () => {
+  const prompt = buildStateCardPrompt('Kael: I sheathe my sword.', [
+    { name: 'Kael', type: 'character' },
+  ]);
+
+  assert.match(prompt, /ENDED, HEALED, or/);
+  assert.match(prompt, /fieldname=cleared or fieldname=none/);
+  assert.match(prompt, /!carried_items/);
+  assert.match(prompt, /UNMENTIONED or UNKNOWN/);
+  assert.match(prompt, /Do NOT write location=unknown or location=none/);
 });

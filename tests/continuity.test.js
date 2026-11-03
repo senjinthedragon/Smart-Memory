@@ -499,3 +499,128 @@ test('reconcileEntityRegistry: keeps seeded characters when pruning unlinked ent
   assert.equal(ids.includes('ghost'), false, 'unlinked non-seeded entity should be pruned');
   assert.deepEqual(registry.find((e) => e.id === 'obj').memory_ids, ['m1']);
 });
+
+// =========================================================================
+// In-story transformations are progression, not contradictions
+// =========================================================================
+
+test('buildContinuityPrompt: rule 7 marks active in-story transformations as progression', () => {
+  const prompt = buildContinuityPrompt('facts', 'transcript', 'latest');
+
+  assert.match(prompt, /ACTIVE IN-STORY TRANSFORMATIONS ARE PROGRESSION/);
+  assert.match(prompt, /a spell turned her eyes crimson/);
+  assert.match(prompt, /she dyed her hair/);
+  assert.match(prompt, /NEVER flag it as a contradiction/);
+});
+
+test('validateIssue: rejects a trait actively transformed in the latest response', () => {
+  const facts = 'Elara has silver eyes.';
+  const latest = 'A spell turned her eyes crimson, and she gasped at the change.';
+  const issue = {
+    fact: 'Elara has silver eyes.',
+    response_quote: 'her eyes crimson',
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is a fixed permanent trait that cannot change.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts), false);
+});
+
+test('validateIssue: rejects dyed hair as progression, not a contradiction', () => {
+  const facts = 'Elara has silver hair.';
+  const latest = 'She dyed her hair, and her hair was now black.';
+  const issue = {
+    fact: 'Elara has silver hair.',
+    response_quote: 'her hair was now black',
+    category: 'permanent_trait',
+    why_not_progression: 'Hair colour is permanent and nothing changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts), false);
+});
+
+test('validateIssue: rejects a severed limb described in-scene', () => {
+  const facts = 'Kael has two legs.';
+  const latest = 'The blade caught him and his leg was severed below the knee.';
+  const issue = {
+    fact: 'Kael has two legs.',
+    response_quote: 'his leg was severed',
+    category: 'permanent_trait',
+    why_not_progression: 'Body composition is permanent and cannot change.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts), false);
+});
+
+test('validateIssue: rejects when the recent transcript already depicts the transition', () => {
+  const facts = 'Elara has silver hair.';
+  const latest = 'Elara tied back her black hair before the fight.';
+  const transcript = '[Elara] Last night I dyed my hair black for the festival.';
+  const issue = {
+    fact: 'Elara has silver hair.',
+    response_quote: 'her black hair',
+    category: 'permanent_trait',
+    why_not_progression: 'Hair colour is permanent and cannot change.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts, transcript), false);
+});
+
+test('validateIssue: still accepts an unmotivated permanent contradiction', () => {
+  const facts = 'Elara is a high elf.';
+  const latest = 'Elara revealed she is a dwarf and always has been.';
+  const issue = {
+    fact: 'Elara is a high elf.',
+    response_quote: 'she is a dwarf',
+    category: 'permanent_trait',
+    why_not_progression: 'Species cannot change and no event in the scene altered it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts), true);
+});
+
+// =========================================================================
+// Repair anchor staleness (no later AI turn, at most one pending user turn)
+// =========================================================================
+
+test('anchored repair: valid with a single pending user turn after the anchor', () => {
+  const chat = [
+    { name: 'Elara', mes: 'The room is empty.' },
+    { is_user: true, mes: 'I step inside.' },
+  ];
+  const pendingRepair = { note: 'n', anchorIdx: 0, anchorHash: hashText(chat[0].mes) };
+
+  assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), true);
+});
+
+test('anchored repair: invalidated once another AI turn is generated', () => {
+  const chat = [
+    { name: 'Elara', mes: 'The room is empty.' },
+    { is_user: true, mes: 'I step inside.' },
+    { name: 'Elara', mes: 'A wraith shrieks in the dark.' },
+  ];
+  const pendingRepair = { note: 'n', anchorIdx: 0, anchorHash: hashText(chat[0].mes) };
+
+  assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), false);
+});
+
+test('anchored repair: invalidated when more than one non-system message follows', () => {
+  const chat = [
+    { name: 'Elara', mes: 'The room is empty.' },
+    { is_user: true, mes: 'I step inside.' },
+    { is_user: true, mes: 'I draw my sword.' },
+  ];
+  const pendingRepair = { note: 'n', anchorIdx: 0, anchorHash: hashText(chat[0].mes) };
+
+  assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), false);
+});
+
+test('anchored repair: invalidated when the anchor is not an AI message', () => {
+  const chat = [
+    { name: 'Elara', mes: 'The room is empty.' },
+    { is_user: true, mes: 'I step inside.' },
+  ];
+  const pendingRepair = { note: 'n', anchorIdx: 1, anchorHash: hashText(chat[1].mes) };
+
+  assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), false);
+});
