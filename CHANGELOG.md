@@ -54,6 +54,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Complete tier clearing.** Cancelled catch-up clears the tier's extension
   slot, macro content, and the materialized unified prompt/cache so stale
   context cannot linger in macro or unified injection modes.
+- **Provenance hardening and lifecycle correlation.** Source ranges must be
+  non-negative and ordered (`start <= end`) to count as usable, and chat ids are
+  normalized (`String(...)`) consistently across provenance union, rollback, and
+  UI source links. Generation start/terminal events are paired FIFO
+  (`correlateGenerationGate`) so a delayed stop from an old generation cannot
+  clear a newer generation's gate. Duplicate chat-load events coalesce even when
+  the chat id is temporarily null, using the chat metadata reference as a
+  secondary lifecycle token, and stale detached recap callbacks no longer mutate
+  a newer chat's loader/status.
 - **Metadata bounding and retention caps.** Arc summaries are capped to 50 recent
   items, canon prompt arc summary inputs are capped to 20, and epistemic entries are
   capped to 100 per chat. Epistemic `[retire]` directives are guarded against mass

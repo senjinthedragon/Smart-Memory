@@ -127,7 +127,13 @@ import {
   seedCharacterEntity,
 } from './graph-migration.js';
 import { generateProfiles, injectProfiles, loadProfiles } from './profiles.js';
-import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
+import {
+  classifyTurn,
+  adaptiveBudgets,
+  correlateGenerationGate,
+  isDuplicateChatLoad,
+  recapCompletionOwnsSlot,
+} from './memory-utils.js';
 import { clearUnifiedSlot, maybeInjectUnified } from './unified-inject.js';
 import { registerSmartMemoryMacros } from './macros.js';
 import { smLog } from './logging.js';
@@ -189,6 +195,19 @@ let generationInProgress = false;
 // so extraction can resume instead of being suppressed forever.
 let generationStartTime = 0;
 
+// Count of normal generations that have started but not yet been matched by a
+// terminal event. SillyTavern's GENERATION_STOPPED/GENERATION_ENDED carry no
+// generation id, so a delayed terminal for an older generation could otherwise
+// clear a newer generation's gate. The pending count lets correlateGenerationGate
+// pair starts and terminals FIFO and only clear the gate when the newest
+// generation is the one terminating.
+let generationPending = 0;
+
+// Timestamp of the last processed terminal event. Back-to-back
+// GENERATION_STOPPED + GENERATION_ENDED for the SAME generation are collapsed
+// within GENERATION_TERMINAL_COALESCE_MS so a generation is dequeued once.
+let lastGenerationTerminalAt = -Infinity;
+
 // Timer that force-clears generationInProgress when no terminal generation event
 // arrives. The flag is normally cleared by MESSAGE_RECEIVED or by the terminal
 // GENERATION_STOPPED/GENERATION_ENDED events, but a generation that is aborted or
@@ -218,6 +237,30 @@ function clearGenerationWatchdog() {
 }
 
 /**
+ * Applies a generation lifecycle event to the module-level gate state via the
+ * pure correlator in memory-utils.js. Keeps the correlation logic testable under
+ * plain Node while the watchdog/timestamp side-effects stay here.
+ * @param {'start'|'complete'|'terminal'|'reset'} event
+ * @param {number} [now] - Monotonic ms timestamp for terminal coalescing.
+ * @returns {{pending: number, inProgress: boolean, lastTerminalAt: number}}
+ */
+function applyGenerationGateEvent(event, now = Date.now()) {
+  const next = correlateGenerationGate(
+    {
+      pending: generationPending,
+      inProgress: generationInProgress,
+      lastTerminalAt: lastGenerationTerminalAt,
+    },
+    event,
+    now,
+  );
+  generationPending = next.pending;
+  generationInProgress = next.inProgress;
+  lastGenerationTerminalAt = next.lastTerminalAt;
+  return next;
+}
+
+/**
  * Starts (or restarts) the watchdog that clears generationInProgress if no
  * terminal generation event arrives within 90 seconds. Increments the
  * generation token so this watchdog only clears the flag while its own
@@ -228,7 +271,7 @@ function startGenerationWatchdog() {
   const myToken = ++activeGenerationToken;
   generationWatchdogId = setTimeout(() => {
     if (activeGenerationToken !== myToken) return; // a newer generation owns the gate
-    generationInProgress = false;
+    applyGenerationGateEvent('reset');
     generationStartTime = 0;
     generationWatchdogId = null;
   }, 90000);
@@ -534,7 +577,8 @@ async function onCharacterMessageRendered(messageId, type) {
   // Fail-safe: if a terminal generation event was missed, the flag can stick
   // true and block extraction indefinitely. Clear it once it is clearly stale.
   if (generationInProgress && Date.now() - generationStartTime > 60000) {
-    generationInProgress = false;
+    applyGenerationGateEvent('reset');
+    generationStartTime = 0;
     clearGenerationWatchdog();
   }
 
@@ -1162,7 +1206,13 @@ let chatLoadId = 0;
 // twice for one logical change. Duplicate events for the SAME chat within a
 // short window are coalesced into a single bump. A genuine switch to a
 // different chat id never coalesces and always bumps.
-let lastChatInvalidatedId = null;
+//
+// Identity has two parts: the normalized chat id (numeric/string-equivalent) and
+// the chatMetadata object reference. The id is authoritative when available; the
+// metadata reference is a per-load lifecycle token used when getCurrentChatId()
+// is temporarily null during a load, so duplicate events are still coalesced
+// instead of bumping the revision twice.
+let lastChatLoadIdentity = { id: null, meta: null };
 let lastChatInvalidatedAt = 0;
 
 // Sentinel thrown inside the extraction try/finally when a chat switch is detected
@@ -1182,18 +1232,25 @@ function onChatChanged() {
   // operationRevision must only advance once per logical chat change.
   const now = Date.now();
   const chatId = getCurrentChatId();
-  const coalesce =
-    chatId != null && chatId === lastChatInvalidatedId && now - lastChatInvalidatedAt < 300;
+  // `chatMetadata` is a fresh object per loaded chat, so its reference doubles
+  // as a per-load lifecycle token when the chat id is not yet available.
+  const chatMeta = getContext().chatMetadata ?? null;
+  const nextIdentity = { id: chatId == null ? null : String(chatId), meta: chatMeta };
+  const coalesce = isDuplicateChatLoad(
+    lastChatLoadIdentity,
+    nextIdentity,
+    now - lastChatInvalidatedAt,
+  );
 
   if (!coalesce) {
     ++chatLoadId;
     bumpOperationRevision();
-    lastChatInvalidatedId = chatId;
+    lastChatLoadIdentity = nextIdentity;
     lastChatInvalidatedAt = now;
 
-    // A chat switch ends any generation in this context. Clear the flag
+    // A chat switch ends any generation in this context. Clear the gate
     // immediately so a stuck value cannot suppress extraction in the new chat.
-    generationInProgress = false;
+    applyGenerationGateEvent('reset');
     generationStartTime = 0;
     clearGenerationWatchdog();
   }
@@ -1356,20 +1413,45 @@ async function onChatChangedImpl() {
           const groupRecapHandle = activeRecapHandle;
           generateRecap()
             .then((recap) => {
+              // The recap promise is detached from onChatChangedImpl, so it can
+              // resolve after the user has switched chats and a different recap
+              // has claimed the active slot. If we no longer own the slot, return
+              // BEFORE touching the loader, status text, or suppression flag -
+              // those now belong to the new chat, and clearing them here would
+              // erase its recap UI.
+              if (
+                !recapCompletionOwnsSlot({
+                  capturedMeta: groupChatMeta,
+                  currentMeta: getContext().chatMetadata,
+                  capturedHandle: groupRecapHandle,
+                  activeHandle: activeRecapHandle,
+                })
+              ) {
+                return;
+              }
               stopActivityLoader(groupRecapHandle);
               activeRecapHandle = null;
-              const stillThisChat = getContext().chatMetadata === groupChatMeta;
               if (recapRunningForChat === groupChatMeta) recapRunningForChat = null;
               const suppressed = recapSuppressed;
               recapSuppressed = false;
               setStatusMessage('');
-              if (!stillThisChat || suppressed) return;
+              if (suppressed) return;
               if (recap) {
                 recapOverlayChatMeta = groupChatMeta;
                 displayRecap(recap, hoursAway);
               }
             })
             .catch((err) => {
+              if (
+                !recapCompletionOwnsSlot({
+                  capturedMeta: groupChatMeta,
+                  currentMeta: getContext().chatMetadata,
+                  capturedHandle: groupRecapHandle,
+                  activeHandle: activeRecapHandle,
+                })
+              ) {
+                return;
+              }
               stopActivityLoader(groupRecapHandle);
               activeRecapHandle = null;
               if (recapRunningForChat === groupChatMeta) recapRunningForChat = null;
@@ -1459,14 +1541,29 @@ async function onChatChangedImpl() {
         const soloRecapHandle = activeRecapHandle;
         generateRecap()
           .then((recap) => {
+            // The recap promise is detached from onChatChangedImpl, so it can
+            // resolve after the user has switched chats and a different recap
+            // has claimed the active slot. If we no longer own the slot, return
+            // BEFORE touching the loader, status text, or suppression flag -
+            // those now belong to the new chat, and clearing them here would
+            // erase its recap UI.
+            if (
+              !recapCompletionOwnsSlot({
+                capturedMeta: soloChatMeta,
+                currentMeta: getContext().chatMetadata,
+                capturedHandle: soloRecapHandle,
+                activeHandle: activeRecapHandle,
+              })
+            ) {
+              return;
+            }
             stopActivityLoader(soloRecapHandle);
             activeRecapHandle = null;
-            const stillThisChat = getContext().chatMetadata === soloChatMeta;
             if (recapRunningForChat === soloChatMeta) recapRunningForChat = null;
             const suppressed = recapSuppressed;
             recapSuppressed = false;
             setStatusMessage('');
-            if (!stillThisChat || suppressed) return;
+            if (suppressed) return;
             if (recap) {
               // Pass hoursAway explicitly - updateLastActive() runs after this
               // async block starts, so getAwayHours() inside displayRecap would
@@ -1476,6 +1573,16 @@ async function onChatChangedImpl() {
             }
           })
           .catch((err) => {
+            if (
+              !recapCompletionOwnsSlot({
+                capturedMeta: soloChatMeta,
+                currentMeta: getContext().chatMetadata,
+                capturedHandle: soloRecapHandle,
+                activeHandle: activeRecapHandle,
+              })
+            ) {
+              return;
+            }
             stopActivityLoader(soloRecapHandle);
             activeRecapHandle = null;
             if (recapRunningForChat === soloChatMeta) recapRunningForChat = null;
@@ -2322,7 +2429,7 @@ jQuery(async function () {
     // skipped when another extension fires a quiet generation between
     // MESSAGE_RECEIVED and CHARACTER_MESSAGE_RENDERED.
     if (type === 'normal') {
-      generationInProgress = true;
+      applyGenerationGateEvent('start');
       generationStartTime = Date.now();
       startGenerationWatchdog();
       $('#sm_recap_overlay').remove();
@@ -2335,37 +2442,33 @@ jQuery(async function () {
   });
   eventSource.on(event_types.MESSAGE_RECEIVED, () => {
     if (generationInProgress) {
-      generationInProgress = false;
+      // Open the gate so the completed message is extracted, but retain the
+      // generation's pending slot for the terminal event that follows. This
+      // keeps the FIFO pairing intact when a newer generation starts before the
+      // older one's terminal is delivered.
+      applyGenerationGateEvent('complete');
       clearGenerationWatchdog();
     }
   });
   // Terminal generation paths. A cancelled or stopped generation produces no
   // MESSAGE_RECEIVED and no CHARACTER_MESSAGE_RENDERED, which would otherwise
-  // leave generationInProgress stuck true and suppress extraction for every
-  // subsequent message. Clear the flag on both terminal events, but only while a
-  // generation is actually in progress so an uncorrelated late event cannot
-  // disturb a gate that is already clear.
+  // leave the gate stuck true and suppress extraction for every subsequent
+  // message.
   //
-  // Host generation events carry no generation id, so a stale terminal event
-  // cannot be correlated with the generation that owns the gate. It is accepted
-  // as authoritative rather than risk leaving the gate stuck: a genuine stop
-  // right after start must always clear it, and the token-scoped watchdog - not
-  // the event - is the guard against a stale timer. A late stop therefore only
-  // ever clears a gate that is already clear or that belongs to a generation
-  // which has itself already ended, so the worst case is a redundant clear,
-  // never a permanently stuck gate.
-  eventSource.on(event_types.GENERATION_STOPPED, () => {
-    if (generationInProgress) {
-      generationInProgress = false;
-      clearGenerationWatchdog();
-    }
-  });
-  eventSource.on(event_types.GENERATION_ENDED, () => {
-    if (generationInProgress) {
-      generationInProgress = false;
-      clearGenerationWatchdog();
-    }
-  });
+  // SillyTavern's terminal events carry no generation id, and stopGeneration()
+  // emits GENERATION_STOPPED immediately followed by GENERATION_ENDED via
+  // hideStopButton(). correlateGenerationGate pairs starts and terminals FIFO
+  // (collapsing the back-to-back STOPPED/ENDED pair for one generation), so a
+  // delayed terminal from an older generation advances the queue WITHOUT
+  // clearing a newer generation's gate. A genuine immediate cancel has a single
+  // pending generation and still clears at once. The trade-off - cannot be
+  // perfectly resolved without host ids - is documented on correlateGenerationGate.
+  const onGenerationTerminal = () => {
+    const next = applyGenerationGateEvent('terminal');
+    if (!next.inProgress) clearGenerationWatchdog();
+  };
+  eventSource.on(event_types.GENERATION_STOPPED, onGenerationTerminal);
+  eventSource.on(event_types.GENERATION_ENDED, onGenerationTerminal);
   // Allow external extensions to dismiss the recap overlay programmatically
   // (e.g. Discord Connector can dispatch this when the user sends a command
   // remotely and the blocking modal is preventing it from responding).
@@ -2423,7 +2526,7 @@ jQuery(async function () {
     // background task is invalidated, clear the generation flag, and abort any
     // external memory generation immediately.
     bumpOperationRevision();
-    generationInProgress = false;
+    applyGenerationGateEvent('reset');
     generationStartTime = 0;
     clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
@@ -2481,7 +2584,7 @@ jQuery(async function () {
     // background task is invalidated, clear the generation flag, and abort any
     // external memory generation before touching state.
     bumpOperationRevision();
-    generationInProgress = false;
+    applyGenerationGateEvent('reset');
     generationStartTime = 0;
     clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
@@ -2525,7 +2628,7 @@ jQuery(async function () {
     // background task is invalidated, clear the generation flag, and abort any
     // external memory generation before touching state.
     bumpOperationRevision();
-    generationInProgress = false;
+    applyGenerationGateEvent('reset');
     generationStartTime = 0;
     clearGenerationWatchdog();
     abortCurrentMemoryGeneration();

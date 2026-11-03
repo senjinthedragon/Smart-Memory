@@ -47,6 +47,9 @@
  * computeSourceRange        - resolves the real chat range covered by a set of extraction-window messages
  * unionSourceRanges         - conservative provenance union for synthesized consolidated entries
  * memorySupportedAfterRollback - conservative rollback predicate: keeps missing/incomplete/other-chat provenance
+ * correlateGenerationGate   - pure FIFO correlation of generation start/terminal events for the in-flight gate
+ * isDuplicateChatLoad       - coalesces duplicate CHAT_CHANGED/CHAT_LOADED signals by id or chatMetadata identity
+ * recapCompletionOwnsSlot   - decides whether a detached recap completion may still touch the active UI
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
  * the embedFn parameter so tests can run under plain Node without loading extensions.js.
@@ -1481,15 +1484,33 @@ export function computeSourceRange(messages, chat) {
 }
 
 /**
+ * Returns true when a `[start, end]` pair is a usable source range: both bounds
+ * are non-negative integers and the interval is not reversed. Anything else
+ * (missing, non-integer, negative, or `start > end`) is malformed provenance.
+ * @param {unknown} start
+ * @param {unknown} end
+ * @returns {boolean}
+ */
+function isUsableSourceRange(start, end) {
+  return Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end >= 0 && start <= end;
+}
+
+/**
  * Returns true when a stored memory's support survives a rollback to
  * targetMsgIndex. Conservative by design: when provenance is missing,
- * incomplete, or belongs to another chat, the memory is KEPT (returns true).
- * Only a memory whose every recorded source range starts after the rollback
- * point - and whose provenance is otherwise certain - is considered unsupported.
+ * incomplete, malformed, or belongs to another chat, the memory is KEPT
+ * (returns true). Only a memory whose every recorded source range is valid and
+ * starts after the rollback point - and whose provenance is otherwise certain -
+ * is considered unsupported.
+ *
+ * Chat identity is compared in normalized string form so a memory stored with a
+ * numeric chat id (`1`) is not misclassified as "another chat" when the host
+ * reports the string form (`'1'`), or vice versa. This mirrors the normalized
+ * `source_chat_id` written by unionSourceRanges().
  *
  * @param {object} mem
  * @param {number} targetMsgIndex
- * @param {string|null} currentChatId
+ * @param {string|number|null} currentChatId
  * @returns {boolean}
  */
 export function memorySupportedAfterRollback(mem, targetMsgIndex, currentChatId) {
@@ -1502,7 +1523,7 @@ export function memorySupportedAfterRollback(mem, targetMsgIndex, currentChatId)
   if (
     mem?.source_chat_id == null ||
     currentChatId == null ||
-    mem.source_chat_id !== currentChatId
+    String(mem.source_chat_id) !== String(currentChatId)
   ) {
     return true;
   }
@@ -1511,9 +1532,16 @@ export function memorySupportedAfterRollback(mem, targetMsgIndex, currentChatId)
   // faithfully bracket the window, so treat the memory as uncertain and keep it.
   if (mem?.source_incomplete === true) return true;
 
-  const starts = ranges
-    .map((range) => (Array.isArray(range) ? range[0] : null))
-    .filter((start) => Number.isInteger(start));
+  // Only a fully valid provenance set can be pruned. Any malformed range
+  // (non-array, non-integer, negative, or reversed) makes the provenance
+  // uncertain, so the memory is kept rather than risk deleting real support.
+  const starts = [];
+  for (const range of ranges) {
+    if (!Array.isArray(range)) return true;
+    const [start, end] = range;
+    if (!isUsableSourceRange(start, end)) return true;
+    starts.push(start);
+  }
   if (starts.length === 0) return true;
 
   return Math.min(...starts) <= targetMsgIndex;
@@ -1522,15 +1550,28 @@ export function memorySupportedAfterRollback(mem, targetMsgIndex, currentChatId)
 /**
  * Unions the provenance of several contributing memories for a synthesized
  * consolidated entry. Conservative: provenance is incomplete unless EVERY
- * contributor has a usable explicit chat id (all equal) and usable ranges.
+ * contributor has a usable explicit chat id (all equal after normalization) and
+ * at least one usable range, and no contributor carries a malformed range.
  *
  * A synthesized composite has no single source, so it inherits the deduped
  * union of every contributor's usable `[start, end]` ranges. This preserves
  * older support instead of keeping only the most recent range (which would let
  * the rollback pruner delete the entry even though earlier supporting messages
  * survive). Any contributor that lacks a usable range, lacks a non-empty chat
- * id, is flagged `source_incomplete`, or draws from a different chat forces
- * `source_incomplete = true` so the rollback predicate keeps the entry.
+ * id, is flagged `source_incomplete`, draws from a different chat, or carries a
+ * malformed range forces `source_incomplete = true` so the rollback predicate
+ * keeps the entry.
+ *
+ * Only non-negative, non-reversed integer ranges count as usable: an impossible
+ * range such as `[99, -1]` must never be treated as certain provenance, or the
+ * rollback predicate could trust it and delete a memory that a discarded branch
+ * cannot actually account for.
+ *
+ * Chat ids are normalized with `String(...)` at write time and returned in that
+ * canonical form so numeric `1` and string `'1'` are treated as the same chat
+ * everywhere. memorySupportedAfterRollback compares the same normalized form,
+ * so a mixed-representation union that reports "complete" is not later
+ * classified as another chat and retained forever.
  *
  * Kept free of SillyTavern runtime imports so it stays importable under plain
  * Node in tests.
@@ -1545,9 +1586,11 @@ export function unionSourceRanges(memories) {
 
   const ranges = [];
   const seenRanges = new Set();
-  // Keyed by string form so numeric/string chat ids compare equal; the value is
-  // the original id so the caller receives the exact stored representation.
-  const chatIds = new Map();
+  // Keyed by the normalized string form so numeric/string chat ids compare
+  // equal; the canonical string is also what we return, so downstream
+  // comparisons (rollback predicate, UI source links) rely on one
+  // representation.
+  const chatIds = new Set();
   let allHaveRanges = true;
   let allHaveChatId = true;
   let incomplete = false;
@@ -1564,9 +1607,14 @@ export function unionSourceRanges(memories) {
     let usableRanges = 0;
     const list = Array.isArray(mem?.source_messages) ? mem.source_messages : [];
     for (const range of list) {
-      if (!Array.isArray(range)) continue;
+      // Only non-negative, non-reversed integer intervals are trusted. Any
+      // malformed entry makes the union incomplete so an impossible range can
+      // never masquerade as certain provenance and delete a memory on rollback.
+      if (!Array.isArray(range) || !isUsableSourceRange(range[0], range[1])) {
+        incomplete = true;
+        continue;
+      }
       const [start, end] = range;
-      if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
       usableRanges += 1;
       const key = `${start}:${end}`;
       if (seenRanges.has(key)) continue;
@@ -1579,8 +1627,7 @@ export function unionSourceRanges(memories) {
     if (chatId == null || String(chatId) === '') {
       allHaveChatId = false;
     } else {
-      const key = String(chatId);
-      if (!chatIds.has(key)) chatIds.set(key, chatId);
+      chatIds.add(String(chatId));
     }
   }
 
@@ -1592,4 +1639,140 @@ export function unionSourceRanges(memories) {
     source_chat_id: sourceChatId,
     source_incomplete: sourceIncomplete,
   };
+}
+
+/**
+ * Coalesce window (ms) for collapsing SillyTavern's back-to-back terminal
+ * generation events. `stopGeneration()` emits GENERATION_STOPPED and then,
+ * via hideStopButton(), GENERATION_ENDED for the SAME aborted generation.
+ * Treating both as independent terminals would dequeue a generation twice and
+ * clear a newer generation's gate.
+ */
+export const GENERATION_TERMINAL_COALESCE_MS = 100;
+
+/**
+ * Pure correlation state machine for the `generationInProgress` gate.
+ *
+ * SillyTavern's terminal generation events carry no generation id, so a
+ * terminal emitted for generation A can be delivered after generation B has
+ * already started (the audit's delayed-cancel case). Treating every terminal as
+ * authoritative for the active gate would clear B's gate mid-stream and let
+ * intermediate CHARACTER_MESSAGE_RENDERED events run extraction on partial,
+ * unstable text.
+ *
+ * To correlate without host ids we pair starts and terminals FIFO: each `start`
+ * enqueues one pending generation, each `terminal` dequeues the oldest, and the
+ * gate is cleared only when the last pending generation terminates. A delayed
+ * terminal for an already-superseded generation therefore advances the queue
+ * without clearing a newer generation's gate, while a genuine immediate cancel
+ * has exactly one pending generation and still clears at once (preserving the
+ * immediate-stop fix). Back-to-back terminals for one generation (STOPPED then
+ * ENDED) are collapsed by the `lastTerminalAt` window so a generation is only
+ * dequeued once.
+ *
+ * `complete` (MESSAGE_RECEIVED) opens the gate for the finished generation but
+ * deliberately retains its pending slot for the terminal that follows, so an
+ * older generation cannot be dequeued by a newer one's terminal.
+ *
+ * Deliberate trade-off: host events carry no identity, so if a generation never
+ * emits a terminal event its slot stays queued. The failure mode is then a gate
+ * that clears via the watchdog / chat-switch reset rather than immediately -
+ * conservative (extraction briefly suppressed), never partial-text extraction.
+ *
+ * @param {{pending?: number, inProgress?: boolean, lastTerminalAt?: number}} state
+ * @param {'start'|'complete'|'terminal'|'reset'} event
+ * @param {number} [now] - Monotonic ms timestamp for terminal coalescing.
+ * @returns {{pending: number, inProgress: boolean, lastTerminalAt: number}}
+ */
+export function correlateGenerationGate(state, event, now = 0) {
+  const pending = Number.isInteger(state?.pending) && state.pending > 0 ? state.pending : 0;
+  const inProgress = state?.inProgress === true;
+  const lastTerminalAt =
+    typeof state?.lastTerminalAt === 'number' && Number.isFinite(state.lastTerminalAt)
+      ? state.lastTerminalAt
+      : -Infinity;
+
+  switch (event) {
+    case 'start':
+      // A new generation opens the gate and enqueues one pending slot.
+      return { pending: pending + 1, inProgress: true, lastTerminalAt };
+    case 'complete':
+      // MESSAGE_RECEIVED: the finished generation's gate opens, but its pending
+      // slot is retained for the terminal that follows it.
+      return { pending, inProgress: false, lastTerminalAt };
+    case 'terminal': {
+      // Collapse STOPPED+ENDED for one aborted generation into a single
+      // dequeue so one generation is never dequeued twice.
+      if (now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS) {
+        return { pending, inProgress, lastTerminalAt: now };
+      }
+      // No pending generation: a stale terminal for an already-cleared gate.
+      // The only pending generation is the active one: dequeue and clear. More
+      // than one pending: this terminal belongs to an older generation, so
+      // dequeue it but keep the newer generation's gate set.
+      if (pending <= 1) {
+        return { pending: 0, inProgress: false, lastTerminalAt: now };
+      }
+      return { pending: pending - 1, inProgress, lastTerminalAt: now };
+    }
+    case 'reset':
+      return { pending: 0, inProgress: false, lastTerminalAt: -Infinity };
+    default:
+      return { pending, inProgress, lastTerminalAt };
+  }
+}
+
+/**
+ * Returns true when a chat-load signal duplicates the previous one within the
+ * coalescing window. CHAT_CHANGED and CHAT_LOADED fire for the same load, so the
+ * caller must only advance chatLoadId / the operation revision once.
+ *
+ * The strongest identity is the normalized chat id. When it is temporarily
+ * unavailable (getCurrentChatId() returns null during a load), fall back to the
+ * chatMetadata object reference - a per-load lifecycle token, since SillyTavern
+ * creates a fresh object per loaded chat. If neither side exposes an identity we
+ * cannot prove duplication, so we do not coalesce (never swallow a real switch).
+ *
+ * @param {{id: string|null, meta: object|null}} previous
+ * @param {{id: string|null, meta: object|null}} next
+ * @param {number} elapsedMs
+ * @returns {boolean}
+ */
+export function isDuplicateChatLoad(previous, next, elapsedMs) {
+  if (!(elapsedMs >= 0) || elapsedMs >= 300) return false;
+  if (next?.id != null && previous?.id != null) return previous.id === next.id;
+  if (next?.meta != null && previous?.meta != null) return previous.meta === next.meta;
+  return false;
+}
+
+/**
+ * Returns true when a detached recap completion still owns the active recap
+ * slot and may therefore touch the loader, status text, and suppression flag.
+ *
+ * The recap promise is detached from onChatChangedImpl, so it can resolve after
+ * the user has switched chats and a different recap has claimed the slot.
+ * Ownership is proven by the captured chatMetadata object reference (a per-load
+ * identity) plus the activity-loader handle: a different metadata object, or a
+ * slot now held by another handle, means this completion is stale and must
+ * return before any cleanup/UI mutation.
+ *
+ * @param {object} p
+ * @param {object|null} p.capturedMeta - chatMetadata the recap was generated for.
+ * @param {object|null} p.currentMeta - getContext().chatMetadata at resolution.
+ * @param {JQuery|null} p.capturedHandle - activity loader captured at start.
+ * @param {JQuery|null} p.activeHandle - current activeRecapHandle.
+ * @returns {boolean}
+ */
+export function recapCompletionOwnsSlot({
+  capturedMeta,
+  currentMeta,
+  capturedHandle,
+  activeHandle,
+}) {
+  // The recap belongs to one chat load; a different (or null/non-null mismatched)
+  // chatMetadata means the chat changed underneath it.
+  if (capturedMeta !== currentMeta) return false;
+  // Another recap has claimed the active slot since this one started.
+  if (activeHandle != null && activeHandle !== capturedHandle) return false;
+  return true;
 }

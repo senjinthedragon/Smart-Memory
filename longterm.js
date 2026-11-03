@@ -720,7 +720,11 @@ export async function extractAndStoreMemories(
       end: windowEnd,
       complete,
     } = computeSourceRange(recentMessages, chat);
-    const sourceChatId = getCurrentChatId() ?? null;
+    // Normalize to the canonical string form used by unionSourceRanges and the
+    // rollback predicate so a numeric chat id and its string form never diverge
+    // across a memory's provenance.
+    const rawChatId = getCurrentChatId();
+    const sourceChatId = rawChatId == null ? null : String(rawChatId);
     // Derive the characters present in this extraction window so the injection
     // path can downgrade memories the responding character did not witness.
     const witnessedBy = getSceneParticipants(recentMessages);
