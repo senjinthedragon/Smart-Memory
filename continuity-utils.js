@@ -34,7 +34,7 @@
  * isPendingRepairAnchorValid  - verifies a queued repair still matches its anchor message
  */
 
-import { keywordSet } from './memory-utils.js';
+import { keywordSet, STOPWORDS } from './memory-utils.js';
 
 /** Only these contradiction categories are permitted through validation. */
 export const CONTINUITY_CATEGORIES = ['permanent_trait', 'backstory', 'world_rule', 'death'];
@@ -257,6 +257,77 @@ const TRAIT_DOMAIN_KEYWORDS = new Set([
   'dark',
 ]);
 
+// Concrete body/identity nouns a permanent trait can be about. Unlike
+// TRAIT_DOMAIN_KEYWORDS (which also holds colours and species values), these are
+// the specific attributes a transition sentence must actually mention before it
+// can suppress a contradiction. An unrelated "[Narrator] The evening sky turned
+// blue." mentions the colour "blue" but none of these nouns, so it can no longer
+// stand in for a character's eyes or hair.
+const ATTRIBUTE_NOUNS = new Set([
+  'eye',
+  'eyes',
+  'hair',
+  'skin',
+  'arm',
+  'arms',
+  'leg',
+  'legs',
+  'hand',
+  'hands',
+  'head',
+  'face',
+  'scar',
+  'scars',
+  'limb',
+  'limbs',
+  'wing',
+  'wings',
+  'tail',
+  'tails',
+  'horn',
+  'horns',
+  'tusk',
+  'tusks',
+  'tooth',
+  'teeth',
+  'mouth',
+  'nose',
+  'ear',
+  'ears',
+  'neck',
+  'back',
+  'chest',
+  'shoulder',
+  'shoulders',
+  'finger',
+  'fingers',
+  'toe',
+  'toes',
+  'voice',
+  'beard',
+  'freckles',
+  'birthmark',
+  'tattoo',
+  'tattoos',
+  'mark',
+  'marks',
+  'body',
+  'frame',
+  'build',
+  'height',
+  'weight',
+  'age',
+  'gender',
+  'sex',
+  'species',
+  'race',
+  'origin',
+  'heritage',
+  'lineage',
+  'blood',
+  'name',
+]);
+
 /** Maximum word gap between a transformation verb and its trait. */
 const TRAIT_PROXIMITY_LIMIT = 5;
 
@@ -290,6 +361,41 @@ function issueTraitKeywords(issue) {
     }
   }
   return traits;
+}
+
+/**
+ * Extracts the concrete attribute nouns (body parts, species, identity words)
+ * an issue is about from its fact and response quote. A transcript sentence must
+ * mention one of these before it can be read as depicting a transition of the
+ * trait - otherwise "the sky turned blue" would suppress an eye-colour issue.
+ * @param {Object} issue
+ * @returns {Set<string>}
+ */
+function issueAttributeNouns(issue) {
+  const nouns = new Set();
+  for (const text of [issue?.fact, issue?.response_quote]) {
+    for (const word of keywordSet(text)) {
+      if (ATTRIBUTE_NOUNS.has(word)) nouns.add(word);
+    }
+  }
+  return nouns;
+}
+
+/**
+ * Extracts likely character names from the issue's fact (capitalized tokens).
+ * Used as a secondary gate so a sentence that names the character alongside the
+ * trait ("Elara is now blue") can still count as a transition even when it does
+ * not spell out the attribute noun itself.
+ * @param {Object} issue
+ * @returns {Set<string>}
+ */
+function issueSubjectNames(issue) {
+  const names = new Set();
+  const matches = String(issue?.fact ?? '').match(/\b[A-Z][a-z]{1,}\b/g) ?? [];
+  for (const match of matches) {
+    names.add(match.toLowerCase());
+  }
+  return names;
 }
 
 const CATEGORY_SET = new Set(CONTINUITY_CATEGORIES);
@@ -436,15 +542,26 @@ function sentenceShowsTransformation(sentence, traitKeywords) {
  * than introducing an unmotivated contradiction.
  *
  * Only substantive trait words count as links - stopwords like "her", "the", or
- * "was" are never enough. A transcript sentence about a different trait
- * ("Her voice changed to a whisper") can therefore never suppress a hair or eye
- * contradiction.
+ * "was" are never enough. Additionally, a sentence must actually mention the
+ * attribute the issue is about (its body/trait noun), or name the character
+ * alongside the trait, before it can be read as a transition of that attribute.
+ * This stops an unrelated "[Narrator] The evening sky turned blue." - which
+ * matches the colour "blue" and the verb "turned" - from suppressing an
+ * eye-colour contradiction for "Elara has blue eyes".
  * @param {string} recentTranscript
  * @param {Set<string>} traitKeywords
  * @param {string} quote - Raw response quote from the issue.
+ * @param {Set<string>} [attributeNouns] - Body/identity nouns the issue is about.
+ * @param {Set<string>} [subjectNames] - Character names mentioned in the issue fact.
  * @returns {boolean}
  */
-function transcriptDepictsTransition(recentTranscript, traitKeywords, quote) {
+function transcriptDepictsTransition(
+  recentTranscript,
+  traitKeywords,
+  quote,
+  attributeNouns,
+  subjectNames,
+) {
   if (!recentTranscript) return false;
 
   const normalizedTranscript = normalize(recentTranscript);
@@ -455,9 +572,18 @@ function transcriptDepictsTransition(recentTranscript, traitKeywords, quote) {
 
   if (!traitKeywords || traitKeywords.size === 0) return false;
 
-  return splitSentences(recentTranscript).some((sentence) =>
-    sentenceShowsTransformation(sentence, traitKeywords),
-  );
+  const nouns = attributeNouns ?? new Set();
+  const names = subjectNames ?? new Set();
+  return splitSentences(recentTranscript).some((sentence) => {
+    const words = tokenizeWords(sentence);
+    // The sentence must actually be about this attribute: either it names the
+    // body/trait noun, or it names the character alongside the trait keyword.
+    const mentionsAttribute = words.some((w) => nouns.has(w));
+    const mentionsSubjectTrait =
+      names.size > 0 && words.some((w) => names.has(w)) && words.some((w) => traitKeywords.has(w));
+    if (!mentionsAttribute && !mentionsSubjectTrait) return false;
+    return sentenceShowsTransformation(sentence, traitKeywords);
+  });
 }
 
 /**
@@ -496,7 +622,12 @@ export function validateIssue(issue, latestText, factsText, recentTranscript = '
   if (reason.length < 10 || PLACEHOLDER_REASONS.has(reason.toLowerCase())) return false;
 
   const quote = normalize(issue.response_quote);
-  if (quote.length < 3) return false;
+  // A substantive quote is required: at least 5 characters, and not composed
+  // solely of stopwords ("her", "the", "was"). Trivial quotes are not evidence
+  // the response actually described the flagged trait.
+  if (quote.length < 5) return false;
+  const quoteWords = quote.split(/\s+/).filter(Boolean);
+  if (quoteWords.length === 0 || quoteWords.every((w) => STOPWORDS.has(w))) return false;
   if (!normalize(latestText).includes(quote)) return false;
 
   const fact = normalize(issue.fact);
@@ -512,7 +643,17 @@ export function validateIssue(issue, latestText, factsText, recentTranscript = '
   if (sentenceShowsTransformation(containingSentence, traitKeywords)) return false;
 
   // If the recent transcript already depicts this transition, it is progression.
-  if (transcriptDepictsTransition(recentTranscript, traitKeywords, issue.response_quote)) {
+  // The attribute-noun gate keeps an unrelated "sky turned blue" sentence from
+  // suppressing a body/eye-colour contradiction.
+  if (
+    transcriptDepictsTransition(
+      recentTranscript,
+      traitKeywords,
+      issue.response_quote,
+      issueAttributeNouns(issue),
+      issueSubjectNames(issue),
+    )
+  ) {
     return false;
   }
 
@@ -544,6 +685,83 @@ export function buildForwardRepairNote(issues, characterName) {
 
   const factList = facts.join('; ');
   return `[Continuity note, background only: earlier in the story it was established that ${factList}. Everything already written in this conversation has happened and stands. Do NOT retract, undo, or re-narrate any past event. Where it fits naturally, keep these facts consistent from now on. If the conversation has legitimately changed them, ignore this note.]`;
+}
+
+// ---- Durable continuity retcons ---------------------------------------------
+
+/**
+ * Default number of AI turns a durable retcon stays active before it is
+ * auto-resolved as canon. Each AI turn decrements the remaining count.
+ */
+export const RETCON_TURNS = 5;
+
+/**
+ * Builds the injected continuity-note block from active durable retcons.
+ *
+ * Unlike the one-shot forward note, this is phrased as a standing reminder that
+ * everything already written stands, so it can be safely re-injected across
+ * several turns until the story has moved past the contradiction.
+ *
+ * @param {Array<Object|string>} retcons - Active retcons (objects or plain facts).
+ * @returns {string} Injection text, or '' when there are no facts.
+ */
+export function buildDurableRetconNote(retcons) {
+  const facts = (Array.isArray(retcons) ? retcons : [])
+    .map((retcon) => (typeof retcon === 'string' ? retcon : retcon?.fact))
+    .map((fact) => String(fact ?? '').trim())
+    .filter(Boolean);
+
+  if (facts.length === 0) return '';
+
+  const factList = facts.join('; ');
+  return `[Continuity notes: earlier in the story it was established that ${factList}. Everything already written in this conversation has happened and stands.]`;
+}
+
+/**
+ * Decrements the remaining lifetime of every active durable retcon by one AI
+ * turn and drops any that have reached zero (auto-resolved as canon).
+ *
+ * @param {Array<Object>} retcons
+ * @returns {Array<Object>} A new array containing only retcons still active.
+ */
+export function advanceRetconLifetimes(retcons) {
+  if (!Array.isArray(retcons)) return [];
+  const survivors = [];
+  for (const retcon of retcons) {
+    if (!retcon || typeof retcon !== 'object') continue;
+    const remaining = Number.isFinite(retcon.turns_remaining)
+      ? retcon.turns_remaining
+      : RETCON_TURNS;
+    if (remaining - 1 > 0) {
+      survivors.push({ ...retcon, turns_remaining: remaining - 1 });
+    }
+    // remaining <= 0 -> the retcon has served its purpose and is allowed to
+    // expire; it drops out so it stops being injected.
+  }
+  return survivors;
+}
+
+/**
+ * Removes retcons the user has implicitly accepted by echoing the flagged
+ * quote in their own reply. When the user writes the changed state themselves,
+ * it is canon and the retcon is moot.
+ *
+ * @param {Array<Object>} retcons
+ * @param {string} userText - Text of the most recent user turn.
+ * @returns {Array<Object>} Retcons that are still unresolved.
+ */
+export function invalidateAcceptedRetcons(retcons, userText) {
+  if (!Array.isArray(retcons)) return [];
+  const text = normalize(userText);
+  if (!text) return retcons.slice();
+
+  return retcons.filter((retcon) => {
+    if (!retcon || typeof retcon !== 'object') return true;
+    const quote = normalize(retcon.quote);
+    if (quote.length < 3) return true;
+    // The user has adopted the changed state - accept it as canon.
+    return !text.includes(quote);
+  });
 }
 
 /**

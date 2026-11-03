@@ -33,6 +33,8 @@
  * deleteStateCard             - removes a state card entry
  * migrateStateLedgerKey       - migrates a state card to a new key after a type change
  * clearStateLedger            - empties the entire ledger
+ * takeStateSnapshot           - records a message-anchored rollback-safe state snapshot
+ * rollbackStateToSnapshot     - restores state as of a message index (swipe/delete)
  * runStateCardExtraction      - runs the extraction pass for the current message window
  * injectStateLedger           - pushes the current-state block into the prompt
  * loadAndInjectStateLedger    - restores and re-injects on chat load
@@ -53,6 +55,7 @@ import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
+import { takeSnapshotOnMeta, rollbackSnapshotOnMeta } from './state-snapshot.js';
 
 // ---- Field schema -----------------------------------------------------------
 
@@ -201,6 +204,44 @@ export async function clearStateLedger() {
   await saveStateLedger({});
 }
 
+// ---- Message-anchored snapshots & rollback ----------------------------------
+
+/**
+ * Records a snapshot of the chat-scoped mutable state (state ledger, story
+ * arcs, perspectives/secrets, durable retcons) tagged with the given message
+ * index. Call after an extraction/state-update pass so a later swipe or delete
+ * can roll the state back to the last committed turn.
+ *
+ * @param {number} chatIndex - Chat message index this state reflects.
+ * @returns {Object|null} The recorded snapshot.
+ */
+export function takeStateSnapshot(chatIndex) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  const snapshot = takeSnapshotOnMeta(context.chatMetadata[META_KEY], chatIndex);
+  context.saveMetadata()?.catch?.(console.error);
+  return snapshot;
+}
+
+/**
+ * Rolls the chat-scoped mutable state back to the latest snapshot at or before
+ * `targetMsgIndex`, pruning every snapshot after it. Used when a message is
+ * swiped or deleted so facts, state cards, arcs, secrets, and retcons from the
+ * discarded branch never survive.
+ *
+ * @param {number} targetMsgIndex - Highest chat index whose state should survive.
+ * @returns {Object|null} The restored snapshot, or null when reset to empty.
+ */
+export function rollbackStateToSnapshot(targetMsgIndex) {
+  const context = getContext();
+  const meta = context.chatMetadata?.[META_KEY];
+  if (!meta) return null;
+  const restored = rollbackSnapshotOnMeta(meta, targetMsgIndex);
+  context.saveMetadata()?.catch?.(console.error);
+  return restored;
+}
+
 // ---- Extraction -------------------------------------------------------------
 
 /**
@@ -288,9 +329,10 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
  * Returns an empty string when the ledger is empty.
  *
  * @param {Object} ledger - The full state ledger map.
+ * @param {number|null} [lastSeenMsg] - Highest message index reflected in the ledger.
  * @returns {string}
  */
-function buildStateLedgerBlock(ledger) {
+function buildStateLedgerBlock(ledger, lastSeenMsg = null) {
   const entries = Object.entries(ledger);
   if (entries.length === 0) return '';
 
@@ -309,10 +351,14 @@ function buildStateLedgerBlock(ledger) {
     byType[type].push(line);
   }
 
-  const lines = [];
+  const lines = [`[State Ledger as of turn #${lastSeenMsg ?? 'current'}]:`];
   for (const type of ['character', 'object', 'place', 'faction']) {
     if (byType[type]) lines.push(...byType[type]);
   }
+
+  // A ledger whose cards all have empty fields yields no content lines - treat
+  // it as empty so the injection slot is cleared rather than header-only.
+  if (lines.length === 1) return '';
 
   return lines.join('\n');
 }
@@ -339,7 +385,9 @@ export function injectStateLedger(updateTelemetry = false) {
   }
 
   const ledger = loadStateLedger();
-  const block = buildStateLedgerBlock(ledger);
+  const context = getContext();
+  const cutoff = context.chatMetadata?.[META_KEY]?.lastExtractCutoff;
+  const block = buildStateLedgerBlock(ledger, Number.isInteger(cutoff) ? cutoff : null);
 
   if (!block) {
     clear();

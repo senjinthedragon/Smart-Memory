@@ -670,7 +670,9 @@ test('parseStateCardResponse: clear-only entry is retained so the clear propagat
 });
 
 test('parseStateCardResponse: unrelated noise values are still skipped', () => {
-  const result = parseStateCardResponse('[state:Kael:character] mood=unknown | active_goal=find the key');
+  const result = parseStateCardResponse(
+    '[state:Kael:character] mood=unknown | active_goal=find the key',
+  );
   const fields = result.get('kael|character');
   assert.ok(fields);
   assert.equal(fields.active_goal, 'find the key');

@@ -52,13 +52,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // ---- Configuration -------------------------------------------------------
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const OLLAMA_MODEL =
-  process.env.OLLAMA_MODEL ?? 'huihui_ai/qwen3-vl-abliterated:8b-instruct';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'huihui_ai/qwen3-vl-abliterated:8b-instruct';
 const RESPONSE_LEN = parseInt(process.env.RESPONSE_LEN ?? '600', 10);
 // Pass think:false to disable chain-of-thought on thinking models (e.g. gemma4).
 // Only sent when explicitly set - omitting the field lets the model use its default.
 const OLLAMA_THINK =
-  process.env.OLLAMA_THINK === 'false' ? false : process.env.OLLAMA_THINK === 'true' ? true : undefined;
+  process.env.OLLAMA_THINK === 'false'
+    ? false
+    : process.env.OLLAMA_THINK === 'true'
+      ? true
+      : undefined;
 
 const LIVE = process.argv.includes('--live');
 const PARSERS_ONLY = process.argv.includes('--parsers');
@@ -68,9 +71,7 @@ const QUIET = process.argv.includes('--quiet');
 
 // parsers.js imports only from constants.js, which imports nothing external.
 // Both are safe to import directly.
-const { parseExtractionOutput, parseSessionOutput, parseArcOutput } = await import(
-  './parsers.js'
-);
+const { parseExtractionOutput, parseSessionOutput, parseArcOutput } = await import('./parsers.js');
 const { buildExtractionPrompt, buildSessionExtractionPrompt, buildArcExtractionPrompt } =
   await import('./prompts.js');
 
@@ -171,14 +172,14 @@ function runTierAssertions(tierName, spec, memories) {
   for (const assertion of spec.must_not_contain ?? []) {
     tierTotal++;
     const combined = contents.join('\n');
-    const triggered = assertion.keywords
-      ? matchesKeywords(combined, assertion.keywords)
-      : false;
+    const triggered = assertion.keywords ? matchesKeywords(combined, assertion.keywords) : false;
     const pass = !triggered;
     if (pass) tierPassed++;
     if (!QUIET || !pass) {
       const icon = pass ? c.green('PASS') : c.red('FAIL');
-      console.log(`  [${tierName}] ${icon} must NOT contain: ${assertion.label ?? assertion.keywords?.join(', ')}`);
+      console.log(
+        `  [${tierName}] ${icon} must NOT contain: ${assertion.label ?? assertion.keywords?.join(', ')}`,
+      );
     }
   }
 
@@ -377,7 +378,9 @@ function runParserTests() {
   assert(minimalFormat.length === 1, 'parses fact with no modifiers');
   assert(minimalFormat[0].importance === 2, 'defaults importance to 2');
 
-  const withEntity = parseExtractionOutput('[fact:2:permanent:entity=Elara/character] Elara is tall.');
+  const withEntity = parseExtractionOutput(
+    '[fact:2:permanent:entity=Elara/character] Elara is tall.',
+  );
   assert(withEntity.length === 1, 'parses entity modifier');
   // entities[] holds UUIDs resolved later by graph-migration; raw names are in _raw_entity_names
   // Format is "Name/type" so check with startsWith rather than exact match.
@@ -409,10 +412,9 @@ function runParserTests() {
   assert(arcResult.add[0].content.includes('promised'), 'arc content correct');
   assert(arcResult.resolve.length === 0, 'no resolved arcs');
 
-  const arcResolve = parseArcOutput(
-    '[resolved] She promised to write.',
-    [{ content: 'She promised to write.' }],
-  );
+  const arcResolve = parseArcOutput('[resolved] She promised to write.', [
+    { content: 'She promised to write.' },
+  ]);
   assert(arcResolve.resolve.length === 1, 'resolved arc detected');
   assert(arcResolve.add.length === 0, 'no new arcs when resolving');
 
@@ -447,9 +449,7 @@ console.log(c.bold('\n' + '─'.repeat(60)));
 const pct = total > 0 ? Math.round((passed / total) * 100) : 100;
 const summaryColor = pct === 100 ? c.green : pct >= 70 ? c.yellow : c.red;
 console.log(
-  c.bold(
-    `Total: ${summaryColor(`${passed}/${total} passed`)} (${summaryColor(`${pct}%`)})`,
-  ),
+  c.bold(`Total: ${summaryColor(`${passed}/${total} passed`)} (${summaryColor(`${pct}%`)})`),
 );
 
 if (failed > 0) {

@@ -7,7 +7,7 @@ import { migrateEpistemicStateLedgerPlacement } from '../settings-migration.js';
 // so the pure helper is extracted to settings-migration.js and called from
 // loadSettings() to keep this behaviour verifiable under plain Node.
 
-test('loadSettings migration: legacy epistemic/state-ledger depth-1 defaults move to IN_PROMPT depth 0', () => {
+test('loadSettings migration: legacy epistemic/state-ledger depth-1 defaults move to IN_PROMPT depth 2', () => {
   const settings = {
     epistemic_position: 1,
     epistemic_depth: 1,
@@ -15,12 +15,32 @@ test('loadSettings migration: legacy epistemic/state-ledger depth-1 defaults mov
     state_ledger_depth: 1,
   };
 
-  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 });
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 }, 2);
 
   assert.equal(settings.epistemic_position, 2);
-  assert.equal(settings.epistemic_depth, 0);
+  assert.equal(settings.epistemic_depth, 2);
   assert.equal(settings.state_ledger_position, 2);
-  assert.equal(settings.state_ledger_depth, 0);
+  assert.equal(settings.state_ledger_depth, 2);
+  assert.equal(settings.migrated_legacy_placement, true);
+});
+
+test('loadSettings migration: sets migrated_legacy_placement flag and does not re-migrate if already set', () => {
+  const settings = {
+    migrated_legacy_placement: true,
+    epistemic_position: 1,
+    epistemic_depth: 1,
+    state_ledger_position: 1,
+    state_ledger_depth: 1,
+  };
+
+  // User explicitly chose position 1 and depth 1 after migration flag was set
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 }, 2);
+
+  // Must NOT be overwritten
+  assert.equal(settings.epistemic_position, 1);
+  assert.equal(settings.epistemic_depth, 1);
+  assert.equal(settings.state_ledger_position, 1);
+  assert.equal(settings.state_ledger_depth, 1);
 });
 
 test('loadSettings migration: uses the supplied IN_PROMPT value', () => {
@@ -31,17 +51,20 @@ test('loadSettings migration: uses the supplied IN_PROMPT value', () => {
     state_ledger_depth: 1,
   };
 
-  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 7 });
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 7 }, 2);
 
   assert.equal(settings.epistemic_position, 7);
   assert.equal(settings.state_ledger_position, 7);
+  assert.equal(settings.epistemic_depth, 2);
+  assert.equal(settings.migrated_legacy_placement, true);
 });
 
-test('loadSettings migration: defaults IN_PROMPT to 2 when omitted', () => {
+test('loadSettings migration: defaults IN_PROMPT to 2 and depth to 2 when omitted', () => {
   const settings = { epistemic_position: 1, epistemic_depth: 1 };
   migrateEpistemicStateLedgerPlacement(settings);
   assert.equal(settings.epistemic_position, 2);
-  assert.equal(settings.epistemic_depth, 0);
+  assert.equal(settings.epistemic_depth, 2);
+  assert.equal(settings.migrated_legacy_placement, true);
 });
 
 test('loadSettings migration: an explicit custom position is preserved', () => {
@@ -53,12 +76,13 @@ test('loadSettings migration: an explicit custom position is preserved', () => {
     state_ledger_depth: 1,
   };
 
-  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 });
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 }, 2);
 
   assert.equal(settings.epistemic_position, 0);
   assert.equal(settings.epistemic_depth, 1);
   assert.equal(settings.state_ledger_position, 3);
   assert.equal(settings.state_ledger_depth, 1);
+  assert.equal(settings.migrated_legacy_placement, true);
 });
 
 test('loadSettings migration: an explicit custom depth is preserved', () => {
@@ -69,12 +93,13 @@ test('loadSettings migration: an explicit custom depth is preserved', () => {
     state_ledger_depth: 0,
   };
 
-  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 });
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 }, 2);
 
   assert.equal(settings.epistemic_position, 1);
   assert.equal(settings.epistemic_depth, 4);
   assert.equal(settings.state_ledger_position, 1);
   assert.equal(settings.state_ledger_depth, 0);
+  assert.equal(settings.migrated_legacy_placement, true);
 });
 
 test('loadSettings migration: migrates each tier independently', () => {
@@ -86,12 +111,13 @@ test('loadSettings migration: migrates each tier independently', () => {
     state_ledger_depth: 0,
   };
 
-  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 });
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 }, 2);
 
   assert.equal(settings.epistemic_position, 2);
-  assert.equal(settings.epistemic_depth, 0);
+  assert.equal(settings.epistemic_depth, 2);
   assert.equal(settings.state_ledger_position, 2);
   assert.equal(settings.state_ledger_depth, 0);
+  assert.equal(settings.migrated_legacy_placement, true);
 });
 
 test('loadSettings migration: is idempotent and tolerates missing fields', () => {
@@ -102,13 +128,15 @@ test('loadSettings migration: is idempotent and tolerates missing fields', () =>
     state_ledger_depth: 1,
   };
 
-  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 });
-  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 });
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 }, 2);
+  // Second call with migrated_legacy_placement true
+  migrateEpistemicStateLedgerPlacement(settings, { IN_PROMPT: 2 }, 2);
 
   assert.equal(settings.epistemic_position, 2);
-  assert.equal(settings.epistemic_depth, 0);
+  assert.equal(settings.epistemic_depth, 2);
   assert.equal(settings.state_ledger_position, 2);
-  assert.equal(settings.state_ledger_depth, 0);
+  assert.equal(settings.state_ledger_depth, 2);
+  assert.equal(settings.migrated_legacy_placement, true);
 
   // No throw on non-object input.
   assert.equal(migrateEpistemicStateLedgerPlacement(null), null);

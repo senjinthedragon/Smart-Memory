@@ -970,11 +970,7 @@ export function parseStateCardResponse(raw) {
 
       const eqIdx = trimmedChunk.indexOf('=');
       if (eqIdx === -1) continue;
-      const fieldName = trimmedChunk
-        .slice(0, eqIdx)
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, '_');
+      const fieldName = trimmedChunk.slice(0, eqIdx).trim().toLowerCase().replace(/\s+/g, '_');
       if (!fieldName) continue;
       const value = trimmedChunk.slice(eqIdx + 1).trim();
       const lowerValue = value.toLowerCase();

@@ -37,9 +37,17 @@
  * the message the check ran on, so a swipe, edit, or deletion invalidates it
  * instead of applying a correction to a rewritten turn.
  *
+ * Confirmed contradictions also create durable retcons that are re-injected for
+ * several turns and auto-resolve as canon once the story moves past them. Both
+ * the anchored note and the durable retcons are chat-scoped and survive only
+ * while the turns that produced them survive; a state-snapshot rollback on
+ * swipe/delete restores the previous retcon state.
+ *
  * checkContinuity        - runs a verified contradiction check against the last AI message
  * handleContinuityResult - respects continuity_mode (off/warn/repair) and queues a note
- * applyPendingRepair     - validates the anchor and injects the pending note
+ * addDurableRetcons      - records durable retcons for confirmed contradictions
+ * advanceDurableRetcons  - decrements retcon lifetimes once per AI turn
+ * applyPendingRepair     - validates the anchor and injects the active continuity notes
  * clearRepair            - removes pending repair state, storage, and prompt slot
  * buildForwardRepairNote - builds the forward-only note (pure helper, re-exported)
  * gatherEstablishedFacts - collects character card, summary, and memories
@@ -54,7 +62,7 @@ import {
   extension_prompt_roles,
 } from '../../../../script.js';
 import { power_user } from '../../../../scripts/power-user.js';
-import { MODULE_NAME, META_KEY, PROMPT_KEY_REPAIR } from './constants.js';
+import { MODULE_NAME, META_KEY, PROMPT_KEY_REPAIR, generateMemoryId } from './constants.js';
 import { buildContinuityPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
@@ -67,6 +75,10 @@ import {
   buildForwardRepairNote,
   parseContinuityJson,
   isPendingRepairAnchorValid,
+  buildDurableRetconNote,
+  advanceRetconLifetimes,
+  invalidateAcceptedRetcons,
+  RETCON_TURNS,
 } from './continuity-utils.js';
 
 // Re-export the pure helpers so the pipeline API lives in one place.
@@ -77,10 +89,17 @@ export {
   buildForwardRepairNote,
   parseContinuityJson,
   isPendingRepairAnchorValid,
+  buildDurableRetconNote,
+  advanceRetconLifetimes,
+  invalidateAcceptedRetcons,
+  RETCON_TURNS,
 };
 
 // chatMetadata key under META_KEY where the pending repair note is stored.
 const REPAIR_KEY = 'pendingRepair';
+
+// chatMetadata key under META_KEY where durable retcons are stored.
+const RETCONS_KEY = 'durable_retcons';
 
 // In-memory mirror of the anchored repair note. Kept alongside chatMetadata so
 // the hot path (apply before generation) does not need a storage round-trip.
@@ -97,6 +116,118 @@ function getContinuityMode() {
   const settings = extension_settings[MODULE_NAME] ?? {};
   if (CONTINUITY_MODES.has(settings.continuity_mode)) return settings.continuity_mode;
   return settings.continuity_auto_repair ? 'repair' : 'warn';
+}
+
+// ---- Durable retcon storage -------------------------------------------------
+
+/**
+ * Returns the chat's durable continuity retcons.
+ *
+ * Retcon shape:
+ *   { id, fact, quote, category, as_of_msg, created_at, turns_remaining }
+ *
+ * @returns {Array<Object>}
+ */
+export function loadDurableRetcons() {
+  const context = getContext();
+  const retcons = context.chatMetadata?.[META_KEY]?.[RETCONS_KEY];
+  return Array.isArray(retcons) ? retcons : [];
+}
+
+/**
+ * Persists the chat's durable continuity retcons to chatMetadata.
+ *
+ * @param {Array<Object>} retcons
+ */
+function saveDurableRetcons(retcons) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY][RETCONS_KEY] = retcons;
+  context.saveMetadata()?.catch?.(console.error);
+}
+
+/**
+ * Adds durable retcon entries for confirmed contradictions. Each entry lives
+ * for RETCON_TURNS AI turns (or until the user accepts the change) so the
+ * continuity note is no longer a fragile one-shot.
+ *
+ * @param {Array<Object>} issues - Validated contradiction issues.
+ * @param {number} asOfMsg - Message index the contradictions were found on.
+ * @returns {number} Number of retcons added.
+ */
+export function addDurableRetcons(issues, asOfMsg) {
+  const list = Array.isArray(issues) ? issues : [];
+  if (list.length === 0) return 0;
+
+  const retcons = loadDurableRetcons();
+  const existingFacts = new Set(
+    retcons
+      .map((retcon) =>
+        String(retcon?.fact ?? '')
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean),
+  );
+
+  let added = 0;
+  for (const issue of list) {
+    const fact = String(issue?.fact ?? '').trim();
+    if (!fact) continue;
+    // Do not stack the same contradiction re-confirmed on later turns.
+    if (existingFacts.has(fact.toLowerCase())) continue;
+
+    retcons.push({
+      id: generateMemoryId(),
+      fact,
+      quote: String(issue?.response_quote ?? '').trim(),
+      category: String(issue?.category ?? '').trim(),
+      as_of_msg: Number.isInteger(asOfMsg) ? asOfMsg : null,
+      created_at: Date.now(),
+      turns_remaining: RETCON_TURNS,
+    });
+    existingFacts.add(fact.toLowerCase());
+    added++;
+  }
+
+  if (added > 0) saveDurableRetcons(retcons);
+  return added;
+}
+
+/**
+ * Advances every active retcon by one AI turn, dropping those that have
+ * reached the end of their lifespan (auto-resolved as canon).
+ *
+ * Called once per committed AI turn.
+ *
+ * @returns {number} Number of active retcons remaining.
+ */
+export function advanceDurableRetcons() {
+  const retcons = loadDurableRetcons();
+  if (retcons.length === 0) return 0;
+  const advanced = advanceRetconLifetimes(retcons);
+  saveDurableRetcons(advanced);
+  return advanced.length;
+}
+
+/**
+ * Drops retcons the user has implicitly accepted by echoing the flagged quote
+ * in their reply. When the user writes the changed state themselves, the
+ * repair is moot and the retcon is invalidated.
+ *
+ * @param {string} userText - Text of the user's most recent turn.
+ * @returns {number} Number of retcons removed.
+ */
+export function invalidateAcceptedDurableRetcons(userText) {
+  const retcons = loadDurableRetcons();
+  if (retcons.length === 0) return 0;
+  const remaining = invalidateAcceptedRetcons(retcons, userText);
+  if (remaining.length !== retcons.length) {
+    saveDurableRetcons(remaining);
+    return retcons.length - remaining.length;
+  }
+  return 0;
 }
 
 /**
@@ -355,6 +486,11 @@ export function handleContinuityResult(result, characterName, abortCheck = null)
     quotes: issues.map((issue) => issue?.response_quote).filter(Boolean),
   };
 
+  // In addition to the anchored one-shot note, record durable retcons so the
+  // reminder survives several turns instead of vanishing after one response.
+  // The retcon entry is removed by a swipe/delete rollback of its anchor.
+  addDurableRetcons(issues, result.anchorIdx);
+
   const context = getContext();
   if (context.chatMetadata) {
     if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
@@ -383,10 +519,34 @@ export function applyPendingRepair() {
   if (!pendingRepair && context.chatMetadata?.[META_KEY]?.[REPAIR_KEY]) {
     pendingRepair = context.chatMetadata[META_KEY][REPAIR_KEY];
   }
-  if (!pendingRepair) return false;
 
-  if (!isPendingRepairAnchorValid(context.chat, pendingRepair)) {
-    clearRepair();
+  // If the user's latest turn already adopts the changed state, the retcon is
+  // moot - drop it before building the injected note.
+  const lastUserText =
+    [...(context.chat ?? [])].reverse().find((m) => m?.is_user && typeof m.mes === 'string')?.mes ??
+    '';
+  if (lastUserText) invalidateAcceptedDurableRetcons(lastUserText);
+
+  // Only repair mode injects anything. Warn and off never inject, so any
+  // stored durable retcons stay dormant rather than leaking into the prompt.
+  if (getContinuityMode() !== 'repair') {
+    setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
+    return false;
+  }
+
+  // Durable retcons take precedence: they persist across turns so the reminder
+  // is not lost after the anchored one-shot note has been consumed.
+  const durableNote = buildDurableRetconNote(loadDurableRetcons());
+
+  let content = '';
+  if (durableNote) {
+    content = durableNote;
+  } else if (pendingRepair && isPendingRepairAnchorValid(context.chat, pendingRepair)) {
+    content = pendingRepair.note;
+  } else {
+    // No durable note and no valid anchor - drop any stale one-shot note.
+    if (pendingRepair) clearRepair();
+    setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
     return false;
   }
 
@@ -395,7 +555,7 @@ export function applyPendingRepair() {
 
   setExtensionPrompt(
     PROMPT_KEY_REPAIR,
-    pendingRepair.note,
+    content,
     extension_prompt_types.IN_CHAT,
     depth,
     false,
@@ -439,11 +599,9 @@ export function loadAndInjectRepair() {
   const context = getContext();
   const stored = context.chatMetadata?.[META_KEY]?.[REPAIR_KEY];
 
-  if (stored) {
-    pendingRepair = stored;
-    applyPendingRepair();
-  } else {
-    pendingRepair = null;
-    setExtensionPrompt(PROMPT_KEY_REPAIR, '', extension_prompt_types.NONE, 0);
-  }
+  // Re-arm this chat's stored one-shot note (if any) and re-inject any durable
+  // retcons that are still active. applyPendingRepair validates the anchor
+  // before using the one-shot note, and injects durable retcons regardless.
+  pendingRepair = stored ?? null;
+  applyPendingRepair();
 }

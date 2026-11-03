@@ -299,16 +299,16 @@ export const defaultSettings = {
   epistemic_secondhand_framing: true,
   epistemic_response_length: 400,
   epistemic_inject_budget: 200,
-  // Injected in the main prompt rather than at IN_CHAT depth 1 so stale
-  // extracted state cannot override the active dialogue turn.
-  epistemic_depth: 0,
+  // Injected near the generation point (depth 2) now that state is anchored
+  // and rollback-safe - stale extracted state can no longer override the turn.
+  epistemic_depth: 2,
   epistemic_position: extension_prompt_types.IN_PROMPT,
   epistemic_role: extension_prompt_roles.SYSTEM,
 
   // State Ledger (structured entity state cards)
   state_ledger_enabled: false,
   state_ledger_inject_budget: 200,
-  state_ledger_depth: 0,
+  state_ledger_depth: 2,
   state_ledger_position: extension_prompt_types.IN_PROMPT,
   state_ledger_role: extension_prompt_roles.SYSTEM,
 
