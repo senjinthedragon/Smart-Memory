@@ -46,7 +46,7 @@ import {
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_STATE_LEDGER, estimateTokens } from './constants.js';
 import { buildStateCardPrompt } from './prompts.js';
-import { parseStateCardResponse } from './parsers.js';
+import { parseStateCardResponse, mergeStateCardFields } from './parsers.js';
 import { loadCharacterEntityRegistry, loadSessionEntityRegistry } from './graph-migration.js';
 import { generateMemoryExtract } from './generate.js';
 import { smLog } from './logging.js';
@@ -144,7 +144,9 @@ export function getStateCard(name, type) {
 export async function setStateCard(name, type, fields) {
   const ledger = loadStateLedger();
   const key = ledgerKey(name, type);
-  ledger[key] = { ...(ledger[key] ?? {}), ...fields };
+  // Collection-aware merge: a plain item list appends, a `{ removeItems }`
+  // descriptor removes matching items, and `''` clears the field outright.
+  ledger[key] = mergeStateCardFields(ledger[key] ?? {}, fields);
   await saveStateLedger(ledger);
 }
 
@@ -260,12 +262,13 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
       return 0;
     }
 
-    // Merge updates into the existing ledger.
+    // Merge updates into the existing ledger with collection-aware add/remove
+    // semantics so a partial removal never wipes untargeted items.
     if (abortCheck?.()) return 0;
     const ledger = loadStateLedger();
     let count = 0;
     for (const [key, fields] of updates) {
-      ledger[key] = { ...(ledger[key] ?? {}), ...fields };
+      ledger[key] = mergeStateCardFields(ledger[key] ?? {}, fields);
       count++;
     }
     await saveStateLedger(ledger);

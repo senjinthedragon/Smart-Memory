@@ -10,6 +10,7 @@ import {
   parseProfileOutput,
   parseRelationshipDeltaResponse,
   parseStateCardResponse,
+  mergeStateCardFields,
 } from '../parsers.js';
 import { buildStateCardPrompt } from '../prompts.js';
 
@@ -581,18 +582,84 @@ test('parseRelationshipDeltaResponse: preserves multi-hyphen names and removals'
 // parseStateCardResponse
 // =========================================================================
 
-test('parseStateCardResponse: none/empty/! values clear stored fields', () => {
+test('parseStateCardResponse: none/empty clear fields and !item removes a single item', () => {
   const result = parseStateCardResponse(
     '[state:Kael:character] mood=calm | injuries=none | carried_items=!silver key | outfit_disguise=empty',
   );
   const fields = result.get('kael|character');
   assert.ok(fields);
   assert.equal(fields.mood, 'calm');
-  // Clearing signals become empty strings so the ledger merge overwrites the
-  // previous value during the next save.
+  // Total-clear signals become empty strings so the ledger merge wipes the value.
   assert.equal(fields.injuries, '');
-  assert.equal(fields.carried_items, '');
   assert.equal(fields.outfit_disguise, '');
+  // A `!item` value is a PARTIAL removal descriptor, not a total clear.
+  assert.deepEqual(fields.carried_items, { removeItems: ['silver key'] });
+});
+
+test('parseStateCardResponse: healed:/dropped: remove a single sub-item', () => {
+  const result = parseStateCardResponse(
+    '[state:Kael:character] injuries=healed: graze on shoulder | carried_items=dropped: silver key',
+  );
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.deepEqual(fields.injuries, { removeItems: ['graze on shoulder'] });
+  assert.deepEqual(fields.carried_items, { removeItems: ['silver key'] });
+});
+
+test('parseStateCardResponse: all-healed and none-left clear a collection field', () => {
+  const healed = parseStateCardResponse('[state:Kael:character] injuries=all healed');
+  assert.equal(healed.get('kael|character').injuries, '');
+  const noneLeft = parseStateCardResponse('[state:Kael:character] carried_items=none left');
+  assert.equal(noneLeft.get('kael|character').carried_items, '');
+});
+
+test('mergeStateCardFields: partial removal keeps untargeted items', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: { removeItems: ['graze'] } },
+  );
+  assert.equal(merged.injuries, 'broken arm');
+});
+
+test('mergeStateCardFields: partial removal of a non-first item keeps the rest', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: { removeItems: ['broken arm'] } },
+  );
+  assert.equal(merged.injuries, 'graze on shoulder');
+});
+
+test('mergeStateCardFields: removing every item clears the field', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: { removeItems: ['graze', 'broken arm'] } },
+  );
+  assert.equal(merged.injuries, '');
+});
+
+test('mergeStateCardFields: total clear wipes the whole collection', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: '' },
+  );
+  assert.equal(merged.injuries, '');
+});
+
+test('mergeStateCardFields: adding new items appends without duplicating', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'broken arm' },
+    { injuries: 'broken arm, sprained wrist' },
+  );
+  assert.equal(merged.injuries, 'broken arm, sprained wrist');
+});
+
+test('mergeStateCardFields: non-collection fields are replaced like before', () => {
+  const merged = mergeStateCardFields(
+    { mood: 'calm', location: 'tavern' },
+    { mood: 'angry', location: 'cleared' },
+  );
+  assert.equal(merged.mood, 'angry');
+  assert.equal(merged.location, 'cleared');
 });
 
 test('parseStateCardResponse: clear-only entry is retained so the clear propagates', () => {

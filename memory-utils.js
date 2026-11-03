@@ -36,7 +36,8 @@
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
  * splitSummarySections      - splits a formatted short-term summary into numbered sections
  * truncateSummaryToBudget   - trims earlier summary sections while preserving Current Moment and Next Beat
- * matchSubjectToMember      - resolves an epistemic subject to a group member (exact/first-name/partial)
+ * matchSubjectToMember      - resolves an epistemic subject to a group member (exact/token/prefix)
+ * setSmartMemoryLogger      - injects the logger used by the pure helpers (kept runtime-free)
  * partitionEpistemicEntriesBySubject - groups group-chat epistemic entries into per-character buckets
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
@@ -45,6 +46,21 @@
 
 import { cosineSimilarity, jaccardSimilarity } from './similarity.js';
 import { estimateTokens } from './constants.js';
+
+// Module-level logger, injectable so these pure helpers stay importable under
+// plain Node (logging.js pulls in the SillyTavern runtime). Production code
+// wires this to smLog via setSmartMemoryLogger() on module load.
+let smLog = () => {};
+
+/**
+ * Injects the Smart Memory logger used by the pure helpers (for example the
+ * ambiguous-epistemic-subject warning). Kept injectable so this module has no
+ * runtime dependency on logging.js or the SillyTavern runtime.
+ * @param {(...args: any[]) => void} fn
+ */
+export function setSmartMemoryLogger(fn) {
+  if (typeof fn === 'function') smLog = fn;
+}
 
 function tokenSet(text) {
   return new Set((text || '').toLowerCase().split(/\s+/).filter(Boolean));
@@ -933,9 +949,27 @@ const SUMMARY_SECTION_TITLES = {
   9: /^next\s+beat\b/i,
 };
 
-// Matches a numbered line at the start of a line, e.g. "3. Key Events:". The
-// captured remainder is validated against SUMMARY_SECTION_TITLES before use.
-const SUMMARY_SECTION_HEADER_RE = /^[ \t]*(\d+)\.\s*(.*)$/gm;
+// Matches a normalized numbered line, e.g. "3. Key Events", "3) Key Events",
+// "3: Key Events", or "3 - Key Events". The captured title is validated against
+// SUMMARY_SECTION_TITLES before use.
+const SUMMARY_SECTION_HEADER_RE = /^([1-9])\s*[.)\:\-]\s*(.+)$/;
+
+/**
+ * Normalizes a raw summary line by stripping markdown heading and emphasis
+ * markers and a trailing delimiter, so plain ("3. Key Events:") and
+ * markdown-decorated forms ("### 3. Key Events", "3. **Key Events:**",
+ * "**3. Key Events**", "3) Key Events:") all collapse to the same "N. Title"
+ * shape before the numbered-header pattern is applied.
+ * @param {string} line
+ * @returns {string}
+ */
+function normalizeSummaryHeaderLine(line) {
+  return String(line ?? '')
+    .replace(/^[ \t]*(?:#{1,6}\s+)?/, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/[:\-–—]\s*$/, '')
+    .trim();
+}
 
 /**
  * Splits a formatted short-term summary into its numbered sections.
@@ -943,6 +977,12 @@ const SUMMARY_SECTION_HEADER_RE = /^[ \t]*(\d+)\.\s*(.*)$/gm;
  * Returns the text before the first section as `preamble` and one entry per
  * recognised section. Only lines whose number maps to a canonical section title
  * count as headers, so numbered lists nested inside a section's body are ignored.
+ * Section numbers must increase monotonically for the same reason - a nested
+ * "8." inside Section 3 is rejected once Section 3 has been seen.
+ *
+ * Markdown decorations are tolerated: `### N. Title`, `N. **Title:**`,
+ * `**N. Title**`, `N) Title:`, and `N. Title:` all parse.
+ *
  * Any text that does not follow the numbered format keeps the whole input in
  * `preamble` with an empty `sections` array.
  *
@@ -951,19 +991,37 @@ const SUMMARY_SECTION_HEADER_RE = /^[ \t]*(\d+)\.\s*(.*)$/gm;
  */
 export function splitSummarySections(summary) {
   const text = String(summary ?? '');
-  const matches = [...text.matchAll(SUMMARY_SECTION_HEADER_RE)].filter((match) => {
-    const num = Number(match[1]);
-    const title = SUMMARY_SECTION_TITLES[num];
-    if (!title) return false;
-    return title.test(match[2].trim());
-  });
-  if (matches.length === 0) return { preamble: text.trim(), sections: [] };
+  const lines = text.split('\n');
 
-  const preamble = text.slice(0, matches[0].index).trim();
-  const sections = matches.map((match, i) => {
-    const start = match.index ?? 0;
-    const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
-    return { num: Number(match[1]), text: text.slice(start, end).trim() };
+  const headers = [];
+  let lastNum = 0;
+  let offset = 0;
+  for (const rawLine of lines) {
+    const lineStart = offset;
+    offset += rawLine.length + 1; // account for the '\n' separator
+
+    const match = normalizeSummaryHeaderLine(rawLine).match(SUMMARY_SECTION_HEADER_RE);
+    if (!match) continue;
+
+    const num = Number(match[1]);
+    const title = match[2].trim();
+    const titlePattern = SUMMARY_SECTION_TITLES[num];
+    if (!titlePattern || !titlePattern.test(title)) continue;
+    // Enforce monotonic numbering so numbered sub-items inside Section 3
+    // ("8. Fought the bandits") cannot be misread as Sections 8 and 9.
+    if (num <= lastNum) continue;
+
+    headers.push({ num, index: lineStart });
+    lastNum = num;
+  }
+
+  if (headers.length === 0) return { preamble: text.trim(), sections: [] };
+
+  const preamble = text.slice(0, headers[0].index).trim();
+  const sections = headers.map((header, i) => {
+    const start = header.index;
+    const end = i + 1 < headers.length ? headers[i + 1].index : text.length;
+    return { num: header.num, text: text.slice(start, end).trim() };
   });
   return { preamble, sections };
 }
@@ -1094,13 +1152,18 @@ export function truncateSummaryToBudget(summary, budget) {
  * for "Kael Draven", "Picard" for "Jean-Luc Picard"). This matcher accepts, in
  * order of confidence:
  * - an exact case-insensitive name match
- * - a whitespace-separated token of the member of length >= 2 (first name)
+ * - a whitespace-separated token of the member (first name / surname)
  * - a prefix/suffix match ("Elara" against "Elara Voss")
- * - a substring match when the subject is at least 4 characters long
+ *
+ * Arbitrary substring matching is deliberately NOT used: "Evan" must not match
+ * "Evangeline Cole". When more than one member matches the subject, the match is
+ * refused (returns null) rather than guessing - putting a secret into the wrong
+ * character's store is worse than dropping it.
  *
  * @param {string} subject
  * @param {string[]} memberNames
- * @returns {string|null} The canonical member name, or null when no member matches.
+ * @returns {string|null} The canonical member name, or null when no member
+ *   matches or the match is ambiguous.
  */
 export function matchSubjectToMember(subject, memberNames) {
   const s = String(subject ?? '')
@@ -1116,16 +1179,30 @@ export function matchSubjectToMember(subject, memberNames) {
     if (String(member).toLowerCase() === s) return member;
   }
 
-  // 2. Token / first-name, prefix/suffix, and substring matches.
+  // 2. Complete whitespace-separated token, or a prefix/suffix bounded by a
+  //    space. `name.includes(subject)` is intentionally NOT used - it produces
+  //    substring false positives like "Evan" -> "Evangeline Cole".
+  const matches = [];
   for (const member of names) {
     const m = String(member).toLowerCase();
     const tokens = m.split(/\s+/).filter(Boolean);
-    if (tokens.some((token) => token.length >= 2 && token === s)) return member;
-    if (m.startsWith(`${s} `) || m.endsWith(` ${s}`)) return member;
-    if (s.length >= 4 && m.includes(s)) return member;
+    if (tokens.includes(s) || m.startsWith(`${s} `) || m.endsWith(` ${s}`)) {
+      matches.push(member);
+    }
   }
 
-  return null;
+  if (matches.length === 0) return null;
+
+  // 3. Ambiguity guard: more than one member matched, so the subject cannot be
+  //    attributed without risk. Refuse rather than silently pick the first.
+  if (matches.length > 1) {
+    smLog(
+      `[SmartMemory] Ambiguous epistemic subject "${subject}" matched multiple members - skipped to prevent misattribution.`,
+    );
+    return null;
+  }
+
+  return matches[0];
 }
 
 /**

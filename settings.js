@@ -100,6 +100,7 @@ import {
 } from './scenes.js';
 import { extractArcs, injectArcs, clearArcs, clearArcSummaries, loadArcSummaries } from './arcs.js';
 import { runModelTest } from './model-test.js';
+import { migrateEpistemicStateLedgerPlacement } from './settings-migration.js';
 
 /** Set to true while a model test is running to allow cancellation. */
 let modelTestRunning = false;
@@ -685,21 +686,8 @@ export function loadSettings() {
   // (position 1, depth 1) to the in-prompt placement (position 2, depth 0). The
   // in-chat default let stale extracted state override the active dialogue turn.
   // Only users still on the untouched old default are moved; an explicit custom
-  // position/depth is preserved.
-  if (
-    extension_settings[MODULE_NAME].epistemic_position === 1 &&
-    extension_settings[MODULE_NAME].epistemic_depth === 1
-  ) {
-    extension_settings[MODULE_NAME].epistemic_position = extension_prompt_types.IN_PROMPT;
-    extension_settings[MODULE_NAME].epistemic_depth = 0;
-  }
-  if (
-    extension_settings[MODULE_NAME].state_ledger_position === 1 &&
-    extension_settings[MODULE_NAME].state_ledger_depth === 1
-  ) {
-    extension_settings[MODULE_NAME].state_ledger_position = extension_prompt_types.IN_PROMPT;
-    extension_settings[MODULE_NAME].state_ledger_depth = 0;
-  }
+  // position/depth is preserved. Pure helper so it is unit-testable.
+  migrateEpistemicStateLedgerPlacement(extension_settings[MODULE_NAME], extension_prompt_types);
 }
 
 // ---- Settings UI binding ------------------------------------------------

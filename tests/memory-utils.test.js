@@ -388,6 +388,40 @@ test('matchSubjectToMember resolves first names, tokens, and partials', () => {
   assert.equal(matchSubjectToMember('', ['Elara Voss']), null);
 });
 
+test('matchSubjectToMember rejects substring false matches', () => {
+  // "Evan" must not match "Evangeline Cole" via arbitrary substring matching.
+  assert.equal(matchSubjectToMember('Evan', ['Evangeline Cole']), null);
+  assert.equal(matchSubjectToMember('Ange', ['Evangeline Cole']), null);
+  // A genuine bounded token still matches.
+  assert.equal(matchSubjectToMember('Cole', ['Evangeline Cole']), 'Evangeline Cole');
+});
+
+test('matchSubjectToMember refuses ambiguous first-name matches', () => {
+  // "Elara" matches both members - refuse rather than misattribute a secret.
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Elara Night']), null);
+  // Ambiguity only fires when multiple members genuinely match.
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Kael Draven']), 'Elara Voss');
+});
+
+test('partitionEpistemicEntriesBySubject skips ambiguous subjects instead of misattributing', () => {
+  const entries = [
+    { type: 'knows', subject: 'Elara', content: 'the vault code' },
+    { type: 'knows', subject: 'Kael', content: 'the ambush plan' },
+  ];
+
+  const { grouped, skipped } = partitionEpistemicEntriesBySubject(entries, [
+    'Elara Voss',
+    'Elara Night',
+    'Kael Draven',
+  ]);
+
+  assert.equal(grouped.get('Elara Voss').length, 0);
+  assert.equal(grouped.get('Elara Night').length, 0);
+  assert.equal(grouped.get('Kael Draven')[0].content, 'the ambush plan');
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].subject, 'Elara');
+});
+
 test('partitionEpistemicEntriesBySubject matches first names to full member names', () => {
   const entries = [
     { type: 'knows', subject: 'Elara', content: 'the vault code' },
@@ -460,6 +494,65 @@ test('truncateSummaryToBudget does not drop Section 5 when Section 3 has a neste
   assert.match(trimmed, /Elara stands at the sealed gate/);
   assert.match(trimmed, /9\. Next Beat:/);
   assert.match(trimmed, /The gate opens and cold air rushes out/);
+});
+
+// =========================================================================
+// Markdown-formatted summary headers
+// =========================================================================
+
+const CANONICAL_SECTION_TITLES = [
+  'Scene & Setting',
+  'Characters Present',
+  'Key Events',
+  'Relationship Dynamics',
+  'Revealed Information',
+  'Story Threads',
+  "User's Direction",
+  'Current Moment',
+  'Next Beat',
+];
+
+function buildSummaryWithFormatter(formatLine) {
+  return CANONICAL_SECTION_TITLES.map((title, i) => formatLine(i + 1, title)).join('\n\n');
+}
+
+test('splitSummarySections parses plain, markdown, and alternate-delimiter headers', () => {
+  const variants = [
+    (n, t) => `${n}. ${t}: Section body ${n}.`, // 3. Key Events:
+    (n, t) => `${n}. **${t}:** Section body ${n}.`, // 3. **Key Events:**
+    (n, t) => `**${n}. ${t}** Section body ${n}.`, // **3. Key Events**
+    (n, t) => `### ${n}. ${t} Section body ${n}.`, // ### 3. Key Events
+    (n, t) => `${n}) ${t}: Section body ${n}.`, // 3) Key Events:
+    (n, t) => `${n}: ${t}: Section body ${n}.`, // 3: Key Events:
+    (n, t) => `${n} - ${t} Section body ${n}.`, // 3 - Key Events
+  ];
+
+  for (const format of variants) {
+    const { sections } = splitSummarySections(buildSummaryWithFormatter(format));
+    assert.equal(
+      sections.length,
+      9,
+      `variant did not parse 9 sections: "${format(1, 'Scene & Setting')}"`,
+    );
+    assert.deepEqual(
+      sections.map((s) => s.num),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      `variant produced wrong section numbers: "${format(1, 'Scene & Setting')}"`,
+    );
+    assert.match(sections.find((s) => s.num === 8).text, /Current Moment/);
+    assert.match(sections.find((s) => s.num === 9).text, /Next Beat/);
+  }
+});
+
+test('truncateSummaryToBudget preserves anchors for markdown-formatted summaries', () => {
+  const summary = buildSummaryWithFormatter(
+    (n, t) => `### ${n}. ${t}\n${'The ancient hall is cold and dark. '.repeat(12)}`,
+  );
+  const trimmed = truncateSummaryToBudget(summary, 120);
+
+  assert.ok(trimmed.length < summary.length);
+  assert.match(trimmed, /Current Moment/);
+  assert.match(trimmed, /Next Beat/);
 });
 
 // =========================================================================

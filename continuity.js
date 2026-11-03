@@ -350,6 +350,9 @@ export function handleContinuityResult(result, characterName, abortCheck = null)
     note,
     anchorIdx: result.anchorIdx,
     anchorHash: result.anchorHash,
+    // Response quotes let isPendingRepairAnchorValid detect whether the user has
+    // already acknowledged the changed state (making the note moot).
+    quotes: issues.map((issue) => issue?.response_quote).filter(Boolean),
   };
 
   const context = getContext();
