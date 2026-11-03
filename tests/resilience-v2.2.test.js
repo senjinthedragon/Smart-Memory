@@ -151,7 +151,12 @@ test('memorySupportedAfterRollback: numeric and string current ids behave identi
 
 // ---- M-3: generation gate FIFO correlation ----------------------------------
 
-const freshGate = () => ({ pending: 0, inProgress: false, lastTerminalAt: -Infinity });
+const freshGate = () => ({
+  pending: 0,
+  inProgress: false,
+  awaitingPair: null,
+  lastTerminalAt: -Infinity,
+});
 
 test('generation gate: an immediate real cancel still clears the gate', () => {
   let s = freshGate();
@@ -184,15 +189,17 @@ test('generation gate: STOPPED+ENDED for one aborted generation dequeue only onc
   s = correlateGenerationGate(s, 'start', 100); // B
 
   // stopGeneration() emits STOPPED, then hideStopButton() emits ENDED.
-  s = correlateGenerationGate(s, 'terminal', 200);
+  s = correlateGenerationGate(s, 'stopped', 200);
   assert.equal(s.pending, 1);
   assert.equal(s.inProgress, true);
-  s = correlateGenerationGate(s, 'terminal', 200 + GENERATION_TERMINAL_COALESCE_MS / 2);
+  assert.equal(s.awaitingPair, 'ended');
+  s = correlateGenerationGate(s, 'ended', 200 + GENERATION_TERMINAL_COALESCE_MS / 2);
   assert.equal(s.pending, 1, 'the ENDED pair must not dequeue a second generation');
   assert.equal(s.inProgress, true);
+  assert.equal(s.awaitingPair, null);
 
   // A later, distinct terminal for B does clear.
-  s = correlateGenerationGate(s, 'terminal', 600);
+  s = correlateGenerationGate(s, 'stopped', 600);
   assert.equal(s.pending, 0);
   assert.equal(s.inProgress, false);
 });
@@ -282,6 +289,69 @@ test('generation gate: complete retains the slot and the trailing terminal clear
   assert.equal(s.inProgress, false, 'normal completion opens the gate');
 
   s = correlateGenerationGate(s, 'terminal', 40);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+});
+
+// ---- H-2: event-kind-aware terminal pairing ----------------------------------
+
+test('generation gate: a delayed STOPPED/ENDED pair for A never consumes B', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // generation A
+  s = correlateGenerationGate(s, 'start', 10); // generation B
+  assert.equal(s.pending, 2);
+
+  // A's delayed cancel: STOPPED then ENDED, both for A.
+  s = correlateGenerationGate(s, 'stopped', 20);
+  assert.equal(s.pending, 1, "A's STOPPED consumes A's slot only");
+  assert.equal(s.awaitingPair, 'ended');
+  s = correlateGenerationGate(s, 'ended', 30);
+  assert.equal(s.pending, 1, 'the ENDED pairs with A - it is not B');
+  assert.equal(s.awaitingPair, null);
+
+  // B's own real STOPPED must consume B's slot...
+  s = correlateGenerationGate(s, 'stopped', 40);
+  assert.equal(s.pending, 0, "B's real STOPPED must consume");
+  assert.equal(s.inProgress, false);
+
+  // ...and B's trailing ENDED is a stale no-op, not a second dequeue.
+  s = correlateGenerationGate(s, 'ended', 50);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+});
+
+test('generation gate: a matched STOPPED/ENDED pair for one generation counts once', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0);
+  s = correlateGenerationGate(s, 'stopped', 10);
+  assert.equal(s.pending, 0, 'the STOPPED consumes the single pending generation');
+  assert.equal(s.inProgress, false);
+
+  // The slot was already consumed by the STOPPED, so the trailing ENDED is a
+  // stale no-op and must not dequeue a second (non-existent) generation.
+  s = correlateGenerationGate(s, 'ended', 20);
+  assert.equal(s.pending, 0, 'the paired ENDED must not dequeue a second time');
+  assert.equal(s.inProgress, false);
+});
+
+test('generation gate: a normal ENDED with no STOPPED clears the gate', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0);
+  s = correlateGenerationGate(s, 'ended', 10);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+  assert.equal(s.awaitingPair, null, 'a lone ENDED does not arm a pair');
+});
+
+test('generation gate: a lone ENDED consumes its slot and a trailing STOPPED is stale', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0);
+  s = correlateGenerationGate(s, 'ended', 10);
+  // The lone ENDED consumed the slot and did not arm awaitingPair, so a
+  // following STOPPED is stale and a no-op.
+  assert.equal(s.pending, 0);
+  assert.equal(s.awaitingPair, null);
+  s = correlateGenerationGate(s, 'stopped', 20);
   assert.equal(s.pending, 0);
   assert.equal(s.inProgress, false);
 });

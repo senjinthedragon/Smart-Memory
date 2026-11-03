@@ -1653,49 +1653,64 @@ export const GENERATION_TERMINAL_COALESCE_MS = 100;
 /**
  * Pure correlation state machine for the `generationInProgress` gate.
  *
- * SillyTavern's terminal generation events carry no generation id, so a
- * terminal emitted for generation A can be delivered after generation B has
- * already started (the audit's delayed-cancel case). Treating every terminal as
+ * SillyTavern's terminal generation events carry no generation id, so a terminal
+ * emitted for generation A can be delivered after generation B has already
+ * started (the audit's delayed-cancel case). Treating every terminal as
  * authoritative for the active gate would clear B's gate mid-stream and let
  * intermediate CHARACTER_MESSAGE_RENDERED events run extraction on partial,
  * unstable text.
  *
  * To correlate without host ids we pair starts and terminals FIFO: each `start`
- * enqueues one pending generation, each `terminal` dequeues the oldest, and the
- * gate is cleared only when the last pending generation terminates. A delayed
- * terminal for an already-superseded generation therefore advances the queue
- * without clearing a newer generation's gate, while a genuine immediate cancel
- * has exactly one pending generation and still clears at once (preserving the
- * immediate-stop fix). Back-to-back terminals for one generation (STOPPED then
- * ENDED) are collapsed by the `lastTerminalAt` window so a generation is only
- * dequeued once.
+ * enqueues one pending generation, each terminal consumes one, and the gate is
+ * cleared only when the last pending generation terminates. A delayed terminal
+ * for an already-superseded generation therefore advances the queue without
+ * clearing a newer generation's gate, while a genuine immediate cancel has
+ * exactly one pending generation and still clears at once (preserving the
+ * immediate-stop fix).
  *
- * The window is scoped to a single terminal pair, not across generations:
- * - `start` resets `lastTerminalAt` to -Infinity, so a new generation's genuine
- *   terminal is never mistaken for a duplicate of a previous generation's.
- * - A `terminal` with `pending === 0` is a stale signal for an already-cleared
- *   gate; it is a NO-OP and deliberately does NOT advance `lastTerminalAt`
- *   (advancing it would let a stale terminal suppress the next real one).
- * - Within a generation, a second `terminal` inside the window is the paired
- *   STOPPED+ENDED duplicate and does not dequeue again.
+ * Terminal events are distinguished by kind: `'stopped'` (GENERATION_STOPPED)
+ * and `'ended'` (GENERATION_ENDED). stopGeneration() emits STOPPED immediately
+ * followed by ENDED for the SAME aborted generation, so the second event of that
+ * pair must NOT consume a second generation. The `awaitingPair` field records
+ * the complement expected next: processing a STOPPED consumes one pending slot
+ * and sets `awaitingPair = 'ended'`; a subsequent ENDED within
+ * GENERATION_TERMINAL_COALESCE_MS of the STOPPED is recognised as the pair,
+ * clears `awaitingPair`, and does NOT consume another slot. Because pairing is
+ * keyed on event kind (not on elapsed time alone), a delayed STOPPED/ENDED pair
+ * for an older generation can never be mistaken for a newer generation's real
+ * terminal.
+ *
+ * `'terminal'` is retained as a generic alias that always consumes one pending
+ * slot and never pairs, for callers/tests that do not distinguish the kind.
+ *
+ * `start` enqueues a slot and resets the coalescing timestamp but deliberately
+ * leaves `awaitingPair` intact: a delayed ENDED that pairs with a STOPPED
+ * observed before a newer generation started must still be absorbed rather than
+ * clear the newer generation's gate.
  *
  * `complete` (MESSAGE_RECEIVED) opens the gate for the finished generation but
  * deliberately retains its pending slot for the terminal that follows, so an
  * older generation cannot be dequeued by a newer one's terminal.
  *
- * Deliberate trade-off: host events carry no identity, so if a generation never
- * emits a terminal event its slot stays queued. The failure mode is then a gate
- * that clears via the watchdog / chat-switch reset rather than immediately -
- * conservative (extraction briefly suppressed), never partial-text extraction.
+ * Residual constraint: host events carry no generation id, so a STOPPED that
+ * never receives its ENDED leaves `awaitingPair` set. Its pending slot is still
+ * consumed, so the gate is not stuck on that account; a generation that emits no
+ * terminal at all relies on the watchdog / chat-switch reset. The failure mode
+ * stays conservative (extraction briefly suppressed), never partial-text
+ * extraction.
  *
- * @param {{pending?: number, inProgress?: boolean, lastTerminalAt?: number}} state
- * @param {'start'|'complete'|'terminal'|'reset'} event
+ * @param {{pending?: number, inProgress?: boolean, awaitingPair?: ('stopped'|'ended'|null), lastTerminalAt?: number}} state
+ * @param {'start'|'complete'|'stopped'|'ended'|'terminal'|'reset'} event
  * @param {number} [now] - Monotonic ms timestamp for terminal coalescing.
- * @returns {{pending: number, inProgress: boolean, lastTerminalAt: number}}
+ * @returns {{pending: number, inProgress: boolean, awaitingPair: ('stopped'|'ended'|null), lastTerminalAt: number}}
  */
 export function correlateGenerationGate(state, event, now = 0) {
   const pending = Number.isInteger(state?.pending) && state.pending > 0 ? state.pending : 0;
   const inProgress = state?.inProgress === true;
+  const awaitingPair =
+    state?.awaitingPair === 'stopped' || state?.awaitingPair === 'ended'
+      ? state.awaitingPair
+      : null;
   const lastTerminalAt =
     typeof state?.lastTerminalAt === 'number' && Number.isFinite(state.lastTerminalAt)
       ? state.lastTerminalAt
@@ -1704,42 +1719,46 @@ export function correlateGenerationGate(state, event, now = 0) {
   switch (event) {
     case 'start':
       // A new generation opens the gate and enqueues one pending slot. The
-      // coalescing marker is reset: a new generation MUST invalidate the prior
-      // terminal-pair window, otherwise a genuine terminal for this generation
-      // arriving within GENERATION_TERMINAL_COALESCE_MS of a stale terminal for
-      // an already-cleared gate would be swallowed as a duplicate and leave the
-      // gate stuck until the watchdog.
-      return { pending: pending + 1, inProgress: true, lastTerminalAt: -Infinity };
+      // coalescing timestamp is reset so a genuine terminal for this generation
+      // is not mistaken for a duplicate of an earlier generation's. `awaitingPair`
+      // is deliberately preserved: a delayed ENDED pairing with a STOPPED seen
+      // before this start must still be absorbed, not clear this generation.
+      return { pending: pending + 1, inProgress: true, awaitingPair, lastTerminalAt: -Infinity };
     case 'complete':
       // MESSAGE_RECEIVED: the finished generation's gate opens, but its pending
       // slot is retained for the terminal that follows it.
-      return { pending, inProgress: false, lastTerminalAt };
+      return { pending, inProgress: false, awaitingPair, lastTerminalAt };
+    case 'stopped':
+    case 'ended':
     case 'terminal': {
-      // No pending generation: this terminal belongs to an already-cleared gate
-      // (e.g. the trailing ENDED after a terminal that already cleared). It is a
-      // NO-OP that must NOT update the coalescing marker - doing so would let a
-      // stale terminal suppress a genuine upcoming terminal for the next
-      // generation.
-      if (pending === 0) {
-        return { pending: 0, inProgress: false, lastTerminalAt };
+      const kind = event === 'terminal' ? null : event; // 'stopped' | 'ended' | null
+      // No pending generation: this terminal belongs to an already-cleared gate.
+      // It is a NO-OP that must NOT update the coalescing marker or the pair,
+      // or it could suppress a genuine upcoming terminal for the next generation.
+      if (pending <= 0) {
+        return { pending: 0, inProgress: false, awaitingPair, lastTerminalAt };
       }
-      // Collapse STOPPED+ENDED for one aborted generation into a single
-      // dequeue so one generation is never dequeued twice.
-      if (now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS) {
-        return { pending, inProgress, lastTerminalAt: now };
+      // Collapse the paired complement (STOPPED then ENDED, or ENDED then
+      // STOPPED) for the SAME generation, only within the coalescing window.
+      // Event-kind keying prevents a newer generation's real terminal from being
+      // swallowed by a delayed older pair.
+      if (kind && awaitingPair === kind && now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS) {
+        return { pending, inProgress, awaitingPair: null, lastTerminalAt: now };
       }
-      // The only pending generation is the active one: dequeue and clear. More
-      // than one pending: this terminal belongs to an older generation, so
-      // dequeue it but keep the newer generation's gate set.
-      if (pending <= 1) {
-        return { pending: 0, inProgress: false, lastTerminalAt: now };
-      }
-      return { pending: pending - 1, inProgress, lastTerminalAt: now };
+      // Consume exactly one pending generation.
+      const nextPending = pending - 1;
+      const nextAwaiting = kind === 'stopped' ? 'ended' : null;
+      return {
+        pending: nextPending,
+        inProgress: nextPending > 0,
+        awaitingPair: nextAwaiting,
+        lastTerminalAt: now,
+      };
     }
     case 'reset':
-      return { pending: 0, inProgress: false, lastTerminalAt: -Infinity };
+      return { pending: 0, inProgress: false, awaitingPair: null, lastTerminalAt: -Infinity };
     default:
-      return { pending, inProgress, lastTerminalAt };
+      return { pending, inProgress, awaitingPair, lastTerminalAt };
   }
 }
 

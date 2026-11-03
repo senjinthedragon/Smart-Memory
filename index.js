@@ -208,6 +208,13 @@ let generationPending = 0;
 // within GENERATION_TERMINAL_COALESCE_MS so a generation is dequeued once.
 let lastGenerationTerminalAt = -Infinity;
 
+// Which paired terminal complement is expected next for the current terminal
+// slot: 'ended' after a GENERATION_STOPPED, or null when no pair is pending.
+// stopGeneration() emits STOPPED then ENDED for one aborted generation; keying
+// the pair on event kind (rather than elapsed time alone) ensures a newer
+// generation's real terminal is never swallowed by a delayed older pair.
+let generationAwaitingPair = null;
+
 // Timer that force-clears generationInProgress when no terminal generation event
 // arrives. The flag is normally cleared by MESSAGE_RECEIVED or by the terminal
 // GENERATION_STOPPED/GENERATION_ENDED events, but a generation that is aborted or
@@ -240,15 +247,16 @@ function clearGenerationWatchdog() {
  * Applies a generation lifecycle event to the module-level gate state via the
  * pure correlator in memory-utils.js. Keeps the correlation logic testable under
  * plain Node while the watchdog/timestamp side-effects stay here.
- * @param {'start'|'complete'|'terminal'|'reset'} event
+ * @param {'start'|'complete'|'stopped'|'ended'|'terminal'|'reset'} event
  * @param {number} [now] - Monotonic ms timestamp for terminal coalescing.
- * @returns {{pending: number, inProgress: boolean, lastTerminalAt: number}}
+ * @returns {{pending: number, inProgress: boolean, awaitingPair: ('stopped'|'ended'|null), lastTerminalAt: number}}
  */
 function applyGenerationGateEvent(event, now = Date.now()) {
   const next = correlateGenerationGate(
     {
       pending: generationPending,
       inProgress: generationInProgress,
+      awaitingPair: generationAwaitingPair,
       lastTerminalAt: lastGenerationTerminalAt,
     },
     event,
@@ -256,6 +264,7 @@ function applyGenerationGateEvent(event, now = Date.now()) {
   );
   generationPending = next.pending;
   generationInProgress = next.inProgress;
+  generationAwaitingPair = next.awaitingPair;
   lastGenerationTerminalAt = next.lastTerminalAt;
   return next;
 }
@@ -2476,17 +2485,19 @@ jQuery(async function () {
   // SillyTavern's terminal events carry no generation id, and stopGeneration()
   // emits GENERATION_STOPPED immediately followed by GENERATION_ENDED via
   // hideStopButton(). correlateGenerationGate pairs starts and terminals FIFO
-  // (collapsing the back-to-back STOPPED/ENDED pair for one generation), so a
-  // delayed terminal from an older generation advances the queue WITHOUT
-  // clearing a newer generation's gate. A genuine immediate cancel has a single
-  // pending generation and still clears at once. The trade-off - cannot be
-  // perfectly resolved without host ids - is documented on correlateGenerationGate.
-  const onGenerationTerminal = () => {
-    const next = applyGenerationGateEvent('terminal');
+  // and collapses the back-to-back STOPPED/ENDED pair for one generation by
+  // event kind (so a delayed older pair can never swallow a newer generation's
+  // real terminal), so a delayed terminal from an older generation advances the
+  // queue WITHOUT clearing a newer generation's gate. A genuine immediate cancel
+  // has a single pending generation and still clears at once. The residual
+  // constraint - a STOPPED that never receives its ENDED relies on the watchdog -
+  // is documented on correlateGenerationGate.
+  const onGenerationTerminal = (kind) => {
+    const next = applyGenerationGateEvent(kind);
     if (!next.inProgress) clearGenerationWatchdog();
   };
-  eventSource.on(event_types.GENERATION_STOPPED, onGenerationTerminal);
-  eventSource.on(event_types.GENERATION_ENDED, onGenerationTerminal);
+  eventSource.on(event_types.GENERATION_STOPPED, () => onGenerationTerminal('stopped'));
+  eventSource.on(event_types.GENERATION_ENDED, () => onGenerationTerminal('ended'));
   // Allow external extensions to dismiss the recap overlay programmatically
   // (e.g. Discord Connector can dispatch this when the user sends a command
   // remotely and the blocking modal is preventing it from responding).
