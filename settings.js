@@ -107,6 +107,7 @@ import {
   migrateLegacyCharacterKeys,
 } from './settings-migration.js';
 import { getOperationRevision, sameGroupId } from './memory-utils.js';
+import { MACRO_NAMES, setMacroContent } from './macros.js';
 
 /** Set to true while a model test is running to allow cancellation. */
 let modelTestRunning = false;
@@ -447,6 +448,16 @@ async function reinjectAfterBudgetChange(characterName) {
   updateTokenDisplay();
 }
 
+// Maps the tier slots that catch-up clears to their Smart Memory macro names.
+// clearTierPrompt uses this to also empty a tier's macro content, since macro
+// mode can keep a tier in the model context even after its prompt slot is
+// emptied. Tiers without a macro (or not cleared by catch-up) are absent.
+const TIER_MACRO_NAMES = {
+  [PROMPT_KEY_LONG]: MACRO_NAMES.longterm,
+  [PROMPT_KEY_TRIGGERED]: MACRO_NAMES.triggered,
+  [PROMPT_KEY_SESSION]: MACRO_NAMES.session,
+};
+
 /**
  * Clears a single prompt slot after an injector resumed following cancellation.
  * Every tier's inject function writes its slot through setExtensionPrompt, so
@@ -455,11 +466,30 @@ async function reinjectAfterBudgetChange(characterName) {
  * routine when a chat switch lands during an injector's internal await and the
  * injector then writes stale content into the newly-active chat.
  *
+ * Macro mode and unified mode each keep a second copy of the tier content that
+ * the slot clear alone does not reach: the tier's {{smartmemory-*}} macro cache
+ * and the already-materialized unified block (slot + macro). Both are cleared
+ * here so a cancelled catch-up cannot leave a stale tier in the model context
+ * in any injection mode.
+ *
  * @param {string} promptKey - A PROMPT_KEY_* constant identifying the tier slot.
  */
 function clearTierPrompt(promptKey) {
   setExtensionPrompt(promptKey, '', extension_prompt_types.NONE, 0);
   invalidateUnifiedCache(promptKey);
+
+  // Macro mode: empty the tier's macro content so {{smartmemory-*}} stops
+  // returning the stale tier even though its individual slot is now empty.
+  const macroName = TIER_MACRO_NAMES[promptKey];
+  if (macroName) {
+    setMacroContent(macroName, '');
+  }
+
+  // Unified mode: injectUnified may already have merged this tier into the
+  // unified block. clearUnifiedSlot empties the unified prompt slot and its
+  // macro, and resets the content cache so the merged block no longer carries
+  // the stale tier.
+  clearUnifiedSlot();
 }
 
 // Minimum budget any tier will be reduced to during auto-tune, and the headroom

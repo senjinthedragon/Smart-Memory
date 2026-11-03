@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateTokens } from '../constants.js';
 import { migrateLegacyCharacterKeys } from '../settings-migration.js';
-import { computeSourceRange, memorySupportedAfterRollback } from '../memory-utils.js';
+import {
+  computeSourceRange,
+  memorySupportedAfterRollback,
+  unionSourceRanges,
+} from '../memory-utils.js';
 import {
   mergeStateCardFields,
   pruneStateLedger,
@@ -149,4 +153,48 @@ test('memorySupportedAfterRollback: keeps uncertain, other-chat, and provenance-
   );
   assert.equal(memorySupportedAfterRollback({}, 5, 'c'), true);
   assert.equal(memorySupportedAfterRollback({ source_messages: [] }, 5, 'c'), true);
+});
+
+test('unionSourceRanges: complete only when every contributor is fully attributed to one chat', () => {
+  const a = { source_messages: [[1, 2]], source_chat_id: 'c' };
+  const b = { source_messages: [[10, 12]], source_chat_id: 'c' };
+  const u = unionSourceRanges([a, b]);
+  assert.equal(u.source_incomplete, false);
+  assert.equal(u.source_chat_id, 'c');
+  assert.deepEqual(
+    u.source_messages.sort((x, y) => x[0] - y[0]),
+    [
+      [1, 2],
+      [10, 12],
+    ],
+  );
+});
+
+test('unionSourceRanges: every ambiguity forces source_incomplete', () => {
+  const ok = { source_messages: [[1, 2]], source_chat_id: 'c' };
+  // missing chat id
+  assert.equal(unionSourceRanges([ok, { source_messages: [[3, 4]] }]).source_incomplete, true);
+  // missing ranges
+  assert.equal(unionSourceRanges([ok, { source_chat_id: 'c' }]).source_incomplete, true);
+  // differing chats
+  assert.equal(
+    unionSourceRanges([ok, { source_messages: [[3, 4]], source_chat_id: 'd' }]).source_incomplete,
+    true,
+  );
+  // already flagged
+  assert.equal(
+    unionSourceRanges([
+      ok,
+      { source_messages: [[3, 4]], source_chat_id: 'c', source_incomplete: true },
+    ]).source_incomplete,
+    true,
+  );
+  // malformed ranges
+  assert.equal(
+    unionSourceRanges([ok, { source_messages: [['x', null]], source_chat_id: 'c' }])
+      .source_incomplete,
+    true,
+  );
+  // empty input
+  assert.equal(unionSourceRanges([]).source_incomplete, true);
 });

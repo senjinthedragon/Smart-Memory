@@ -103,6 +103,7 @@ import {
   sameGroupId,
   safeStorageKey,
   computeSourceRange,
+  unionSourceRanges,
   memorySupportedAfterRollback,
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
@@ -1084,46 +1085,19 @@ export async function consolidateMemories(characterName, force = false, abortChe
       // synthesized composite has no single source, so it inherits the UNION of
       // every contributing range from the type's inputs - keeping only the most
       // recent range would discard older support and let the rollback pruner
-      // delete the entry even though earlier supporting messages survive. Any
-      // contributor marked incomplete (or contributors drawn from different
-      // chats) makes the merged entry incomplete, so it is kept conservatively.
+      // delete the entry even though earlier supporting messages survive. The
+      // union is conservative: if ANY contributor lacks a usable range or an
+      // explicit chat id, is flagged incomplete, or draws from a different chat,
+      // the merged entry is marked incomplete so it is kept conservatively.
       const allInputs = [...base, ...unprocessed];
-      const unionSourceRanges = (contributors) => {
-        const ranges = [];
-        const seenRanges = new Set();
-        const chatIdByKey = new Map();
-        let incomplete = false;
-        for (const mem of contributors) {
-          if (!mem) continue;
-          if (mem.source_incomplete === true) incomplete = true;
-          if (mem.source_chat_id != null && !chatIdByKey.has(String(mem.source_chat_id))) {
-            chatIdByKey.set(String(mem.source_chat_id), mem.source_chat_id);
-          }
-          const list = Array.isArray(mem.source_messages) ? mem.source_messages : [];
-          for (const range of list) {
-            if (!Array.isArray(range)) continue;
-            const [start, end] = range;
-            if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
-            const key = `${start}:${end}`;
-            if (seenRanges.has(key)) continue;
-            seenRanges.add(key);
-            ranges.push([start, end]);
-          }
-        }
-        // Ambiguous provenance across chats must not cause a deletion.
-        if (chatIdByKey.size > 1) incomplete = true;
-        const chatId = chatIdByKey.size === 1 ? [...chatIdByKey.values()][0] : null;
-        return { ranges, incomplete, chatId };
-      };
       for (const entry of reconciledType) {
         const match = allInputs.find((m) => m.id === entry.id);
-        const contributors = match ? [match] : allInputs;
-        const { ranges, incomplete, chatId } = unionSourceRanges(contributors);
-        if (ranges.length > 0) {
-          entry.source_messages = ranges;
-          entry.source_chat_id = chatId;
-        }
-        if (incomplete) entry.source_incomplete = true;
+        const { source_messages, source_chat_id, source_incomplete } = unionSourceRanges(
+          match ? [match] : allInputs,
+        );
+        entry.source_messages = source_messages;
+        entry.source_chat_id = source_chat_id;
+        entry.source_incomplete = source_incomplete;
       }
 
       // Replace this type's entries. Other types are untouched.

@@ -45,6 +45,7 @@
  * safeStorageKey            - guards special object keys (__proto__, constructor, prototype)
  * escapeHtml                - escapes a value for safe HTML text/attribute interpolation
  * computeSourceRange        - resolves the real chat range covered by a set of extraction-window messages
+ * unionSourceRanges         - conservative provenance union for synthesized consolidated entries
  * memorySupportedAfterRollback - conservative rollback predicate: keeps missing/incomplete/other-chat provenance
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
@@ -1516,4 +1517,79 @@ export function memorySupportedAfterRollback(mem, targetMsgIndex, currentChatId)
   if (starts.length === 0) return true;
 
   return Math.min(...starts) <= targetMsgIndex;
+}
+
+/**
+ * Unions the provenance of several contributing memories for a synthesized
+ * consolidated entry. Conservative: provenance is incomplete unless EVERY
+ * contributor has a usable explicit chat id (all equal) and usable ranges.
+ *
+ * A synthesized composite has no single source, so it inherits the deduped
+ * union of every contributor's usable `[start, end]` ranges. This preserves
+ * older support instead of keeping only the most recent range (which would let
+ * the rollback pruner delete the entry even though earlier supporting messages
+ * survive). Any contributor that lacks a usable range, lacks a non-empty chat
+ * id, is flagged `source_incomplete`, or draws from a different chat forces
+ * `source_incomplete = true` so the rollback predicate keeps the entry.
+ *
+ * Kept free of SillyTavern runtime imports so it stays importable under plain
+ * Node in tests.
+ *
+ * @param {Array<object>} memories - Contributing memory objects.
+ * @returns {{source_messages: Array<[number, number]>, source_chat_id: string|null, source_incomplete: boolean}}
+ */
+export function unionSourceRanges(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) {
+    return { source_messages: [], source_chat_id: null, source_incomplete: true };
+  }
+
+  const ranges = [];
+  const seenRanges = new Set();
+  // Keyed by string form so numeric/string chat ids compare equal; the value is
+  // the original id so the caller receives the exact stored representation.
+  const chatIds = new Map();
+  let allHaveRanges = true;
+  let allHaveChatId = true;
+  let incomplete = false;
+
+  for (const mem of memories) {
+    // A missing contributor (or one with non-array source_messages) cannot be
+    // attributed, so the merged provenance must stay incomplete.
+    if (!mem || !Array.isArray(mem.source_messages)) {
+      incomplete = true;
+      allHaveRanges = false;
+    }
+    if (mem?.source_incomplete === true) incomplete = true;
+
+    let usableRanges = 0;
+    const list = Array.isArray(mem?.source_messages) ? mem.source_messages : [];
+    for (const range of list) {
+      if (!Array.isArray(range)) continue;
+      const [start, end] = range;
+      if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
+      usableRanges += 1;
+      const key = `${start}:${end}`;
+      if (seenRanges.has(key)) continue;
+      seenRanges.add(key);
+      ranges.push([start, end]);
+    }
+    if (usableRanges === 0) allHaveRanges = false;
+
+    const chatId = mem?.source_chat_id;
+    if (chatId == null || String(chatId) === '') {
+      allHaveChatId = false;
+    } else {
+      const key = String(chatId);
+      if (!chatIds.has(key)) chatIds.set(key, chatId);
+    }
+  }
+
+  const sourceIncomplete = incomplete || !allHaveRanges || !allHaveChatId || chatIds.size > 1;
+  const sourceChatId = allHaveChatId && chatIds.size === 1 ? chatIds.values().next().value : null;
+
+  return {
+    source_messages: ranges,
+    source_chat_id: sourceChatId,
+    source_incomplete: sourceIncomplete,
+  };
 }

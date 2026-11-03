@@ -37,6 +37,7 @@
 import {
   eventSource,
   event_types,
+  getCurrentChatId,
   saveSettingsDebounced,
   setExtensionPrompt,
   extension_prompt_types,
@@ -187,16 +188,6 @@ let generationInProgress = false;
 // somehow missed and the flag is left stuck, it is cleared once clearly stale
 // so extraction can resume instead of being suppressed forever.
 let generationStartTime = 0;
-
-// Timestamp of the most recent GENERATION_STARTED (type='normal'). Unlike
-// generationStartTime, this is never reset, so terminal handlers can reject a
-// stale GENERATION_ENDED/GENERATION_STOPPED that arrives within a tiny grace
-// window of a brand-new generation. A generation cannot legitimately finish
-// within milliseconds of starting, so this is a safe best-effort heuristic.
-// Host generation events carry no generation id, so exact correlation is not
-// possible; the token-scoped watchdog plus this timestamp are the available
-// guards.
-let lastGenerationStartAt = 0;
 
 // Timer that force-clears generationInProgress when no terminal generation event
 // arrives. The flag is normally cleared by MESSAGE_RECEIVED or by the terminal
@@ -1164,6 +1155,16 @@ let chatChangedTimer = null;
 // immediately instead of during the context-stabilization window.
 let chatLoadId = 0;
 
+// Identity of the chat whose load last triggered a synchronous invalidation,
+// plus the timestamp of that invalidation. SillyTavern fires both CHAT_CHANGED
+// and CHAT_LOADED for a single chat load (and other extensions can trigger
+// further duplicates), which would otherwise bump chatLoadId/operationRevision
+// twice for one logical change. Duplicate events for the SAME chat within a
+// short window are coalesced into a single bump. A genuine switch to a
+// different chat id never coalesces and always bumps.
+let lastChatInvalidatedId = null;
+let lastChatInvalidatedAt = 0;
+
 // Sentinel thrown inside the extraction try/finally when a chat switch is detected
 // mid-extraction. Caught separately from real errors so it is not logged as a failure.
 const CHAT_SWITCHED = Symbol('chat-switched');
@@ -1175,16 +1176,37 @@ function onChatChanged() {
   // restoration; it must not delay invalidation, or tasks from the old chat
   // would still observe the "current" revision/load-id during the 100ms window
   // and could write or inject stale content.
-  ++chatLoadId;
-  bumpOperationRevision();
+  //
+  // ST fires CHAT_CHANGED and CHAT_LOADED for one load, so a duplicate event for
+  // the SAME chat id within a short window is coalesced: chatLoadId and
+  // operationRevision must only advance once per logical chat change.
+  const now = Date.now();
+  const chatId = getCurrentChatId();
+  const coalesce =
+    chatId != null && chatId === lastChatInvalidatedId && now - lastChatInvalidatedAt < 300;
+
+  if (!coalesce) {
+    ++chatLoadId;
+    bumpOperationRevision();
+    lastChatInvalidatedId = chatId;
+    lastChatInvalidatedAt = now;
+
+    // A chat switch ends any generation in this context. Clear the flag
+    // immediately so a stuck value cannot suppress extraction in the new chat.
+    generationInProgress = false;
+    generationStartTime = 0;
+    clearGenerationWatchdog();
+  }
+
+  // A coalesced duplicate is still a fresh load signal for the same chat, so
+  // abort any in-flight model/embedding work. Both calls are cheap and
+  // idempotent, and this guarantees stale work cannot survive even when the
+  // load-id bump was skipped.
   abortCurrentMemoryGeneration();
   abortEmbeddingRequests();
 
-  // A chat switch ends any generation in this context. Clear the flag
-  // immediately so a stuck value cannot suppress extraction in the new chat.
-  generationInProgress = false;
-  generationStartTime = 0;
-  clearGenerationWatchdog();
+  // Always clear and reschedule the debounced restoration so it runs after the
+  // last event in a burst, once the host has settled context.
   clearTimeout(chatChangedTimer);
   chatChangedTimer = setTimeout(() => onChatChangedImpl().catch(console.error), 100);
 }
@@ -1195,6 +1217,17 @@ function onChatChanged() {
  * an away recap if the user has been gone longer than the configured threshold.
  */
 async function onChatChangedImpl() {
+  // Capture the load id and operation revision at entry. After every await and
+  // before each mutating UI/state write below, bail out if either changed: a
+  // newer chat event (implGen) or a branch rewrite (implRev - swipe/edit/delete)
+  // means this restoration is now stale and must not keep loading the previous
+  // chat's context over the new state. For a normal single event these values
+  // are the ones set by the synchronous bump in onChatChanged(), so stale() is
+  // false and the load completes.
+  const implGen = chatLoadId;
+  const implRev = getOperationRevision();
+  const stale = () => chatLoadId !== implGen || getOperationRevision() !== implRev;
+
   // NOTE: chatLoadId/operationRevision were already bumped and any in-flight
   // generation/embedding aborts issued synchronously in onChatChanged(), at
   // event receipt. Do not invalidate again here: doing so would double-count
@@ -1253,6 +1286,7 @@ async function onChatChangedImpl() {
   // Migrate chat data first - no character name needed, operates on chatMetadata.
   // Fast no-op when the container is already at the current schema version.
   await ensureChatMigrated();
+  if (stale()) return;
 
   // Remove group arc stores for groups that no longer exist. Runs once per
   // chat load; cheap enough that it does not need further throttling.
@@ -1271,6 +1305,7 @@ async function onChatChangedImpl() {
     injectSceneHistory();
     // Merge group-level persistent arcs into this chat before injecting.
     await mergeGroupPersistentArcs(getContext().groupId);
+    if (stale()) return;
     injectArcs();
     updateScenesUI();
     updateArcsUI();
@@ -1283,10 +1318,12 @@ async function onChatChangedImpl() {
     // are migrated lazily on their first onGroupMemberDrafted.
     if (selectedGroupCharacter) ensureCharacterMigrated(selectedGroupCharacter);
     await injectMemories(selectedGroupCharacter);
+    if (stale()) return;
     injectRelationshipHistory(selectedGroupCharacter);
     loadAndInjectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
     loadAndInjectStateLedger();
     await injectSessionMemories();
+    if (stale()) return;
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
     loadAndInjectRepair();
@@ -1344,6 +1381,7 @@ async function onChatChangedImpl() {
       }
     }
 
+    if (stale()) return;
     await updateLastActive();
     return;
   }
@@ -1375,14 +1413,17 @@ async function onChatChangedImpl() {
   updateShortTermUI(summary);
 
   await injectMemories(characterName);
+  if (stale()) return;
   injectRelationshipHistory(characterName);
   loadAndInjectEpistemicKnowledge(characterName, characterName);
   loadAndInjectStateLedger();
 
   await injectSessionMemories();
+  if (stale()) return;
   injectSceneHistory();
   // Merge character-level persistent arcs into this chat before injecting.
   await mergePersistentArcs(characterName);
+  if (stale()) return;
   injectArcs();
   injectProfiles(characterName);
   loadAndInjectRepair();
@@ -1446,6 +1487,7 @@ async function onChatChangedImpl() {
     }
   }
 
+  if (stale()) return;
   await updateLastActive();
 }
 
@@ -2282,7 +2324,6 @@ jQuery(async function () {
     if (type === 'normal') {
       generationInProgress = true;
       generationStartTime = Date.now();
-      lastGenerationStartAt = generationStartTime;
       startGenerationWatchdog();
       $('#sm_recap_overlay').remove();
       recapOverlayChatMeta = null;
@@ -2304,22 +2345,22 @@ jQuery(async function () {
   // subsequent message. Clear the flag on both terminal events, but only while a
   // generation is actually in progress so an uncorrelated late event cannot
   // disturb a gate that is already clear.
+  //
+  // Host generation events carry no generation id, so a stale terminal event
+  // cannot be correlated with the generation that owns the gate. It is accepted
+  // as authoritative rather than risk leaving the gate stuck: a genuine stop
+  // right after start must always clear it, and the token-scoped watchdog - not
+  // the event - is the guard against a stale timer. A late stop therefore only
+  // ever clears a gate that is already clear or that belongs to a generation
+  // which has itself already ended, so the worst case is a redundant clear,
+  // never a permanently stuck gate.
   eventSource.on(event_types.GENERATION_STOPPED, () => {
-    // Host generation events carry no generation id, so a terminal event from an
-    // old generation cannot be perfectly correlated with the gate's owner. As a
-    // best-effort guard, ignore a terminal event that arrives within a tiny
-    // grace window of the most recent start: a generation cannot legitimately
-    // finish that quickly, so it must belong to an older, already-finished
-    // generation and must not clear the newer generation's gate.
-    if (Date.now() - lastGenerationStartAt < 150) return;
     if (generationInProgress) {
       generationInProgress = false;
       clearGenerationWatchdog();
     }
   });
   eventSource.on(event_types.GENERATION_ENDED, () => {
-    // Same best-effort grace-window guard as GENERATION_STOPPED above.
-    if (Date.now() - lastGenerationStartAt < 150) return;
     if (generationInProgress) {
       generationInProgress = false;
       clearGenerationWatchdog();

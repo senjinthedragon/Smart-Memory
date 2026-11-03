@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persistent long-term memories whose real source range lies after the rollback
   point (for the current chat) are pruned. Provenance is conservative:
   memories with missing, incomplete, or other-chat provenance are kept.
+  Duplicate `CHAT_CHANGED`/`CHAT_LOADED` events for the same chat are coalesced
+  into one logical revision bump, and the debounced load routine re-checks the
+  load/revision identity after every await.
   _Limitation:_ cancellation is transport-enforced for Ollama and
   OpenAI-compatible sources and for embeddings; main-API, WebLLM, and
   connection-profile generation remain host-managed, so for those the revision
@@ -45,8 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stores (`_constructor`, `_prototype`, `___proto__`) onto the collision-free
   NUL-sentinel encoding so previously-stored data stays reachable.
 - **Generation-identity watchdog.** The 90-second `generationInProgress`
-  fail-safe watchdog is token-scoped so a stale terminal event or timer cannot
-  clear a newer generation's gate.
+  fail-safe watchdog is token-scoped so a stale timer cannot clear a newer
+  generation's gate. Real terminal events (`GENERATION_STOPPED`/`ENDED`) always
+  clear the gate, so an immediate user cancel cannot leave extraction stuck.
+- **Complete tier clearing.** Cancelled catch-up clears the tier's extension
+  slot, macro content, and the materialized unified prompt/cache so stale
+  context cannot linger in macro or unified injection modes.
 - **Metadata bounding and retention caps.** Arc summaries are capped to 50 recent
   items, canon prompt arc summary inputs are capped to 20, and epistemic entries are
   capped to 100 per chat. Epistemic `[retire]` directives are guarded against mass
