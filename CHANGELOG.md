@@ -58,9 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   safety**: when two orderings are indistinguishable (a delayed old `ENDED` vs a
   new generation's own `ENDED`), the gate is held rather than risk extracting
   partial streaming text; the hold is bounded by the 90-second watchdog and by
-  chat switch/reset. Because host events carry no generation id, an unpaired
-  terminal or a generation that never emits one is likewise resolved by the
-  watchdog or a chat switch.
+  chat switch/reset. Normal completion (`MESSAGE_RECEIVED`) is authoritative: it
+  consumes its pending slot and the watchdog is retained whenever any pending
+  slot remains, so an ambiguity-collapsed terminal cannot strand a slot with no
+  recovery path.
 - **Complete tier clearing.** Cancelled catch-up clears the tier's extension
   slot, macro content, and the materialized unified prompt/cache so stale
   context cannot linger in macro or unified injection modes.

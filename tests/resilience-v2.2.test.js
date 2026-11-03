@@ -204,13 +204,15 @@ test('generation gate: STOPPED+ENDED for one aborted generation dequeue only onc
   assert.equal(s.inProgress, false);
 });
 
-test('generation gate: MESSAGE_RECEIVED opens the gate but retains the pending slot', () => {
+test('generation gate: MESSAGE_RECEIVED consumes the completed generation slot', () => {
   let s = freshGate();
   s = correlateGenerationGate(s, 'start', 0);
   s = correlateGenerationGate(s, 'complete', 50);
   assert.equal(s.inProgress, false, 'normal completion lets extraction run');
-  assert.equal(s.pending, 1, 'the trailing terminal still owns a slot');
+  assert.equal(s.pending, 0, 'normal completion authoritatively consumes its slot');
+  assert.equal(s.awaitingPair, null, 'normal completion clears stale pair expectations');
 
+  // The trailing terminal is now stale and must not change the clear gate.
   s = correlateGenerationGate(s, 'terminal', 60);
   assert.equal(s.pending, 0);
   assert.equal(s.inProgress, false);
@@ -281,13 +283,14 @@ test('generation gate: STOPPED+ENDED for one generation at the same epoch clears
   assert.equal(s.inProgress, false);
 });
 
-test('generation gate: complete retains the slot and the trailing terminal clears it', () => {
+test('generation gate: complete consumes its slot and the trailing terminal is stale', () => {
   let s = freshGate();
   s = correlateGenerationGate(s, 'start', 0);
   s = correlateGenerationGate(s, 'complete', 20);
-  assert.equal(s.pending, 1, 'the pending slot is retained for the trailing terminal');
+  assert.equal(s.pending, 0, 'MESSAGE_RECEIVED authoritatively consumes the completed slot');
   assert.equal(s.inProgress, false, 'normal completion opens the gate');
 
+  // A later terminal belongs to the already-completed generation and is a no-op.
   s = correlateGenerationGate(s, 'terminal', 40);
   assert.equal(s.pending, 0);
   assert.equal(s.inProgress, false);
@@ -489,6 +492,42 @@ test('generation gate: a held unresolved pair recovers via reset (watchdog/chat-
     awaitingPair: null,
     lastTerminalAt: -Infinity,
   });
+});
+
+// ---- H-5: MESSAGE_RECEIVED must self-heal ambiguous pending accounting -------
+
+test('generation gate: complete self-heals an ambiguously collapsed ENDED slot', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'stopped', 10); // A awaits ENDED
+  s = correlateGenerationGate(s, 'start', 20); // B
+  s = correlateGenerationGate(s, 'complete', 25); // B committed a message
+  assert.equal(s.pending, 0, 'MESSAGE_RECEIVED consumes B authoritatively');
+  assert.equal(s.inProgress, false);
+  assert.equal(s.awaitingPair, null);
+
+  // The following ENDED could be A's old complement or B's terminal. Either way
+  // it is stale after the authoritative completion and cannot retain a slot.
+  s = correlateGenerationGate(s, 'ended', 30);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+  assert.equal(s.awaitingPair, null);
+});
+
+test('generation gate: a subsequent completed generation has no poisoned pending slot', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'stopped', 10); // A awaits ENDED
+  s = correlateGenerationGate(s, 'start', 20); // B
+  s = correlateGenerationGate(s, 'complete', 25); // B consumes its slot
+  s = correlateGenerationGate(s, 'ended', 30); // stale A/B terminal
+
+  s = correlateGenerationGate(s, 'start', 100); // C
+  s = correlateGenerationGate(s, 'complete', 110); // C consumes its slot
+  s = correlateGenerationGate(s, 'ended', 120); // stale C terminal
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+  assert.equal(s.awaitingPair, null);
 });
 
 // ---- L-2: duplicate chat-load coalescing -------------------------------------

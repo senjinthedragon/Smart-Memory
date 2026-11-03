@@ -286,6 +286,22 @@ function startGenerationWatchdog() {
   }, 90000);
 }
 
+/**
+ * Keeps watchdog lifetime aligned with the correlator's actual pending count.
+ * A committed MESSAGE_RECEIVED may open the render gate while another generation
+ * is still pending, so clearing solely because generationInProgress is false can
+ * strand that retained slot forever. Only a fully idle gate clears the watchdog;
+ * any remaining pending slot gets a fresh bounded-recovery timer.
+ * @param {{pending: number, inProgress: boolean}} state
+ */
+function reconcileGenerationWatchdog(state) {
+  if (!state.inProgress && state.pending === 0) {
+    clearGenerationWatchdog();
+  } else if (state.pending > 0) {
+    startGenerationWatchdog();
+  }
+}
+
 // Monotonic revision counter for the current chat branch. Incremented on every
 export { bumpOperationRevision, getOperationRevision } from './memory-utils.js';
 import { bumpOperationRevision, getOperationRevision } from './memory-utils.js';
@@ -2469,12 +2485,12 @@ jQuery(async function () {
   });
   eventSource.on(event_types.MESSAGE_RECEIVED, () => {
     if (generationInProgress) {
-      // Open the gate so the completed message is extracted, but retain the
-      // generation's pending slot for the terminal event that follows. This
-      // keeps the FIFO pairing intact when a newer generation starts before the
-      // older one's terminal is delivered.
-      applyGenerationGateEvent('complete');
-      clearGenerationWatchdog();
+      // MESSAGE_RECEIVED is authoritative evidence that a generation produced a
+      // committed message. The correlator consumes its slot; if another slot is
+      // genuinely pending, keep a bounded-recovery watchdog instead of stranding
+      // that slot after opening the render gate.
+      const next = applyGenerationGateEvent('complete');
+      reconcileGenerationWatchdog(next);
     }
   });
   // Terminal generation paths. A cancelled or stopped generation produces no
@@ -2494,7 +2510,7 @@ jQuery(async function () {
   // is documented on correlateGenerationGate.
   const onGenerationTerminal = (kind) => {
     const next = applyGenerationGateEvent(kind);
-    if (!next.inProgress) clearGenerationWatchdog();
+    reconcileGenerationWatchdog(next);
   };
   eventSource.on(event_types.GENERATION_STOPPED, () => onGenerationTerminal('stopped'));
   eventSource.on(event_types.GENERATION_ENDED, () => onGenerationTerminal('ended'));

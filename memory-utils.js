@@ -1690,9 +1690,11 @@ export const GENERATION_TERMINAL_COALESCE_MS = 100;
  * A terminal older than the coalescing window simply will not collapse (correct
  * - it becomes a normal consume for a genuinely new generation).
  *
- * `complete` (MESSAGE_RECEIVED) opens the gate for the finished generation but
- * deliberately retains its pending slot for the terminal that follows, so an
- * older generation cannot be dequeued by a newer one's terminal.
+ * `complete` (MESSAGE_RECEIVED) is authoritative evidence that one generation
+ * finished and produced a committed message. It consumes one pending slot and
+ * clears any outstanding terminal-pair expectation. This self-heals the pending
+ * count when an ambiguous ENDED was treated as an older generation's pair rather
+ * than the just-completed generation's terminal.
  *
  * Lifecycle policy: PREFER EXTRACTION SAFETY. With anonymous host events the
  * orderings `start A -> stopped A -> start B -> ended A` (a delayed old pair that
@@ -1711,14 +1713,15 @@ export const GENERATION_TERMINAL_COALESCE_MS = 100;
  * is a concrete timestamp from the STOPPED that armed the pair, so a much-later
  * terminal cannot collapse and is consumed normally.
  *
- * Residual constraint: host events carry no generation id, so a STOPPED that
- * never receives its ENDED leaves `awaitingPair` set. Its pending slot is still
- * consumed, so the gate is not stuck on that account; a generation that emits no
- * terminal at all relies on the watchdog / chat-switch reset. If the awaited
- * complement does arrive after its slot was already cleared, it resolves
- * (clears) the pair instead of lingering and swallowing a later generation's
- * normal terminal. The failure mode stays conservative (extraction briefly
- * suppressed), never partial-text extraction.
+ * Residual constraint: host events carry no generation id, so an unpaired
+ * STOPPED can leave an outstanding pair expectation until its complement,
+ * MESSAGE_RECEIVED, or reset resolves it. MESSAGE_RECEIVED consumes its pending
+ * slot authoritatively; runtime code retains the watchdog whenever any pending
+ * slot remains, so unresolved work is bounded by the watchdog or a chat
+ * switch/reset. If the awaited complement arrives after its slot was already
+ * cleared, it resolves (clears) the pair instead of lingering and swallowing a
+ * later generation's normal terminal. The failure mode stays conservative
+ * (extraction briefly suppressed), never partial-text extraction.
  *
  * @param {{pending?: number, inProgress?: boolean, awaitingPair?: ('stopped'|'ended'|null), lastTerminalAt?: number}} state
  * @param {'start'|'complete'|'stopped'|'ended'|'terminal'|'reset'} event
@@ -1746,10 +1749,19 @@ export function correlateGenerationGate(state, event, now = 0) {
       // new generation. A terminal older than the coalescing window still won't
       // collapse, so it becomes a normal consume for a genuinely new generation.
       return { pending: pending + 1, inProgress: true, awaitingPair, lastTerminalAt };
-    case 'complete':
-      // MESSAGE_RECEIVED: the finished generation's gate opens, but its pending
-      // slot is retained for the terminal that follows it.
-      return { pending, inProgress: false, awaitingPair, lastTerminalAt };
+    case 'complete': {
+      // MESSAGE_RECEIVED is authoritative evidence that one generation completed
+      // and committed a message. Consume that slot rather than waiting for a
+      // trailing terminal event: the latter may be an ambiguous old pair, and
+      // retaining this slot could poison later generation accounting.
+      const nextPending = pending > 0 ? pending - 1 : 0;
+      return {
+        pending: nextPending,
+        inProgress: nextPending > 0,
+        awaitingPair: null,
+        lastTerminalAt,
+      };
+    }
     case 'stopped':
     case 'ended':
     case 'terminal': {
