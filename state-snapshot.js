@@ -141,6 +141,18 @@ export function takeSnapshotOnMeta(meta, msgIndex) {
 export function rollbackSnapshotOnMeta(meta, targetMsgIndex) {
   if (!meta || typeof meta !== 'object') return null;
 
+  // Rewind the extraction cursor. If the rolled-back branch was already
+  // extracted, leaving lastExtractCutoff past the rollback target would make the
+  // next pass skip the rewritten turns entirely. Clamp at 0 so the very first
+  // turn can be re-extracted.
+  if (
+    typeof meta.lastExtractCutoff === 'number' &&
+    Number.isFinite(targetMsgIndex) &&
+    meta.lastExtractCutoff > targetMsgIndex
+  ) {
+    meta.lastExtractCutoff = Math.max(0, targetMsgIndex);
+  }
+
   const snapshots = Array.isArray(meta.state_snapshots) ? meta.state_snapshots : [];
   const index = findSnapshotIndexForRollback(snapshots, targetMsgIndex);
 

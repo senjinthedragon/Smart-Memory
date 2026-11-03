@@ -60,6 +60,49 @@ function escapeRegExp(s) {
   return String(s ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Scripts written without inter-word spaces. An ASCII word-boundary regex cannot
+// link a CJK/Thai name correctly (there is no \b between two ideographs), so
+// those names are matched with a plain substring test instead - reusing the
+// Unicode lookaround below would treat every neighbouring ideograph as a word
+// character and never link anything.
+const CJK_SCRIPT_RE =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
+
+/**
+ * Returns true when the name uses a script that is written without spaces
+ * between words (Han, Hiragana, Katakana, Hangul, Thai).
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+function isCjkName(name) {
+  return CJK_SCRIPT_RE.test(String(name ?? ''));
+}
+
+/**
+ * Builds a predicate that reports whether `text` mentions `name`.
+ *
+ * Latin/Cyrillic/Greek/Arabic and other space-delimited scripts use Unicode
+ * lookaround boundaries so accented names ("Zoë", "José", "Ødegård") link
+ * correctly while "Ann" still never matches "Joanna" and "Eli" never matches
+ * "believes". CJK/Thai names use a lowercase substring test because those
+ * scripts have no spaces between words.
+ *
+ * @param {string} name - Already lowercased/trimmed name or alias token.
+ * @returns {(text: string) => boolean}
+ */
+function buildNameMatcher(name) {
+  if (isCjkName(name)) {
+    const needle = String(name).toLowerCase();
+    return (text) =>
+      String(text ?? '')
+        .toLowerCase()
+        .includes(needle);
+  }
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(name)}(?![\\p{L}\\p{N}_])`, 'iu');
+  return (text) => pattern.test(String(text ?? ''));
+}
+
 /**
  * Returns true for an entity seeded from the character card. Seeded characters
  * have no message index yet (first_seen === 0) and must survive registry
@@ -83,8 +126,11 @@ function isSeededCharacter(entity) {
  *    entity's canonical name or any of its aliases, and add those memory IDs.
  *    Also updates the memory's own entities array so both sides stay consistent.
  *
- * Re-linking uses exact word-boundary matching on lowercased content. Names
- * shorter than 3 characters are skipped, and generic honorific titles ("king",
+ * Re-linking uses Unicode-aware word-boundary matching on lowercased content so
+ * accented and non-Latin scripts ("Zoë", "José", "Ødegård", "Мария") link
+ * correctly. CJK/Thai names, which have no inter-word spaces, use substring
+ * matching instead and get a lower length floor. Names shorter than 3
+ * characters are skipped (2 for CJK), and generic honorific titles ("king",
  * "lady", ...) are never split out of multi-word names, so "King Aldric" cannot
  * link via the substring "king" in "making".
  *
@@ -122,23 +168,27 @@ export function reconcileEntityRegistry(entityRegistry, currentMemories) {
     // honorific titles) so "Asher" in content matches the entity "Asher Somel",
     // while "King" in "King Aldric" never matches "making".
     const rawNames = [entity.name, ...(entity.aliases ?? [])].map((n) => n.toLowerCase().trim());
+    // CJK/Thai names are dense: two characters is already a full name, whereas a
+    // two-letter Latin name ("Eli") is usually a fragment. Use a lower length
+    // floor for spaceless scripts so names like "艾拉" are still linkable.
+    const meetsMinLength = (n, latinMin) => (isCjkName(n) ? n.length >= 2 : n.length >= latinMin);
     const names = [
       ...new Set([
-        ...rawNames.filter((n) => n.length >= 3),
+        ...rawNames.filter((n) => meetsMinLength(n, 3)),
         ...rawNames.flatMap((n) =>
-          n.split(/\s+/).filter((w) => w.length >= 4 && !HONORIFIC_TITLES.has(w)),
+          n.split(/\s+/).filter((w) => meetsMinLength(w, 4) && !HONORIFIC_TITLES.has(w)),
         ),
       ]),
     ];
 
     if (names.length === 0) continue;
 
-    const namePatterns = names.map((n) => new RegExp(`\\b${escapeRegExp(n)}\\b`, 'i'));
+    const nameMatchers = names.map(buildNameMatcher);
 
     for (const mem of currentMemories) {
       if (entity.memory_ids.includes(mem.id)) continue; // already linked
 
-      const linkedByName = namePatterns.some((re) => re.test(String(mem.content ?? '')));
+      const linkedByName = nameMatchers.some((matches) => matches(mem.content));
       // Also check the memory's own entities array. A consolidated memory may
       // use pronouns ("she") instead of the entity's name - content substring
       // matching would miss it, but reconcileTypeEntries carries the base

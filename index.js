@@ -103,6 +103,7 @@ import {
   checkContinuity,
   handleContinuityResult,
   applyPendingRepair,
+  applyDurableRetconNote,
   clearRepair,
   loadAndInjectRepair,
   advanceDurableRetcons,
@@ -530,10 +531,10 @@ async function onCharacterMessageRendered(messageId, type) {
   clearRepair();
 
   // Advance durable retcon lifetimes one AI turn. Retcons that reach the end of
-  // their lifespan are auto-resolved as canon and stop being injected.
-  advanceDurableRetcons();
-
+  // their lifespan are auto-resolved as canon and stop being injected. Expired
+  // retcons are resolved into state so the old baseline fact is superseded.
   const characterName = getCurrentCharacterName();
+  advanceDurableRetcons(characterName);
 
   // Capture the current chat generation so we can abort before any write if
   // the user switches chats while a model call is in progress.
@@ -1454,14 +1455,15 @@ async function onGroupMemberDrafted(chId) {
   injectSceneHistory();
   injectArcs();
   injectProfiles(characterName);
-  // Repair is one-shot - only the first character in a round gets it.
-  // applyPendingRepair() validates the anchor before injecting; subsequent
-  // characters call clearRepair() so the slot does not carry over.
+  // Repair is one-shot - only the first character in a round gets the anchored
+  // note. The standing durable-retcon note, however, applies to the whole
+  // round, so every subsequent member re-injects it. applyPendingRepair()
+  // validates the anchor before injecting the one-shot note.
   if (!repairInjectedThisRound) {
     applyPendingRepair();
     repairInjectedThisRound = true;
   } else {
-    clearRepair();
+    applyDurableRetconNote();
   }
 
   // The token display is NOT updated here. Injecting this character's slots
@@ -1959,8 +1961,9 @@ async function onGroupWrapperFinished({ type } = {}) {
       // consumed. Clear it so repair remains strictly one-shot.
       clearRepair();
 
-      // Advance durable retcon lifetimes once per group round.
-      advanceDurableRetcons();
+      // Advance durable retcon lifetimes once per group round - never per member.
+      // Expired retcons are resolved into the group members' state.
+      advanceDurableRetcons(activeGroupMembers);
 
       // Step 6 (Profile B only): silent continuity check - once per round using
       // the last character who responded. Running per-character would multiply
@@ -2228,6 +2231,39 @@ jQuery(async function () {
     sceneBufferLastIndex = Math.min(sceneBufferLastIndex, chat.length - 2);
   });
 
+  // When an already-extracted message is edited, everything extracted from it
+  // and from later turns is now based on text the user replaced. Roll the
+  // chat-scoped state back to the turn before the edit, rewind the extraction
+  // cursor, and rewind the scene buffer so the rewritten text is processed
+  // again instead of being skipped as already-seen.
+  eventSource.on(event_types.MESSAGE_EDITED, (messageId) => {
+    if (!Number.isInteger(messageId)) return;
+
+    const context = getContext();
+    const meta = context.chatMetadata?.[META_KEY];
+    const lastExtractCutoff = Number.isInteger(meta?.lastExtractCutoff)
+      ? meta.lastExtractCutoff
+      : -1;
+
+    // Only messages that were already fed to extraction need a rollback.
+    if (messageId > lastExtractCutoff) return;
+
+    const rollbackTarget = messageId - 1;
+
+    // Set the cursor before rollback so the same metadata save persists it.
+    // The cursor itself is clamped at 0; the state rollback target is not, so
+    // editing the very first turn resets state instead of preserving it.
+    if (meta) meta.lastExtractCutoff = Math.max(0, rollbackTarget);
+    rollbackStateToSnapshot(rollbackTarget);
+
+    // Drop the buffered copy of the edited message and every buffered turn after
+    // it so the rewritten branch is captured cleanly by the next pass.
+    sceneBufferLastIndex = Math.min(sceneBufferLastIndex, rollbackTarget);
+
+    clearRepair();
+    refreshAfterStateRollback();
+  });
+
   // When a message is deleted, trim the scene buffer to only messages that
   // still exist in the chat. Without this, a deleted message would remain in
   // the buffer and be included in the next scene summary.
@@ -2243,8 +2279,12 @@ jQuery(async function () {
     // one so its facts, state cards, arcs, secrets, and retcons are gone. ST
     // passes either the deleted index or the new chat length; both resolve to
     // the last surviving turn via `messageId - 1`.
-    const rollbackTarget = Number.isInteger(messageId) ? messageId - 1 : context.chat.length - 1;
-    rollbackStateToSnapshot(rollbackTarget);
+    const targetIndex = Number.isInteger(messageId) ? messageId - 1 : context.chat.length - 1;
+    const meta = context.chatMetadata?.[META_KEY];
+    // Rewind the extraction cursor so deleted/rewritten turns are re-extracted
+    // rather than skipped by the next pass.
+    if (meta) meta.lastExtractCutoff = Math.max(0, targetIndex);
+    rollbackStateToSnapshot(targetIndex);
     refreshAfterStateRollback();
   });
 

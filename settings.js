@@ -299,17 +299,17 @@ export const defaultSettings = {
   epistemic_secondhand_framing: true,
   epistemic_response_length: 400,
   epistemic_inject_budget: 200,
-  // Injected near the generation point (depth 2) now that state is anchored
-  // and rollback-safe - stale extracted state can no longer override the turn.
+  // Injected near the generation point (IN_CHAT depth 2). Depth only applies to
+  // IN_CHAT prompts in SillyTavern; IN_PROMPT ignores it and sits at the top.
   epistemic_depth: 2,
-  epistemic_position: extension_prompt_types.IN_PROMPT,
+  epistemic_position: extension_prompt_types.IN_CHAT,
   epistemic_role: extension_prompt_roles.SYSTEM,
 
   // State Ledger (structured entity state cards)
   state_ledger_enabled: false,
   state_ledger_inject_budget: 200,
   state_ledger_depth: 2,
-  state_ledger_position: extension_prompt_types.IN_PROMPT,
+  state_ledger_position: extension_prompt_types.IN_CHAT,
   state_ledger_role: extension_prompt_roles.SYSTEM,
 
   // Hardware profile - 'auto' | 'a' | 'b'
@@ -682,11 +682,13 @@ export function loadSettings() {
       extension_settings[MODULE_NAME].longterm_consolidate;
   }
 
-  // Migration: move legacy epistemic/state-ledger injections from IN_CHAT depth 1
-  // (position 1, depth 1) to the in-prompt placement (position 2, depth 0). The
-  // in-chat default let stale extracted state override the active dialogue turn.
-  // Only users still on the untouched old default are moved; an explicit custom
-  // position/depth is preserved. Pure helper so it is unit-testable.
+  // Migration: normalise epistemic/state-ledger injection placement to
+  // IN_CHAT depth 2. SillyTavern only honours depth for IN_CHAT (position 1);
+  // IN_PROMPT (position 2) sits at the very top. Both the legacy IN_CHAT depth-1
+  // default and the interim IN_PROMPT depth-0/2 default move to the near-end
+  // placement. An explicit custom position/depth is preserved. Pure helper so
+  // it is unit-testable; it also sets migrated_legacy_placement so this never
+  // runs again.
   migrateEpistemicStateLedgerPlacement(extension_settings[MODULE_NAME], extension_prompt_types);
 }
 

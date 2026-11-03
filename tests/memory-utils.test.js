@@ -606,3 +606,40 @@ test('scene buffer cursor: end-of-chat index yields only newly appended messages
   // The legacy -1 cursor would re-ingest the whole history - the bug we fixed.
   assert.equal(chat.slice(-1 + 1).length, chat.length);
 });
+
+// =========================================================================
+// N7 / 3.6: bidirectional epistemic subject matching
+// =========================================================================
+
+test('matchSubjectToMember: subject tokens may include a short member name (N7)', () => {
+  // A long subject can resolve to a short canonical member name.
+  assert.equal(matchSubjectToMember('Kael Draven', ['Kael']), 'Kael');
+  assert.equal(matchSubjectToMember('Elara Voss', ['Elara']), 'Elara');
+});
+
+test('matchSubjectToMember: honorific titles are stripped from either side (N7)', () => {
+  assert.equal(matchSubjectToMember('Lady Elara', ['Elara']), 'Elara');
+  assert.equal(matchSubjectToMember('Lady Elara', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('King Aldric', ['Aldric']), 'Aldric');
+  assert.equal(matchSubjectToMember('Elara', ['Lady Elara']), 'Lady Elara');
+});
+
+test('matchSubjectToMember: possessives and punctuation are cleaned (N7)', () => {
+  assert.equal(matchSubjectToMember("Elara's", ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Elara’s', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Dr. Smith', ['Smith']), 'Smith');
+  assert.equal(matchSubjectToMember('Jean-Luc Picard', ['Picard']), 'Picard');
+});
+
+test('matchSubjectToMember: cleaning does not introduce substring false positives (N7)', () => {
+  assert.equal(matchSubjectToMember('Evan', ['Evangeline Cole']), null);
+  assert.equal(matchSubjectToMember('Ange', ['Evangeline Cole']), null);
+  assert.equal(matchSubjectToMember('Lady Evan', ['Evangeline Cole']), null);
+});
+
+test('matchSubjectToMember: bidirectional matching still refuses ambiguity (N7)', () => {
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Elara Night']), null);
+  assert.equal(matchSubjectToMember('Lady Elara', ['Elara Voss', 'Elara Night']), null);
+  // A longer subject containing both members' tokens is ambiguous too.
+  assert.equal(matchSubjectToMember('Elara Voss Night', ['Elara Voss', 'Elara Night']), null);
+});

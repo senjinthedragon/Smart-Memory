@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Unicode-aware entity linking.** Re-linking now uses Unicode-aware word
+  boundaries for accented and non-Latin scripts, and substring matching with a
+  lower length floor for spaceless scripts (CJK/Thai). Names such as `Zoë`,
+  `Éowyn`, `José`, `Ødegård`, `Мария`, and `艾拉` now link correctly, while
+  `King Aldric` no longer links via “making”, `Ann` via “Joanna”, or `Eli` via
+  “believes”.
+- **State-following durable retcons.** When a retcon expires or the user accepts
+  the changed state, the old long-term memory is retired via `superseded_by`,
+  the resolved fact becomes the new baseline, and matching state-card attributes
+  are updated. This stops the same contradiction from being re-flagged after the
+  retcon window closes.
+- **Manual-edit snapshots.** Setting/deleting state cards, saving/deleting arcs,
+  and saving/clearing epistemic knowledge now record a message-anchored
+  snapshot, so a later swipe cannot silently wipe a manual edit.
+- **Mid-chat edit rollback.** Editing an already-extracted message now rolls
+  state back to the turn before the edit, rewinds the extraction cursor and
+  scene buffer, clears any queued repair, and refreshes the UI.
+- **Bidirectional epistemic subject matching.** Subjects now resolve in both
+  directions (`Kael Draven` → `Kael`, `Lady Elara` → `Elara`) after stripping
+  possessives, punctuation, and honorific titles. Ambiguous matches are still
+  refused rather than misattributed.
+- **`agents.md`** documenting the architecture, tier model, rollback system,
+  design decisions, and revision history.
 - **Partitioned epistemic knowledge for group chats.** Group scenes now run a unified epistemic extraction that partitions entries by character name into each member's respective perspective store.
 - **Explicit state card field clearing syntax.** State card responses can now explicitly clear stored attributes using `!field` or `field=none/empty`.
 - **Remote embedding CORS proxy support.** OpenAI-compatible embeddings targeting remote or cloud endpoints now route through SillyTavern's `/proxy/<url>` middleware.
@@ -16,6 +39,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Epistemic and State Ledger placement.** SillyTavern only honours depth for
+  `IN_CHAT`; `IN_PROMPT` ignores it and sits at the very top. Both tiers now
+  default to `IN_CHAT` depth 2 (near the end of the prompt), and the migration
+  normalises both the legacy `IN_CHAT` depth-1 default and the interim
+  `IN_PROMPT` depth-0/2 default. Explicit custom placements are preserved, and
+  the migration is skipped once `migrated_legacy_placement` is set.
+- **Rollback extraction cursor.** Rolling back a swipe/delete now rewinds
+  `lastExtractCutoff`, so the rewritten turns are extracted again instead of
+  being skipped by the next pass.
+- **Group-chat durable retcon notes.** The standing durable-retcon note is now
+  injected for every member in a round, while retcon lifetimes still decrement
+  only once per full round.
+- **Continuity transformation precision.** Possessive constructions such as
+  “The spell turned Elara's eyes green” are recognised as active
+  transformations, and a sentence about a different attribute (for example a
+  cloak turning blue) can no longer suppress an eye-colour contradiction.
 - **Continuity checks no longer nudge the story backward.** The checker now
   receives the recent transcript as ground truth and is told that baseline
   notes lag behind it, so normal progression (moving, using an item, learning
@@ -25,7 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only"; optional auto-repair uses a forward-only note that never retracts or
   re-narrates events already written. The note is anchored to the message it was
   checked against, so swiping, editing, or deleting that message discards it.
-- **Temporal drift and directive placement.** Swapped default injection position for State Ledger and Epistemic to `IN_PROMPT` (`depth: 0`) so extracted state directives do not override recent dialogue turns.
 - **Summary truncation budget anchoring.** Replaced naive tail-truncation with section-aware truncation (`truncateSummaryToBudget`) preserving Current Moment and Next Beat anchor sections.
 - **Assistant message swipe handling.** Assistant swipes now cleanly rewind the scene message buffer and pop discarded turns to prevent scene corruption.
 - **Periodic epistemic extraction.** Extraction passes now perform periodic lightweight epistemic refreshes so character perspectives remain up to date between rare scene breaks.
@@ -706,7 +744,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Status message during relationship history extraction**: the extraction
   status indicator in the settings panel now shows `Extracting relationship
-  history...` while the relationship history model call is in progress, matching
+history...` while the relationship history model call is in progress, matching
   the feedback already shown for other extraction tiers.
 
 - **Contextual relevance for long-term memories**: the hybrid scorer now applies a

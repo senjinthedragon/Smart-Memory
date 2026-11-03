@@ -131,6 +131,8 @@ const TRAIT_LINKER_WORDS = new Set([
   'had',
   'has',
   'have',
+  // Possessive "s" after tokenization: "Elara's eyes" -> ["elara", "s", "eyes"].
+  's',
 ]);
 
 // Domain vocabulary of durable traits (body parts, colours, species, identity)
@@ -391,9 +393,9 @@ function issueAttributeNouns(issue) {
  */
 function issueSubjectNames(issue) {
   const names = new Set();
-  const matches = String(issue?.fact ?? '').match(/\b[A-Z][a-z]{1,}\b/g) ?? [];
+  const matches = String(issue?.fact ?? '').match(/\p{Lu}[\p{L}'’-]*/gu) ?? [];
   for (const match of matches) {
-    names.add(match.toLowerCase());
+    names.add(match.replace(/['’]s$/i, '').toLowerCase());
   }
   return names;
 }
@@ -502,9 +504,13 @@ function splitSentences(text) {
  * "his leg was severed").
  * @param {string} sentence
  * @param {Set<string>} traitKeywords
+ * @param {Set<string>} [subjectNames] - Character names from the issue fact.
+ *   A possessive construction puts the owner's name between the verb and the
+ *   trait ("turned Elara's eyes green"), so a valid subject name must count as
+ *   a linker or that active transformation is missed.
  * @returns {boolean}
  */
-function sentenceShowsTransformation(sentence, traitKeywords) {
+function sentenceShowsTransformation(sentence, traitKeywords, subjectNames = null) {
   if (!sentence || !traitKeywords || traitKeywords.size === 0) return false;
 
   const words = tokenizeWords(sentence);
@@ -518,6 +524,8 @@ function sentenceShowsTransformation(sentence, traitKeywords) {
   });
   if (verbIndices.length === 0 || traitIndices.length === 0) return false;
 
+  const names = subjectNames ?? new Set();
+
   for (const verbIndex of verbIndices) {
     for (const traitIndex of traitIndices) {
       const low = Math.min(verbIndex, traitIndex);
@@ -526,7 +534,9 @@ function sentenceShowsTransformation(sentence, traitKeywords) {
       let linked = true;
       for (let i = low + 1; i < high; i++) {
         const between = words[i];
-        if (TRAIT_LINKER_WORDS.has(between) || traitKeywords.has(between)) continue;
+        if (TRAIT_LINKER_WORDS.has(between) || traitKeywords.has(between) || names.has(between)) {
+          continue;
+        }
         linked = false;
         break;
       }
@@ -542,12 +552,14 @@ function sentenceShowsTransformation(sentence, traitKeywords) {
  * than introducing an unmotivated contradiction.
  *
  * Only substantive trait words count as links - stopwords like "her", "the", or
- * "was" are never enough. Additionally, a sentence must actually mention the
- * attribute the issue is about (its body/trait noun), or name the character
- * alongside the trait, before it can be read as a transition of that attribute.
+ * "was" are never enough. When the issue is about a specific attribute noun
+ * (eyes, hair, leg, ...), the sentence MUST mention that noun before it can be
+ * read as a transition of it. If no attribute noun is known, the fallback
+ * requires the character's name alongside the trait keyword.
  * This stops an unrelated "[Narrator] The evening sky turned blue." - which
  * matches the colour "blue" and the verb "turned" - from suppressing an
- * eye-colour contradiction for "Elara has blue eyes".
+ * eye-colour contradiction for "Elara has blue eyes", and stops a cloak or hair
+ * change from standing in for an eye-colour change.
  * @param {string} recentTranscript
  * @param {Set<string>} traitKeywords
  * @param {string} quote - Raw response quote from the issue.
@@ -576,13 +588,22 @@ function transcriptDepictsTransition(
   const names = subjectNames ?? new Set();
   return splitSentences(recentTranscript).some((sentence) => {
     const words = tokenizeWords(sentence);
-    // The sentence must actually be about this attribute: either it names the
-    // body/trait noun, or it names the character alongside the trait keyword.
-    const mentionsAttribute = words.some((w) => nouns.has(w));
-    const mentionsSubjectTrait =
-      names.size > 0 && words.some((w) => names.has(w)) && words.some((w) => traitKeywords.has(w));
-    if (!mentionsAttribute && !mentionsSubjectTrait) return false;
-    return sentenceShowsTransformation(sentence, traitKeywords);
+    // When the issue is about a specific attribute (eyes, hair, leg, ...), the
+    // sentence MUST mention that attribute before it can be read as a
+    // transition of it. A sentence about a cloak turning blue says nothing
+    // about eyes, so it must never suppress an eye-colour contradiction.
+    if (nouns.size > 0) {
+      if (!words.some((word) => nouns.has(word))) return false;
+    } else {
+      // No attribute noun known - fall back to requiring the character's name
+      // alongside the trait keyword.
+      const mentionsSubjectTrait =
+        names.size > 0 &&
+        words.some((word) => names.has(word)) &&
+        words.some((word) => traitKeywords.has(word));
+      if (!mentionsSubjectTrait) return false;
+    }
+    return sentenceShowsTransformation(sentence, traitKeywords, names);
   });
 }
 
@@ -637,21 +658,24 @@ export function validateIssue(issue, latestText, factsText, recentTranscript = '
   // Reject active in-story transformations of THIS trait. Find the sentence in
   // the latest response that contains the quote and check whether it describes a
   // change to one of the issue's traits (not just any transformation word).
+  // Subject names are allowed as linkers so possessive constructions such as
+  // "turned Elara's eyes green" are recognised as active transformations.
   const traitKeywords = issueTraitKeywords(issue);
+  const subjectNames = issueSubjectNames(issue);
   const containingSentence =
     splitSentences(latestText).find((sentence) => normalize(sentence).includes(quote)) ?? '';
-  if (sentenceShowsTransformation(containingSentence, traitKeywords)) return false;
+  if (sentenceShowsTransformation(containingSentence, traitKeywords, subjectNames)) return false;
 
   // If the recent transcript already depicts this transition, it is progression.
-  // The attribute-noun gate keeps an unrelated "sky turned blue" sentence from
-  // suppressing a body/eye-colour contradiction.
+  // The attribute-noun gate keeps an unrelated "sky turned blue" or "cloak
+  // turned blue" sentence from suppressing a body/eye-colour contradiction.
   if (
     transcriptDepictsTransition(
       recentTranscript,
       traitKeywords,
       issue.response_quote,
       issueAttributeNouns(issue),
-      issueSubjectNames(issue),
+      subjectNames,
     )
   ) {
     return false;
@@ -762,6 +786,253 @@ export function invalidateAcceptedRetcons(retcons, userText) {
     // The user has adopted the changed state - accept it as canon.
     return !text.includes(quote);
   });
+}
+
+// ---- Durable retcon state-following -----------------------------------------
+
+// Articles/honorifics that can precede an entity name in a fact sentence.
+const RETCON_ENTITY_TITLES = new Set([
+  'the',
+  'a',
+  'an',
+  'lady',
+  'lord',
+  'sir',
+  'captain',
+  'dr',
+  'doctor',
+  'king',
+  'queen',
+  'prince',
+  'princess',
+]);
+
+// Body/injury vocabulary. When a retcon is about one of these AND the changed
+// text describes a wound/loss, the character's `injuries` state card field is
+// updated so the baseline follows the story.
+const RETCON_INJURY_WORDS = new Set([
+  'severed',
+  'wounded',
+  'injured',
+  'injury',
+  'amputated',
+  'bleeding',
+  'bled',
+  'broken',
+  'lost',
+  'scar',
+  'scarred',
+  'crippled',
+  'maimed',
+  'burned',
+  'burnt',
+]);
+
+const RETCON_BODY_WORDS = new Set([
+  'leg',
+  'legs',
+  'arm',
+  'arms',
+  'hand',
+  'hands',
+  'eye',
+  'eyes',
+  'head',
+  'face',
+  'limb',
+  'limbs',
+  'wing',
+  'wings',
+  'tail',
+  'tails',
+  'horn',
+  'horns',
+  'tooth',
+  'teeth',
+  'mouth',
+  'nose',
+  'ear',
+  'ears',
+  'neck',
+  'back',
+  'chest',
+  'shoulder',
+  'shoulders',
+  'finger',
+  'fingers',
+  'toe',
+  'toes',
+  'skin',
+]);
+
+const RETCON_OUTFIT_WORDS = new Set([
+  'cloak',
+  'outfit',
+  'clothes',
+  'clothing',
+  'dress',
+  'armor',
+  'armour',
+  'disguise',
+  'disguised',
+  'wearing',
+  'wore',
+  'costume',
+  'uniform',
+  'robe',
+  'robes',
+  'dyed',
+  'hair',
+  'beard',
+]);
+
+const RETCON_MOOD_WORDS = new Set([
+  'mood',
+  'angry',
+  'calm',
+  'afraid',
+  'furious',
+  'sad',
+  'happy',
+  'anxious',
+  'terrified',
+  'joyful',
+  'grieving',
+  'hopeful',
+  'despair',
+]);
+
+const RETCON_LOCATION_WORDS = new Set([
+  'location',
+  'inside',
+  'outside',
+  'traveling',
+  'travelling',
+  'journey',
+  'arrived',
+  'left',
+  'moved',
+  'camp',
+  'city',
+  'village',
+  'forest',
+  'castle',
+]);
+
+const RETCON_GOAL_WORDS = new Set([
+  'goal',
+  'plan',
+  'plans',
+  'intends',
+  'wants',
+  'seeks',
+  'quest',
+  'mission',
+  'objective',
+]);
+
+const RETCON_ITEM_WORDS = new Set([
+  'carries',
+  'carrying',
+  'wields',
+  'holding',
+  'sword',
+  'blade',
+  'key',
+  'weapon',
+  'item',
+  'relic',
+  'ring',
+  'amulet',
+]);
+
+/**
+ * Returns the canonical fact text a resolved retcon should install as the new
+ * baseline. Prefers an explicit `resolved_fact`, then the response quote that
+ * contradicted the old baseline, then the old fact itself.
+ *
+ * @param {Object} retcon
+ * @returns {string}
+ */
+export function getResolvedRetconFact(retcon) {
+  if (!retcon || typeof retcon !== 'object') return '';
+  const raw = retcon.resolved_fact || retcon.quote || retcon.fact || '';
+  return String(raw).trim();
+}
+
+/**
+ * Extracts the entity name a contradiction fact is about.
+ *
+ * Facts are written as prose ("Elara has silver eyes.", "The Silver Key is
+ * broken."). The leading run of capitalised words - minus articles and titles -
+ * is treated as the entity name. Returns '' when no name can be found.
+ *
+ * @param {string} fact
+ * @returns {string}
+ */
+export function extractRetconEntityName(fact) {
+  const tokens = String(fact ?? '').match(/[\p{L}][\p{L}'’-]*/gu) ?? [];
+  const name = [];
+  for (const rawToken of tokens) {
+    if (!/^\p{Lu}/u.test(rawToken)) break;
+    const token = rawToken.replace(/['’]s$/i, '');
+    if (!token) continue;
+    if (RETCON_ENTITY_TITLES.has(token.toLowerCase())) continue;
+    name.push(token);
+  }
+  return name.join(' ');
+}
+
+/**
+ * Infers a state-card update from a durable retcon.
+ *
+ * Returns null when the retcon does not describe a state-card attribute (for
+ * example an eye-colour change, which the state-card schema does not model).
+ * Resolution still supersedes the old long-term memory in that case.
+ *
+ * @param {Object} retcon
+ * @returns {{name: string, type: string, fields: Object}|null}
+ */
+export function inferRetconStateUpdate(retcon) {
+  if (!retcon || typeof retcon !== 'object') return null;
+  const name = extractRetconEntityName(retcon.fact);
+  if (!name) return null;
+
+  const words = new Set([...keywordSet(retcon.fact), ...keywordSet(retcon.quote)]);
+  const changedText = String(retcon.quote || retcon.resolved_fact || retcon.fact || '')
+    .toLowerCase()
+    .trim();
+  if (!changedText) return null;
+
+  const hasAny = (candidateSet) => [...words].some((word) => candidateSet.has(word));
+  const injuryChange =
+    hasAny(RETCON_INJURY_WORDS) ||
+    /\b(severed|wounded|injured|amputated|bled|bleeding|broken)\b/.test(changedText);
+
+  let field = null;
+  if (injuryChange && (hasAny(RETCON_BODY_WORDS) || hasAny(RETCON_INJURY_WORDS))) {
+    field = 'injuries';
+  } else if (hasAny(RETCON_OUTFIT_WORDS)) {
+    field = 'outfit_disguise';
+  } else if (hasAny(RETCON_MOOD_WORDS)) {
+    field = 'mood';
+  } else if (hasAny(RETCON_LOCATION_WORDS)) {
+    field = 'location';
+  } else if (hasAny(RETCON_GOAL_WORDS)) {
+    field = 'active_goal';
+  } else if (hasAny(RETCON_ITEM_WORDS)) {
+    field = 'carried_items';
+  }
+
+  if (!field) return null;
+
+  const value = changedText
+    .replace(/^(?:her|his|their|its|my|your|our|the|a|an)\s+/i, '')
+    .replace(/[.;,\s]+$/, '')
+    .trim();
+  if (!value) return null;
+
+  return { name, type: 'character', fields: { [field]: value } };
 }
 
 /**

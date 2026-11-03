@@ -13,6 +13,8 @@ import {
   buildDurableRetconNote,
   advanceRetconLifetimes,
   invalidateAcceptedRetcons,
+  getResolvedRetconFact,
+  inferRetconStateUpdate,
   RETCON_TURNS,
 } from '../continuity-utils.js';
 import { reconcileEntityRegistry } from '../entity-registry.js';
@@ -968,4 +970,173 @@ test('invalidateAcceptedRetcons: empty/absent user text keeps all retcons', () =
   assert.equal(invalidateAcceptedRetcons(retcons, '').length, 1);
   assert.equal(invalidateAcceptedRetcons(retcons, null).length, 1);
   assert.deepEqual(invalidateAcceptedRetcons(null, 'text'), []);
+});
+
+// =========================================================================
+// N1: Unicode-aware entity linking
+// =========================================================================
+
+test('reconcileEntityRegistry: Unicode boundaries link accented and non-Latin names (N1)', () => {
+  const names = ['Zoë', 'Éowyn', 'José', 'Ødegård', 'Мария', '艾拉'];
+  const registry = names.map((name, index) => ({
+    id: `e${index}`,
+    name,
+    type: 'character',
+    first_seen: 0,
+    last_seen: 0,
+    memory_ids: [],
+  }));
+  const memories = [
+    { id: 'm1', content: 'Zoë entered the room.' },
+    { id: 'm2', content: 'Éowyn smiled warmly.' },
+    { id: 'm3', content: 'José drew his blade.' },
+    { id: 'm4', content: 'Ødegård nodded slowly.' },
+    { id: 'm5', content: 'Мария spoke softly.' },
+    { id: 'm6', content: '艾拉微笑着说。' },
+  ];
+
+  reconcileEntityRegistry(registry, memories);
+
+  for (let i = 0; i < names.length; i++) {
+    assert.deepEqual(
+      registry.find((e) => e.id === `e${i}`).memory_ids,
+      [`m${i + 1}`],
+      `${names[i]} must link to its memory`,
+    );
+  }
+});
+
+test('reconcileEntityRegistry: Unicode boundaries still reject substring traps (N1)', () => {
+  const registry = [
+    {
+      id: 'king',
+      name: 'King Aldric',
+      type: 'character',
+      first_seen: 0,
+      last_seen: 0,
+      memory_ids: [],
+    },
+    { id: 'ann', name: 'Ann', type: 'character', first_seen: 0, last_seen: 0, memory_ids: [] },
+    { id: 'eli', name: 'Eli', type: 'character', first_seen: 0, last_seen: 0, memory_ids: [] },
+  ];
+  const memories = [
+    { id: 'm1', content: 'Mira is making a potion for the village.' },
+    { id: 'm2', content: 'Joanna planned the channel crossing.' },
+    { id: 'm3', content: 'She believes the gate is open.' },
+  ];
+
+  reconcileEntityRegistry(registry, memories);
+
+  assert.deepEqual(registry.find((e) => e.id === 'king').memory_ids, []);
+  assert.deepEqual(registry.find((e) => e.id === 'ann').memory_ids, []);
+  assert.deepEqual(registry.find((e) => e.id === 'eli').memory_ids, []);
+});
+
+// =========================================================================
+// N6 / 3.5: possessive subject names link a verb to its trait
+// =========================================================================
+
+test('validateIssue: possessive subject name between verb and trait is an active transformation (3.5)', () => {
+  const facts = 'Elara has silver eyes.';
+  const latest = "The spell turned Elara's eyes green.";
+  const issue = {
+    fact: 'Elara has silver eyes.',
+    response_quote: "Elara's eyes green",
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is permanent and no event changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts), false);
+});
+
+test('validateIssue: possessive subject in the transcript suppresses a matching transition (3.5)', () => {
+  const facts = 'Elara has silver eyes.';
+  const latest = 'Elara blinked, her green eyes bright in the torchlight.';
+  const transcript = "[Narrator] The spell turned Elara's eyes green.";
+  const issue = {
+    fact: 'Elara has silver eyes.',
+    response_quote: 'her green eyes bright',
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is permanent and nothing in the scene changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts, transcript), false);
+});
+
+// =========================================================================
+// N6 / 3.6: unrelated attribute sentences never suppress a contradiction
+// =========================================================================
+
+test('validateIssue: a cloak transition never suppresses an eye-colour contradiction (3.6)', () => {
+  const facts = 'Elara has blue eyes.';
+  const latest = 'Elara looked up, her eyes green in the torchlight.';
+  const transcript = "[Narrator] Elara's cloak turned blue in the rain.";
+  const issue = {
+    fact: 'Elara has blue eyes.',
+    response_quote: 'her eyes green',
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is permanent and nothing in the scene changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts, transcript), true);
+});
+
+test('validateIssue: a hair transition never suppresses an eye-colour contradiction (3.6)', () => {
+  const facts = 'Elara has blue eyes.';
+  const latest = 'Elara looked up, her eyes green in the torchlight.';
+  const transcript = '[Elara] She dyed her hair black for the festival.';
+  const issue = {
+    fact: 'Elara has blue eyes.',
+    response_quote: 'her eyes green',
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is permanent and nothing in the scene changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts, transcript), true);
+});
+
+// =========================================================================
+// N4: durable retcon state-following helpers
+// =========================================================================
+
+test('getResolvedRetconFact: prefers resolved_fact, then quote, then fact (N4)', () => {
+  assert.equal(
+    getResolvedRetconFact({ fact: 'old', quote: 'quoted', resolved_fact: 'explicit' }),
+    'explicit',
+  );
+  assert.equal(getResolvedRetconFact({ fact: 'old', quote: 'quoted' }), 'quoted');
+  assert.equal(getResolvedRetconFact({ fact: 'old' }), 'old');
+  assert.equal(getResolvedRetconFact(null), '');
+});
+
+test('inferRetconStateUpdate: maps a wound to the injuries state card (N4)', () => {
+  const update = inferRetconStateUpdate({
+    fact: 'Kael has two legs.',
+    quote: 'his leg was severed',
+  });
+
+  assert.ok(update);
+  assert.equal(update.name, 'Kael');
+  assert.equal(update.type, 'character');
+  assert.equal(update.fields.injuries, 'leg was severed');
+});
+
+test('inferRetconStateUpdate: maps a cloak change to outfit/disguise (N4)', () => {
+  const update = inferRetconStateUpdate({
+    fact: 'Elara wears a green cloak.',
+    quote: 'her cloak is now blue',
+  });
+
+  assert.ok(update);
+  assert.equal(update.name, 'Elara');
+  assert.equal(update.fields.outfit_disguise, 'cloak is now blue');
+});
+
+test('inferRetconStateUpdate: returns null for attributes the schema does not model (N4)', () => {
+  assert.equal(
+    inferRetconStateUpdate({ fact: 'Elara has silver eyes.', quote: 'her eyes green' }),
+    null,
+  );
+  assert.equal(inferRetconStateUpdate(null), null);
+  assert.equal(inferRetconStateUpdate({ fact: '', quote: '' }), null);
 });
