@@ -356,6 +356,91 @@ test('generation gate: a lone ENDED consumes its slot and a trailing STOPPED is 
   assert.equal(s.inProgress, false);
 });
 
+// ---- H-3: the outstanding pair's timestamp must survive a start --------------
+
+test('generation gate: a delayed ENDED for A after start B is collapsed, not consumed', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'stopped', 10); // A stops; expects its ENDED
+  assert.equal(s.pending, 0);
+  assert.equal(s.awaitingPair, 'ended');
+
+  s = correlateGenerationGate(s, 'start', 20); // B starts before A's ENDED lands
+  assert.equal(s.pending, 1);
+  assert.equal(s.awaitingPair, 'ended', 'the outstanding pair survives the start');
+  assert.equal(
+    s.lastTerminalAt,
+    10,
+    'the pair timestamp must survive the start so the collapse window is valid',
+  );
+
+  s = correlateGenerationGate(s, 'ended', 30); // A's delayed ENDED pairs with A's STOPPED
+  assert.equal(s.pending, 1, "B's slot must NOT be consumed");
+  assert.equal(s.inProgress, true);
+  assert.equal(s.awaitingPair, null);
+});
+
+test('generation gate: delayed ENDED for B after start C is collapsed, not consumed', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'start', 10); // B
+  s = correlateGenerationGate(s, 'stopped', 20); // A
+  s = correlateGenerationGate(s, 'ended', 30); // A pair, collapsed
+  s = correlateGenerationGate(s, 'stopped', 40); // B stops; expects its ENDED
+  assert.equal(s.pending, 0);
+  assert.equal(s.awaitingPair, 'ended');
+
+  s = correlateGenerationGate(s, 'start', 50); // C starts before B's ENDED lands
+  assert.equal(s.pending, 1);
+
+  s = correlateGenerationGate(s, 'ended', 60); // B's delayed ENDED pairs with B's STOPPED
+  assert.equal(s.pending, 1, "C's slot must NOT be consumed");
+  assert.equal(s.inProgress, true);
+  assert.equal(s.awaitingPair, null);
+});
+
+test('generation gate: a stale pair marker older than the window still consumes', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0);
+  s = correlateGenerationGate(s, 'stopped', 10);
+  s = correlateGenerationGate(s, 'start', 20);
+  // The ENDED arrives far outside the coalescing window, so it is a genuinely
+  // new terminal and must consume the pending generation.
+  s = correlateGenerationGate(s, 'ended', 10 + GENERATION_TERMINAL_COALESCE_MS + 1);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+});
+
+// ---- H-3 follow-up: a resolved pair must not linger past its cleared slot ----
+
+test('generation gate: a cleared pair does not swallow the next generation normal ended', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'stopped', 10); // A stops; expects its ENDED
+  s = correlateGenerationGate(s, 'ended', 20); // A's pair resolves
+  assert.equal(s.pending, 0);
+  assert.equal(s.awaitingPair, null, 'the resolved pair must not linger');
+
+  s = correlateGenerationGate(s, 'start', 30); // C
+  s = correlateGenerationGate(s, 'ended', 40); // C's normal ENDED, inside the window
+  assert.equal(s.pending, 0, "C's normal ENDED must consume, not be swallowed");
+  assert.equal(s.inProgress, false);
+  assert.equal(s.awaitingPair, null);
+});
+
+test('generation gate: an ENDED that resolves a cleared pair leaves awaitingPair null', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0);
+  s = correlateGenerationGate(s, 'stopped', 10);
+  assert.equal(s.awaitingPair, 'ended');
+
+  // The slot is already cleared (pending 0); the awaited ENDED still arrives.
+  s = correlateGenerationGate(s, 'ended', 20);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+  assert.equal(s.awaitingPair, null, 'the trailing ENDED resolves the pair');
+});
+
 // ---- L-2: duplicate chat-load coalescing -------------------------------------
 
 test('isDuplicateChatLoad: same normalized id coalesces within the window', () => {

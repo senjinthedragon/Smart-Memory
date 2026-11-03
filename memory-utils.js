@@ -1683,10 +1683,12 @@ export const GENERATION_TERMINAL_COALESCE_MS = 100;
  * `'terminal'` is retained as a generic alias that always consumes one pending
  * slot and never pairs, for callers/tests that do not distinguish the kind.
  *
- * `start` enqueues a slot and resets the coalescing timestamp but deliberately
- * leaves `awaitingPair` intact: a delayed ENDED that pairs with a STOPPED
- * observed before a newer generation started must still be absorbed rather than
- * clear the newer generation's gate.
+ * `start` enqueues a slot but deliberately preserves BOTH `awaitingPair` and
+ * `lastTerminalAt`: the outstanding pair's timestamp must survive the start
+ * boundary so a delayed ENDED that belongs to the prior STOPPED can still be
+ * recognized and collapsed instead of consuming the newly started generation.
+ * A terminal older than the coalescing window simply will not collapse (correct
+ * - it becomes a normal consume for a genuinely new generation).
  *
  * `complete` (MESSAGE_RECEIVED) opens the gate for the finished generation but
  * deliberately retains its pending slot for the terminal that follows, so an
@@ -1695,9 +1697,11 @@ export const GENERATION_TERMINAL_COALESCE_MS = 100;
  * Residual constraint: host events carry no generation id, so a STOPPED that
  * never receives its ENDED leaves `awaitingPair` set. Its pending slot is still
  * consumed, so the gate is not stuck on that account; a generation that emits no
- * terminal at all relies on the watchdog / chat-switch reset. The failure mode
- * stays conservative (extraction briefly suppressed), never partial-text
- * extraction.
+ * terminal at all relies on the watchdog / chat-switch reset. If the awaited
+ * complement does arrive after its slot was already cleared, it resolves
+ * (clears) the pair instead of lingering and swallowing a later generation's
+ * normal terminal. The failure mode stays conservative (extraction briefly
+ * suppressed), never partial-text extraction.
  *
  * @param {{pending?: number, inProgress?: boolean, awaitingPair?: ('stopped'|'ended'|null), lastTerminalAt?: number}} state
  * @param {'start'|'complete'|'stopped'|'ended'|'terminal'|'reset'} event
@@ -1718,12 +1722,13 @@ export function correlateGenerationGate(state, event, now = 0) {
 
   switch (event) {
     case 'start':
-      // A new generation opens the gate and enqueues one pending slot. The
-      // coalescing timestamp is reset so a genuine terminal for this generation
-      // is not mistaken for a duplicate of an earlier generation's. `awaitingPair`
-      // is deliberately preserved: a delayed ENDED pairing with a STOPPED seen
-      // before this start must still be absorbed, not clear this generation.
-      return { pending: pending + 1, inProgress: true, awaitingPair, lastTerminalAt: -Infinity };
+      // A new generation opens the gate and enqueues one pending slot. Preserve
+      // BOTH the outstanding pair and its timestamp: resetting `lastTerminalAt`
+      // would make `awaitingPair` unsatisfiable, so a delayed ENDED belonging to
+      // the prior STOPPED could never collapse and would wrongly consume this
+      // new generation. A terminal older than the coalescing window still won't
+      // collapse, so it becomes a normal consume for a genuinely new generation.
+      return { pending: pending + 1, inProgress: true, awaitingPair, lastTerminalAt };
     case 'complete':
       // MESSAGE_RECEIVED: the finished generation's gate opens, but its pending
       // slot is retained for the terminal that follows it.
@@ -1733,10 +1738,13 @@ export function correlateGenerationGate(state, event, now = 0) {
     case 'terminal': {
       const kind = event === 'terminal' ? null : event; // 'stopped' | 'ended' | null
       // No pending generation: this terminal belongs to an already-cleared gate.
-      // It is a NO-OP that must NOT update the coalescing marker or the pair,
-      // or it could suppress a genuine upcoming terminal for the next generation.
+      // It must NOT advance the coalescing marker (that could suppress the next
+      // real terminal). If it is exactly the complement we were awaiting, clear
+      // the pair so it does not linger and swallow a later generation's normal
+      // terminal; any other stale terminal leaves the pair state untouched.
       if (pending <= 0) {
-        return { pending: 0, inProgress: false, awaitingPair, lastTerminalAt };
+        const nextAwaitingPair = kind && awaitingPair === kind ? null : awaitingPair;
+        return { pending: 0, inProgress: false, awaitingPair: nextAwaitingPair, lastTerminalAt };
       }
       // Collapse the paired complement (STOPPED then ENDED, or ENDED then
       // STOPPED) for the SAME generation, only within the coalescing window.
