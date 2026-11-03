@@ -1345,7 +1345,7 @@ async function onChatChangedImpl() {
  */
 function getGroupMemberNames() {
   const context = getContext();
-  const group = context.groups?.find((g) => g.id === context.groupId);
+  const group = context.groups?.find((g) => String(g.id) === String(context.groupId));
   if (!group) return [];
   return [
     ...new Set(
@@ -1364,7 +1364,7 @@ function getGroupMemberNames() {
  */
 function updateGroupCharSelector() {
   const context = getContext();
-  const group = context.groups?.find((g) => g.id === context.groupId);
+  const group = context.groups?.find((g) => String(g.id) === String(context.groupId));
   if (!group) {
     smLog('[SmartMemory] updateGroupCharSelector: group not found for groupId', context.groupId);
     return;
