@@ -101,8 +101,8 @@ import {
 } from './arcs.js';
 import {
   checkContinuity,
-  generateRepair,
-  injectRepair,
+  handleContinuityResult,
+  applyPendingRepair,
   clearRepair,
   loadAndInjectRepair,
 } from './continuity.js';
@@ -129,6 +129,7 @@ import { smLog } from './logging.js';
 import {
   isEpistemicEnabled,
   extractEpistemicKnowledge,
+  extractAndPartitionGroupEpistemic,
   injectEpistemicKnowledge,
   loadAndInjectEpistemicKnowledge,
   resetEpistemicWarnFlag,
@@ -226,9 +227,9 @@ let catchUpCancelled = false;
 // by onGroupWrapperStarted at the top of each new round.
 let respondedThisRound = new Set();
 
-// True once loadAndInjectRepair() has been called for the first character in a
-// group round. Prevents the one-shot repair note from being re-injected for
-// every subsequent character in the same round.
+// True once applyPendingRepair() has run for the first character in a group
+// round. Prevents the one-shot repair note from being re-injected for every
+// subsequent character in the same round.
 let repairInjectedThisRound = false;
 
 // Last observed chat length, used to distinguish new messages from swipes.
@@ -496,6 +497,11 @@ async function onCharacterMessageRendered(messageId, type) {
     return;
   }
 
+  // The continuity note (if any) was consumed by the generation that produced
+  // this committed message. Clear it synchronously, before the deferred
+  // extraction pipeline, so it can never leak into a later turn.
+  clearRepair();
+
   const characterName = getCurrentCharacterName();
 
   // Capture the current chat generation so we can abort before any write if
@@ -543,6 +549,10 @@ async function onCharacterMessageRendered(messageId, type) {
       // previous character's canon into the wrong chat.
       if (chatChanged()) return;
 
+      // Tracks whether a scene-break epistemic pass already ran this turn so the
+      // periodic extraction batch below does not duplicate the model call.
+      let epistemicThisPass = false;
+
       // Step 1: compaction - awaited before extraction to prevent concurrent use
       // of ST's TempResponseLength singleton, which would corrupt amount_gen.
       // Also gated on !extractionRunning: after the deferral a re-entrant handler
@@ -568,7 +578,7 @@ async function onCharacterMessageRendered(messageId, type) {
               source !== memory_sources.main
                 ? startActivityLoader(settings, 'Updating story summary...')
                 : null;
-            const summary = await runCompaction();
+            const summary = await runCompaction({ abortCheck: chatChanged });
             stopActivityLoader(compactionHandle);
             if (summary) {
               injectSummary(summary);
@@ -610,6 +620,7 @@ async function onCharacterMessageRendered(messageId, type) {
             if (isEpistemicEnabled()) {
               await extractEpistemicKnowledge(sceneMessageBuffer, characterName);
               injectEpistemicKnowledge(characterName, characterName, true, true);
+              epistemicThisPass = true;
             }
             sceneMessageBuffer = [];
             sceneBufferLastIndex = -1;
@@ -707,30 +718,18 @@ async function onCharacterMessageRendered(messageId, type) {
           // Awaiting here also prevents compaction/scene detection on the next
           // message from racing against an ongoing extraction and corrupting
           // ST's TempResponseLength singleton (the same hazard fixed in 1.0.1).
-          // Capture original budgets before entering try/finally so the finally
-          // block can restore them regardless of where the error occurred.
-          const originalBudgets = {
-            longterm_inject_budget: settings.longterm_inject_budget,
-            session_inject_budget: settings.session_inject_budget,
-            scene_inject_budget: settings.scene_inject_budget,
-            arcs_inject_budget: settings.arcs_inject_budget,
-            profiles_inject_budget: settings.profiles_inject_budget,
-          };
           const activityHandle = startActivityLoader(settings, 'Extracting memories...');
           try {
             let total = 0;
 
-            // Classify the current turn and apply adaptive per-tier token budgets.
-            // The last AI message drives the classifier; budgets are patched directly
-            // into settings so injection calls pick them up without signature changes.
+            // Classify the current turn and compute adaptive per-tier token
+            // budgets. These are passed directly to the injectors for this
+            // turn only - never written into settings - so a debounced save
+            // during a long model call cannot persist temporary values over
+            // the user's manually configured budgets.
             const lastAiMessage = context.chat?.at(-1)?.mes ?? '';
             const turnType = classifyTurn(lastAiMessage);
             const budgets = adaptiveBudgets(settings, turnType);
-            settings.longterm_inject_budget = budgets.longterm;
-            settings.session_inject_budget = budgets.session;
-            settings.scene_inject_budget = budgets.scenes;
-            settings.arcs_inject_budget = budgets.arcs;
-            settings.profiles_inject_budget = budgets.profiles;
 
             if (chatChanged()) throw CHAT_SWITCHED;
             if (settings.session_enabled && sessionWindow.length > 0 && !isFreshStart()) {
@@ -756,7 +755,7 @@ async function onCharacterMessageRendered(messageId, type) {
                 });
                 consolidationRunning = false;
               }
-              if (shouldRefreshInjections) await injectSessionMemories(true);
+              if (shouldRefreshInjections) await injectSessionMemories(true, budgets.session);
               updateSessionUI();
               total += count;
 
@@ -812,13 +811,31 @@ async function onCharacterMessageRendered(messageId, type) {
               // refresh period so the slot stays stable between refreshes for
               // cloud API prompt cache hits.
               if (shouldRefreshInjections) {
-                await injectMemories(characterName, true);
+                await injectMemories(characterName, true, budgets.longterm);
                 injectRelationshipHistory(characterName);
               }
               updateLongTermUI(characterName);
               updateRelationshipHistoryUI(characterName);
               updateEpistemicUI(characterName);
               total += count;
+            }
+
+            // Periodic epistemic refresh: scene breaks can be dozens of messages
+            // apart, leaving character knowledge stale when a secret is revealed
+            // mid-scene. Run a lightweight pass on each extraction batch unless a
+            // scene-break pass already covered this turn's buffer.
+            if (chatChanged()) throw CHAT_SWITCHED;
+            if (isEpistemicEnabled() && characterName && !isFreshStart() && !epistemicThisPass) {
+              const epistemicWindow = longtermWindow.length > 0 ? longtermWindow : sessionWindow;
+              if (epistemicWindow.length > 0) {
+                await extractEpistemicKnowledge(epistemicWindow, characterName).catch((err) => {
+                  console.error('[SmartMemory] Periodic epistemic extraction error:', err);
+                });
+                if (shouldRefreshInjections) {
+                  injectEpistemicKnowledge(characterName, characterName);
+                }
+                updateEpistemicUI(characterName);
+              }
             }
 
             // Snapshot arc summary count before extraction so we can detect a new
@@ -838,7 +855,7 @@ async function onCharacterMessageRendered(messageId, type) {
                   return 0;
                 },
               );
-              injectArcs();
+              injectArcs(budgets.arcs);
               updateArcsUI();
               total += count;
             }
@@ -862,7 +879,7 @@ async function onCharacterMessageRendered(messageId, type) {
               await generateProfiles(characterName, chatChanged)
                 .then((profiles) => {
                   if (profiles) {
-                    injectProfiles(characterName);
+                    injectProfiles(characterName, budgets.profiles);
                     updateProfilesUI(profiles);
                   }
                 })
@@ -918,14 +935,6 @@ async function onCharacterMessageRendered(messageId, type) {
           } finally {
             smLog(`[SmartMemory] Solo extraction finished at ${new Date().toISOString()}`);
             stopActivityLoader(activityHandle);
-            // Restore original budget settings so chat-load / settings-change injection
-            // paths use the user's configured values, not this turn's adapted values.
-            // saveSettingsDebounced is called here rather than inside the try block to
-            // ensure the debounce never fires while adapted budgets are still patched in.
-            // On Ollama, LLM calls take several seconds - long enough for a 1000ms debounce
-            // to fire with wrong values and persist them to disk.
-            Object.assign(settings, originalBudgets);
-            saveSettingsDebounced();
             extractionRunning = false;
           }
         }
@@ -960,13 +969,15 @@ async function onCharacterMessageRendered(messageId, type) {
           });
       }
 
-      // Step 5: clear any pending continuity repair - it was injected for this
-      // response turn and should not carry over to the next message.
+      // Step 5: the continuity note injected before this generation has been
+      // consumed by the response that just rendered. Clear it so repair is
+      // strictly one-shot and can never leak into a later turn.
       clearRepair();
 
       // Step 6 (Profile B only): silent continuity check after each AI turn.
       // Fire-and-forget so it does not block the event handler while the model
-      // responds. The badge in the settings header updates when the check finishes.
+      // responds. handleContinuityResult applies the user's continuity_mode:
+      // warn (default) only reports, repair queues a forward-only anchored note.
       // On Profile A (local hardware) this stays manual-only - too expensive for
       // every turn on an RTX 2080.
       if (
@@ -977,50 +988,8 @@ async function onCharacterMessageRendered(messageId, type) {
         continuityCheckRunning = true;
         const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
         checkContinuity(characterName)
-          .then(async (contradictions) => {
-            setContinuityBadge(contradictions.length);
-            // Populate the result panel so the user can read the contradictions
-            // when they open the settings panel - same display as the manual check.
-            const $result = $('#sm_continuity_result');
-            $result.empty().removeClass('sm_continuity_clean sm_continuity_warn');
-            if (contradictions.length === 0) {
-              $result.addClass('sm_continuity_clean').text('No contradictions found.').show();
-            } else {
-              $result.addClass('sm_continuity_warn');
-              $result.append('<b>Contradictions found:</b>');
-              const $ul = $('<ul>');
-              contradictions.forEach((c) => $ul.append($('<li>').text(c)));
-              $result.append($ul).show();
-              if (getSettings().continuity_auto_repair) {
-                try {
-                  const note = await generateRepair(contradictions, characterName);
-                  injectRepair(note);
-                  const $repairBlock = $('<div class="sm_repair_queued">');
-                  $repairBlock.append($('<p>').text('Correction queued for next response:'));
-                  $repairBlock.append($('<p class="sm_repair_note">').text(note));
-                  const $cancel = $(
-                    '<button class="menu_button sm_repair_cancel">Cancel correction</button>',
-                  );
-                  $cancel.on('click', () => {
-                    clearRepair();
-                    $repairBlock.remove();
-                  });
-                  $repairBlock.append($cancel);
-                  $result.append($repairBlock);
-                  toastr.info(
-                    `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found - correction queued for next response.`,
-                    'Smart Memory',
-                  );
-                } catch (repairErr) {
-                  console.error('[SmartMemory] Auto-repair failed:', repairErr);
-                  $result.append(
-                    $('<p class="sm_repair_queued">').text(
-                      'Correction could not be generated - check console.',
-                    ),
-                  );
-                }
-              }
-            }
+          .then((result) => {
+            handleContinuityResult(result, characterName);
           })
           .catch((err) => {
             console.error('[SmartMemory] Auto-continuity check failed:', err);
@@ -1086,6 +1055,10 @@ async function onChatChangedImpl() {
   continuityCheckRunning = false;
   recapSuppressed = false;
   catchUpCancelled = true;
+  // Cancel any in-flight Ollama/OpenAI memory generation from the previous
+  // chat. Without this, the old chat's memory call can finish after the switch
+  // and compete with the new chat's generation for the same model instance.
+  abortCurrentMemoryGeneration();
   stopActivityLoader(activeRecapHandle);
   activeRecapHandle = null;
   sceneMessageBuffer = [];
@@ -1093,6 +1066,11 @@ async function onChatChangedImpl() {
   respondedThisRound = new Set();
   selectedGroupCharacter = null;
   setContinuityBadge(null);
+  // A queued continuity note is anchored to message indices in the previous
+  // chat, which are meaningless here. Clear the live slot/in-memory state, but
+  // keep this chat's own stored note so loadAndInjectRepair() can re-arm it
+  // after re-validating the anchor against the newly loaded chat.
+  clearRepair({ keepStored: true });
   setStatusMessage('');
   // Initialise to the current chat length so the first CHARACTER_MESSAGE_RENDERED
   // after a chat load is not mistaken for a new message when the user swipes
@@ -1252,6 +1230,9 @@ async function onChatChangedImpl() {
   updateTokenDisplay();
   autoTuneBudgets(characterName);
   updateEmbeddingNotice();
+  // Mark load complete so the budget trim warning toast can fire on the next
+  // injection cycle for 1:1 chats too (previously only the group path did this).
+  markChatLoadComplete();
 
   // Show a recap popup if the user has been away long enough.
   const soloChatMeta = getContext().chatMetadata;
@@ -1299,6 +1280,27 @@ async function onChatChangedImpl() {
 }
 
 // ---- Group chat helpers -------------------------------------------------
+
+/**
+ * Resolves the active group's member names from their avatar ids.
+ * Returns an empty array outside a group or when no member can be resolved.
+ * Used by group extraction to gather state-ledger entities and partition
+ * epistemic entries across every member rather than only the selected one.
+ *
+ * @returns {string[]}
+ */
+function getGroupMemberNames() {
+  const context = getContext();
+  const group = context.groups?.find((g) => g.id === context.groupId);
+  if (!group) return [];
+  return [
+    ...new Set(
+      (group.members ?? [])
+        .map((avatarId) => context.characters.find((c) => c.avatar === avatarId)?.name)
+        .filter(Boolean),
+    ),
+  ];
+}
 
 /**
  * Populates the group character selector dropdown with the current group's
@@ -1400,9 +1402,10 @@ async function onGroupMemberDrafted(chId) {
   injectArcs();
   injectProfiles(characterName);
   // Repair is one-shot - only the first character in a round gets it.
-  // Subsequent characters call clearRepair() so the slot doesn't carry over.
+  // applyPendingRepair() validates the anchor before injecting; subsequent
+  // characters call clearRepair() so the slot does not carry over.
   if (!repairInjectedThisRound) {
-    loadAndInjectRepair();
+    applyPendingRepair();
     repairInjectedThisRound = true;
   } else {
     clearRepair();
@@ -1449,6 +1452,12 @@ async function onGroupWrapperFinished({ type } = {}) {
   // sends a new message quickly. Everything below uses the snapshot.
   const roundResponders = new Set(respondedThisRound);
 
+  // All active group members - used for group epistemic partitioning and
+  // cross-member state-ledger entity gathering. Fall back to this round's
+  // responders if the roster cannot be resolved.
+  const groupMemberNames = getGroupMemberNames();
+  const activeGroupMembers = groupMemberNames.length > 0 ? groupMemberNames : [...roundResponders];
+
   // Build scene check text from the end of the completed round.
   const lastMsg = context.chat
     .slice()
@@ -1469,6 +1478,10 @@ async function onGroupWrapperFinished({ type } = {}) {
       // Guard: bail if the user switched chats during the deferral window.
       if (chatChanged()) return;
 
+      // Tracks whether a scene-break epistemic pass already ran this round so
+      // the periodic extraction below does not duplicate the model call.
+      let epistemicThisPass = false;
+
       // Step 1: compaction - once per round rather than per character response.
       // Gated by !isFreshStart() and !extractionRunning matching the solo path.
       if (
@@ -1487,7 +1500,7 @@ async function onGroupWrapperFinished({ type } = {}) {
               source !== memory_sources.main
                 ? startActivityLoader(settings, 'Updating story summary...')
                 : null;
-            const summary = await runCompaction();
+            const summary = await runCompaction({ abortCheck: chatChanged });
             stopActivityLoader(compactionHandle);
             if (summary) {
               injectSummary(summary);
@@ -1522,13 +1535,17 @@ async function onGroupWrapperFinished({ type } = {}) {
             updateScenesUI();
             maybeInjectUnified();
             updateTokenDisplay();
-            if (isEpistemicEnabled()) {
-              // Store under the selected character; fall back to first responder this round.
-              const epistemicChar = selectedGroupCharacter || [...roundResponders][0] || null;
+            if (isEpistemicEnabled() && activeGroupMembers.length > 0) {
+              // One extraction pass, then partition the subjects into each
+              // member's own epistemic store so every group member keeps the
+              // knowledge they gained during the scene.
+              await extractAndPartitionGroupEpistemic(sceneMessageBuffer, activeGroupMembers);
+              const epistemicChar = selectedGroupCharacter || activeGroupMembers[0] || null;
               if (epistemicChar) {
-                await extractEpistemicKnowledge(sceneMessageBuffer, epistemicChar);
                 injectEpistemicKnowledge(epistemicChar, epistemicChar, true, true);
+                updateEpistemicUI(epistemicChar);
               }
+              epistemicThisPass = true;
             }
             sceneMessageBuffer = [];
             sceneBufferLastIndex = -1;
@@ -1601,26 +1618,17 @@ async function onGroupWrapperFinished({ type } = {}) {
             messagesSinceLastExtraction = 0;
             setStatusMessage('Extracting memories...');
 
-            const originalBudgets = {
-              longterm_inject_budget: settings.longterm_inject_budget,
-              session_inject_budget: settings.session_inject_budget,
-              scene_inject_budget: settings.scene_inject_budget,
-              arcs_inject_budget: settings.arcs_inject_budget,
-              profiles_inject_budget: settings.profiles_inject_budget,
-            };
             const activityHandle = startActivityLoader(settings, 'Extracting memories...');
 
             try {
               let total = 0;
 
+              // Adaptive budgets are per-turn values passed to injectors below;
+              // they are never written into settings, so a save during the model
+              // call cannot persist them over the user's configured values.
               const lastAiMessage = context.chat?.at(-1)?.mes ?? '';
               const turnType = classifyTurn(lastAiMessage);
               const budgets = adaptiveBudgets(settings, turnType);
-              settings.longterm_inject_budget = budgets.longterm;
-              settings.session_inject_budget = budgets.session;
-              settings.scene_inject_budget = budgets.scenes;
-              settings.arcs_inject_budget = budgets.arcs;
-              settings.profiles_inject_budget = budgets.profiles;
 
               if (chatChanged()) throw CHAT_SWITCHED;
               // Session extraction is chat-wide - all characters share one session store.
@@ -1644,7 +1652,8 @@ async function onGroupWrapperFinished({ type } = {}) {
                   });
                   consolidationRunning = false;
                 }
-                if (shouldRefreshInjectionsGroup) await injectSessionMemories(true);
+                if (shouldRefreshInjectionsGroup)
+                  await injectSessionMemories(true, budgets.session);
                 updateSessionUI();
                 total += count;
 
@@ -1721,6 +1730,31 @@ async function onGroupWrapperFinished({ type } = {}) {
                 }
               }
 
+              // Periodic group epistemic refresh so knowledge revealed between scene
+              // breaks is captured. One pass partitions entries across every member.
+              if (chatChanged()) throw CHAT_SWITCHED;
+              if (
+                isEpistemicEnabled() &&
+                !isFreshStart() &&
+                !epistemicThisPass &&
+                activeGroupMembers.length > 0
+              ) {
+                const epistemicWindow = longtermWindow.length > 0 ? longtermWindow : sessionWindow;
+                if (epistemicWindow.length > 0) {
+                  await extractAndPartitionGroupEpistemic(
+                    epistemicWindow,
+                    activeGroupMembers,
+                  ).catch((err) => {
+                    console.error('[SmartMemory] Group periodic epistemic error:', err);
+                  });
+                  if (selectedGroupCharacter) {
+                    injectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
+                    updateEpistemicUI(selectedGroupCharacter);
+                  }
+                  epistemicThisPass = true;
+                }
+              }
+
               if (chatChanged()) throw CHAT_SWITCHED;
               // Arc extraction is chat-wide - once per round after all characters.
               // Snapshot summary count first so the canon check below can detect a
@@ -1733,7 +1767,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                   console.error('[SmartMemory] Arc extraction error:', err);
                   return 0;
                 });
-                injectArcs();
+                injectArcs(budgets.arcs);
                 updateArcsUI();
                 total += count;
 
@@ -1764,9 +1798,13 @@ async function onGroupWrapperFinished({ type } = {}) {
 
               if (chatChanged()) throw CHAT_SWITCHED;
               if (!isFreshStart()) {
-                await runStateCardExtraction(null, longtermWindow, chatChanged).catch((err) => {
-                  console.error('[SmartMemory] State ledger extraction error:', err);
-                });
+                // Pass every active member so entities from the whole group's
+                // registries are available, not just the selected character's.
+                await runStateCardExtraction(activeGroupMembers, longtermWindow, chatChanged).catch(
+                  (err) => {
+                    console.error('[SmartMemory] State ledger extraction error:', err);
+                  },
+                );
                 injectStateLedger(true);
               }
 
@@ -1818,8 +1856,6 @@ async function onGroupWrapperFinished({ type } = {}) {
             } finally {
               smLog(`[SmartMemory] Group extraction finished at ${new Date().toISOString()}`);
               stopActivityLoader(activityHandle);
-              Object.assign(settings, originalBudgets);
-              saveSettingsDebounced();
               extractionRunning = false;
             }
           }
@@ -1856,12 +1892,14 @@ async function onGroupWrapperFinished({ type } = {}) {
         }
       }
 
-      // Step 5: clear any pending continuity repair carried over from last round.
+      // Step 5: the note injected before this round's generation has been
+      // consumed. Clear it so repair remains strictly one-shot.
       clearRepair();
 
       // Step 6 (Profile B only): silent continuity check - once per round using
       // the last character who responded. Running per-character would multiply
       // model calls by character count for the same round of messages.
+      // handleContinuityResult applies continuity_mode (warn/repair/off).
       const lastResponder = [...roundResponders].at(-1);
       if (
         getHardwareProfile() === 'b' &&
@@ -1872,12 +1910,8 @@ async function onGroupWrapperFinished({ type } = {}) {
         continuityCheckRunning = true;
         const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
         checkContinuity(lastResponder)
-          .then(async (contradictions) => {
-            setContinuityBadge(contradictions.length);
-            if (contradictions.length > 0 && getSettings().continuity_auto_repair) {
-              const note = await generateRepair(contradictions, lastResponder);
-              injectRepair(note);
-            }
+          .then((result) => {
+            handleContinuityResult(result, lastResponder);
           })
           .catch((err) => {
             console.error('[SmartMemory] Auto-continuity check failed:', err);
@@ -2021,6 +2055,10 @@ jQuery(async function () {
       generationInProgress = true;
       $('#sm_recap_overlay').remove();
       recapOverlayChatMeta = null;
+      // Inject a queued continuity note before the model sees the prompt.
+      // The anchor check discards it if the turn it was based on was edited,
+      // swiped, or deleted.
+      applyPendingRepair();
     }
   });
   eventSource.on(event_types.MESSAGE_RECEIVED, () => {
@@ -2074,8 +2112,39 @@ jQuery(async function () {
   // before the memory model finishes, reverting the swipe counter. The aborted
   // memory operation returns an empty response and is skipped cleanly - it will
   // retry on the next accepted message.
-  eventSource.on(event_types.MESSAGE_SWIPED, () => {
+  eventSource.on(event_types.MESSAGE_SWIPED, (messageId) => {
     abortCurrentMemoryGeneration();
+    // A swipe rewrites the message the continuity check was anchored to, so
+    // any queued note is no longer valid for this branch of the story.
+    clearRepair();
+
+    const context = getContext();
+    const chat = context.chat ?? [];
+    if (chat.length === 0) return;
+
+    const targetIndex = Number.isInteger(messageId) ? messageId : chat.length - 1;
+    const swiped = chat[targetIndex] ?? chat[chat.length - 1];
+    // Swipes only replace assistant messages. User/system messages never enter
+    // the scene buffer, so there is nothing to rewind for them.
+    if (!swiped || swiped.is_user || swiped.is_system) return;
+
+    // Drop the buffered copy of the swiped message when it is the buffer tail.
+    // This prevents the old variant from being included in the next scene
+    // summary alongside the regenerated text. The index check covers ST
+    // versions that replace the message object instead of mutating it in place.
+    const buffered = sceneMessageBuffer[sceneMessageBuffer.length - 1];
+    const bufferedSwipedMessage =
+      buffered &&
+      (buffered === swiped ||
+        (buffered.mes === swiped.mes && buffered.name === swiped.name) ||
+        sceneBufferLastIndex >= targetIndex);
+    if (bufferedSwipedMessage) {
+      sceneMessageBuffer.pop();
+    }
+
+    // Rewind the cursor so the regenerated message is captured once by the
+    // next real character render instead of being skipped as already-seen.
+    sceneBufferLastIndex = Math.min(sceneBufferLastIndex, chat.length - 2);
   });
 
   // When a message is deleted, trim the scene buffer to only messages that
@@ -2086,6 +2155,9 @@ jQuery(async function () {
     const chatSet = new Set(context.chat);
     sceneMessageBuffer = sceneMessageBuffer.filter((m) => chatSet.has(m));
     sceneBufferLastIndex = Math.min(sceneBufferLastIndex, context.chat.length - 1);
+    // Deleting a message shifts every later index and may remove the anchor.
+    // Discard any queued note rather than risk applying it to a different turn.
+    clearRepair();
   });
 
   onChatChanged();
@@ -2098,21 +2170,16 @@ jQuery(async function () {
       callback: async () => {
         const characterName = getCurrentCharacterName();
         if (!characterName) return 'No character active.';
-        const contradictions = await checkContinuity(characterName);
-        if (contradictions.length === 0) {
+        const result = await checkContinuity(characterName);
+        const { issues } = handleContinuityResult(result, characterName);
+        if (issues.length === 0) {
           toastr.info('No contradictions found.', 'Smart Memory', {
             timeOut: 4000,
             positionClass: 'toast-bottom-right',
           });
           return 'No contradictions found.';
         }
-        const message = contradictions.map((c, i) => `${i + 1}. ${c}`).join('\n');
-        toastr.warning(
-          `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found. Check the Smart Memory panel for details.`,
-          'Smart Memory',
-          { timeOut: 8000, positionClass: 'toast-bottom-right' },
-        );
-        return message;
+        return issues.map((issue, i) => `${i + 1}. ${issue.fact ?? issue}`).join('\n');
       },
       helpString:
         'Checks the last AI response for contradictions against established facts and memories.',

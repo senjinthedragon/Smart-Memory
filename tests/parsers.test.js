@@ -8,6 +8,8 @@ import {
   formatSummary,
   detectSceneBreakHeuristic,
   parseProfileOutput,
+  parseRelationshipDeltaResponse,
+  parseStateCardResponse,
 } from '../parsers.js';
 
 // =========================================================================
@@ -240,11 +242,13 @@ test('parseArcOutput: parses [arc] lines', () => {
   assert.equal(typeof result.add[0].ts, 'number');
 });
 
-test('parseArcOutput: skips [arc] with content 5 chars or fewer', () => {
+test('parseArcOutput: skips [arc] with content 15 chars or fewer', () => {
   // 5 chars - skipped
   assert.equal(parseArcOutput('[arc] Quest', []).add.length, 0);
-  // 6 chars - accepted
-  assert.equal(parseArcOutput('[arc] Quests', []).add.length, 1);
+  // 15 chars - skipped (boundary is content.length > 15)
+  assert.equal(parseArcOutput('[arc] Quest complete!', []).add.length, 0);
+  // 38 chars - accepted
+  assert.equal(parseArcOutput('[arc] She promised to return before winter.', []).add.length, 1);
 });
 
 test('parseArcOutput: resolves arc with sufficient Jaccard overlap', () => {
@@ -537,4 +541,70 @@ test('parseProfileOutput: trims whitespace from sections', () => {
   assert.ok(result !== null);
   // Content should be trimmed but not empty
   assert.ok(result.character_state.length > 0);
+});
+
+// =========================================================================
+// parseRelationshipDeltaResponse
+// =========================================================================
+
+test('parseRelationshipDeltaResponse: hyphenated subject is parsed correctly', () => {
+  const result = parseRelationshipDeltaResponse('Jean-Luc -> Bob: fond(high)');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].subject, 'Jean-Luc');
+  assert.equal(result[0].target, 'Bob');
+  assert.deepEqual(result[0].updates, [{ word: 'fond', magnitude: 'high' }]);
+  assert.deepEqual(result[0].removals, []);
+});
+
+test('parseRelationshipDeltaResponse: hyphenated subject with unicode arrow', () => {
+  const result = parseRelationshipDeltaResponse('Mary-Jane → Bob: warm(low), cautious(medium)');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].subject, 'Mary-Jane');
+  assert.equal(result[0].target, 'Bob');
+  assert.deepEqual(result[0].updates, [
+    { word: 'warm', magnitude: 'low' },
+    { word: 'cautious', magnitude: 'medium' },
+  ]);
+});
+
+test('parseRelationshipDeltaResponse: preserves multi-hyphen names and removals', () => {
+  const result = parseRelationshipDeltaResponse('Al-Haitham -> Kaveh: distant(high), !trusting');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].subject, 'Al-Haitham');
+  assert.equal(result[0].target, 'Kaveh');
+  assert.deepEqual(result[0].updates, [{ word: 'distant', magnitude: 'high' }]);
+  assert.deepEqual(result[0].removals, ['trusting']);
+});
+
+// =========================================================================
+// parseStateCardResponse
+// =========================================================================
+
+test('parseStateCardResponse: none/empty/! values clear stored fields', () => {
+  const result = parseStateCardResponse(
+    '[state:Kael:character] mood=calm | injuries=none | carried_items=!silver key | outfit_disguise=empty',
+  );
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.mood, 'calm');
+  // Clearing signals become empty strings so the ledger merge overwrites the
+  // previous value during the next save.
+  assert.equal(fields.injuries, '');
+  assert.equal(fields.carried_items, '');
+  assert.equal(fields.outfit_disguise, '');
+});
+
+test('parseStateCardResponse: clear-only entry is retained so the clear propagates', () => {
+  const result = parseStateCardResponse('[state:Kael:character] injuries=none');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.injuries, '');
+});
+
+test('parseStateCardResponse: unrelated noise values are still skipped', () => {
+  const result = parseStateCardResponse('[state:Kael:character] mood=unknown | active_goal=find the key');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.active_goal, 'find the key');
+  assert.equal('mood' in fields, false);
 });

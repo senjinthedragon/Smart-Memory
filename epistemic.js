@@ -37,6 +37,7 @@
  * saveEpistemicKnowledge           - persists entries for a character
  * clearEpistemicKnowledge          - removes all entries for a character
  * extractEpistemicKnowledge        - runs the extraction pass for the current scene
+ * extractAndPartitionGroupEpistemic - runs one extraction pass and partitions entries by subject for group members
  * injectEpistemicKnowledge         - pushes the knowledge block into the prompt; warn=true prompts budget growth
  * loadAndInjectEpistemicKnowledge  - restores and re-injects on chat load
  * resetEpistemicWarnFlag           - resets the per-load overflow warning flag; call on chat change
@@ -66,6 +67,7 @@ import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
+import { partitionEpistemicEntriesBySubject } from './memory-utils.js';
 
 // ---- Per-chat budget override -----------------------------------------------
 
@@ -241,6 +243,77 @@ function isEpistemicDuplicate(a, b, vectors) {
 // ---- Extraction -------------------------------------------------------------
 
 /**
+ * Formats the scene messages into the plain-text excerpt used by the model.
+ *
+ * @param {Object[]} sceneMessages
+ * @returns {string}
+ */
+function buildEpistemicSceneExcerpt(sceneMessages) {
+  return (sceneMessages ?? [])
+    .filter((m) => m.mes && !m.is_system)
+    .map((m) => `${m.name}: ${m.mes}`)
+    .join('\n\n');
+}
+
+/**
+ * Assigns id, timestamp, and source range to freshly parsed entries.
+ *
+ * @param {Object[]} entries
+ * @param {Object[]} sceneMessages
+ */
+function stampEpistemicEntries(entries, sceneMessages) {
+  const context = getContext();
+  const chatLen = context.chat?.length ?? 1;
+  const windowEnd = Math.max(0, chatLen - 2);
+  const windowStart = Math.max(0, windowEnd - (sceneMessages?.length ?? 0) + 1);
+  for (const entry of entries) {
+    entry.id = generateMemoryId();
+    entry.ts = Date.now();
+    entry.source_messages = [windowStart, windowEnd];
+  }
+}
+
+/**
+ * Fetches embeddings for the existing + incoming content strings in one batch.
+ * Returns null when embeddings are unavailable so callers fall back to Jaccard.
+ *
+ * @param {Object[]} existing
+ * @param {Object[]} parsed
+ * @returns {Promise<Map<string, number[]>|null>}
+ */
+async function fetchEpistemicEmbeddings(existing, parsed) {
+  try {
+    const texts = [...existing.map((e) => e.content), ...parsed.map((e) => e.content)];
+    if (texts.length === 0) return null;
+    return await getEmbeddingBatch(texts);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes incoming entries that duplicate an existing entry.
+ *
+ * @param {Object[]} parsed - Incoming entries.
+ * @param {Object[]} existing - Entries that survived retirement.
+ * @param {Map<string, number[]>|null} embeddings
+ * @returns {Object[]}
+ */
+function filterDuplicateEpistemicEntries(parsed, existing, embeddings) {
+  const newEntries = [];
+  for (const incoming of parsed) {
+    const incomingVec = embeddings?.get(incoming.content.trim()) ?? null;
+    const isDup = existing.some((ex) => {
+      const existingVec = embeddings?.get(ex.content.trim()) ?? null;
+      const vectors = incomingVec && existingVec ? [existingVec, incomingVec] : null;
+      return isEpistemicDuplicate(ex, incoming, vectors);
+    });
+    if (!isDup) newEntries.push(incoming);
+  }
+  return newEntries;
+}
+
+/**
  * Runs the epistemic extraction pass for a completed scene.
  *
  * Called at scene breaks only - not every extraction cycle. Epistemic facts are
@@ -264,11 +337,7 @@ export async function extractEpistemicKnowledge(
   const settings = extension_settings[MODULE_NAME];
 
   try {
-    const chatExcerpt = sceneMessages
-      .filter((m) => m.mes && !m.is_system)
-      .map((m) => `${m.name}: ${m.mes}`)
-      .join('\n\n');
-
+    const chatExcerpt = buildEpistemicSceneExcerpt(sceneMessages);
     if (!chatExcerpt.trim()) return 0;
 
     const participants = getSceneParticipants(sceneMessages);
@@ -309,38 +378,11 @@ export async function extractEpistemicKnowledge(
     }
 
     // Assign ids and source range.
-    const context = getContext();
-    const chatLen = context.chat?.length ?? 1;
-    const windowEnd = Math.max(0, chatLen - 2);
-    const windowStart = Math.max(0, windowEnd - sceneMessages.length + 1);
-    for (const entry of parsed) {
-      entry.id = generateMemoryId();
-      entry.ts = Date.now();
-      entry.source_messages = [windowStart, windowEnd];
-    }
+    stampEpistemicEntries(parsed, sceneMessages);
 
     // Fetch embeddings for all content strings in one batch when possible.
-    let embeddings = null;
-    try {
-      const texts = [...survivingExisting.map((e) => e.content), ...parsed.map((e) => e.content)];
-      if (texts.length > 0) {
-        embeddings = await getEmbeddingBatch(texts);
-      }
-    } catch {
-      // Embedding fetch failed - fall back to Jaccard inside isEpistemicDuplicate.
-    }
-
-    const newEntries = [];
-    for (let pi = 0; pi < parsed.length; pi++) {
-      const incoming = parsed[pi];
-      const incomingVec = embeddings?.get(incoming.content.trim()) ?? null;
-      const isDup = survivingExisting.some((ex) => {
-        const existingVec = embeddings?.get(ex.content.trim()) ?? null;
-        const vectors = incomingVec && existingVec ? [existingVec, incomingVec] : null;
-        return isEpistemicDuplicate(ex, incoming, vectors);
-      });
-      if (!isDup) newEntries.push(incoming);
-    }
+    const embeddings = await fetchEpistemicEmbeddings(survivingExisting, parsed);
+    const newEntries = filterDuplicateEpistemicEntries(parsed, survivingExisting, embeddings);
 
     if (newEntries.length === 0 && retiredCount === 0) {
       smLog('[SmartMemory] All epistemic candidates were duplicates of existing entries.');
@@ -354,6 +396,118 @@ export async function extractEpistemicKnowledge(
     return newEntries.length;
   } catch (err) {
     smLog('[SmartMemory] Epistemic extraction failed:', err.message);
+    return 0;
+  }
+}
+
+/**
+ * Runs one epistemic extraction pass for a group scene and partitions the
+ * resulting entries by subject.
+ *
+ * Group scenes contain several named characters in a single model response.
+ * Unlike the solo path - which stores every entry under one card key and
+ * filters by subject at injection time - this stores each character's entries
+ * in their own `extension_settings.characters[name].epistemic_knowledge` slot
+ * so every group member's perspective is preserved.
+ *
+ * Existing entries are combined for the prompt (with their member origin
+ * tracked) so `[retire] <n>` indices can be applied back to the right store.
+ *
+ * @param {Object[]} sceneMessages - Messages from the completed scene.
+ * @param {string[]} groupMemberNames - Active group members (storage keys).
+ * @returns {Promise<number>} Number of new entries added across all members.
+ */
+export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemberNames) {
+  if (!isEpistemicEnabled()) return 0;
+
+  const memberNames = [...new Set((groupMemberNames ?? []).filter(Boolean))];
+  if (memberNames.length === 0) return 0;
+
+  const settings = extension_settings[MODULE_NAME];
+
+  try {
+    const chatExcerpt = buildEpistemicSceneExcerpt(sceneMessages);
+    if (!chatExcerpt.trim()) return 0;
+
+    const sceneParticipants = getSceneParticipants(sceneMessages);
+    const participants = [...new Set([...sceneParticipants, ...memberNames])];
+
+    // Load every member's existing entries and remember where each came from.
+    const existingByMember = new Map();
+    const combinedExisting = [];
+    for (const name of memberNames) {
+      const entries = loadEpistemicKnowledge(name);
+      existingByMember.set(name, entries);
+      for (const entry of entries) combinedExisting.push({ entry, name });
+    }
+
+    const prompt = buildEpistemicExtractionPrompt(
+      chatExcerpt,
+      participants,
+      combinedExisting.map(({ entry }) => entry),
+    );
+
+    const response = await generateMemoryExtract(prompt, {
+      responseLength: settings.epistemic_response_length ?? 400,
+    });
+
+    smLog('[SmartMemory] Group epistemic raw response:', response);
+
+    if (!response || response.trim().toUpperCase() === 'NONE') return 0;
+
+    const retireIndices = parseEpistemicRetireIndices(response);
+    const retiredCount = retireIndices.size;
+
+    // Apply retire indices back to the member that owned each entry.
+    const survivingByMember = new Map(memberNames.map((name) => [name, []]));
+    combinedExisting.forEach(({ entry, name }, index) => {
+      if (!retireIndices.has(index + 1)) {
+        survivingByMember.get(name).push(entry);
+      }
+    });
+
+    const parsed = parseEpistemicResponse(response);
+    if (parsed.length === 0 && retiredCount === 0) {
+      smLog('[SmartMemory] Group epistemic extraction produced no parseable lines.');
+      return 0;
+    }
+
+    stampEpistemicEntries(parsed, sceneMessages);
+
+    const survivingAll = [...survivingByMember.values()].flat();
+    const embeddings = await fetchEpistemicEmbeddings(survivingAll, parsed);
+
+    const { grouped, skipped } = partitionEpistemicEntriesBySubject(parsed, memberNames);
+    if (skipped.length > 0) {
+      smLog(
+        `[SmartMemory] Group epistemic: skipped ${skipped.length} entries for non-member subjects.`,
+      );
+    }
+
+    let addedTotal = 0;
+    for (const name of memberNames) {
+      const original = existingByMember.get(name) ?? [];
+      const survivors = survivingByMember.get(name) ?? [];
+      const incoming = grouped.get(name) ?? [];
+      const newEntries = filterDuplicateEpistemicEntries(incoming, survivors, embeddings);
+      const changed = newEntries.length > 0 || survivors.length !== original.length;
+      if (changed) {
+        saveEpistemicKnowledge(name, [...survivors, ...newEntries]);
+      }
+      addedTotal += newEntries.length;
+    }
+
+    if (addedTotal === 0 && retiredCount === 0) {
+      smLog('[SmartMemory] Group epistemic: all candidates were duplicates.');
+      return 0;
+    }
+
+    smLog(
+      `[SmartMemory] Group epistemic: added ${addedTotal} new entries, retired ${retiredCount} across ${memberNames.length} members.`,
+    );
+    return addedTotal;
+  } catch (err) {
+    smLog('[SmartMemory] Group epistemic extraction failed:', err.message);
     return 0;
   }
 }
@@ -509,8 +663,8 @@ export function injectEpistemicKnowledge(
     setExtensionPrompt(
       PROMPT_KEY_EPISTEMIC,
       content,
-      settings.epistemic_position ?? extension_prompt_types.IN_CHAT,
-      settings.epistemic_depth ?? 1,
+      settings.epistemic_position ?? extension_prompt_types.IN_PROMPT,
+      settings.epistemic_depth ?? 0,
       false,
       settings.epistemic_role ?? extension_prompt_roles.SYSTEM,
     );

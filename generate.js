@@ -297,7 +297,7 @@ async function generateOllama(
  * @param {string} url
  * @returns {boolean}
  */
-function isLocalUrl(url) {
+export function isLocalUrl(url) {
   try {
     const { hostname } = new URL(url);
     // Strip brackets from IPv6 addresses (e.g. [::1] -> ::1)

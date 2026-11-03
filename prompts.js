@@ -347,23 +347,53 @@ ARC: ${arcContent}${sceneSection}${memSection}`
 
 /**
  * Assembles the continuity check prompt.
- * @param {string} establishedFacts - Combined summary + memories as a text block.
- * @param {string} latestResponse - The last AI message to check against the facts.
+ *
+ * The recent transcript is the ground truth. Baseline notes are explicitly
+ * described as lagging so the checker does not mistake normal story progression
+ * (moved location, used an item, learned something, time passing) for a
+ * contradiction. Only permanent properties are eligible, and the model must
+ * return strict JSON whose quotes can be verified against the source text.
+ *
+ * @param {string} establishedFacts - Combined summary + memories as a baseline text block.
+ * @param {string} recentTranscript - The turns preceding the latest response as [USER]/[Name] lines.
+ * @param {string} latestResponse - The last AI message to check.
  * @returns {string} The complete prompt string.
  */
-export function buildContinuityPrompt(establishedFacts, latestResponse) {
+export function buildContinuityPrompt(establishedFacts, recentTranscript, latestResponse) {
   return (
     NO_ACTION_PREAMBLE +
-    `[CONTINUITY CHECK - Do NOT roleplay. Identify contradictions only.]
+    `[CONTINUITY CHECK - Do NOT roleplay. Identify genuine permanent contradictions only.]
 
-ESTABLISHED FACTS (from memories and summary):
+You are auditing a roleplay for continuity errors. A false positive is far worse than a missed one: telling the story that a past event did not happen causes severe narrative drift. Be extremely conservative.
+
+RECENT TRANSCRIPT (ground truth - this is what actually happened in the story, in order):
+${recentTranscript || '(no recent transcript available)'}
+
+BASELINE NOTES (written earlier - often lagging or outdated, and they do NOT include recent turns):
 ${establishedFacts}
 
-LATEST STORY RESPONSE:
+LATEST STORY RESPONSE (the newest AI message):
 ${latestResponse}
 
 ---
-Does the latest response contradict or conflict with any established fact? List each contradiction precisely and briefly. If there are none, output: NONE`
+EVIDENCE RULES - follow these exactly:
+1. The RECENT TRANSCRIPT is ground truth for what happened in the story.
+2. BASELINE NOTES were written earlier, are often lagging or outdated, and do not include recent turns.
+3. If the latest response differs from a baseline note, assume the story PROGRESSED, unless the note describes a PERMANENT property that nothing in the transcript could have changed.
+4. NEVER flag: location changes, items gained/lost/used, injuries, emotions, plans, relationship shifts, newly learned information, time passing, or anything merely not visible in the transcript.
+5. ONLY flag permanent properties: character names, species/race, physical appearance, fixed backstory, hard world rules, or established permanent deaths.
+6. If you are unsure, output no contradiction. Silence is always preferred over a false positive.
+
+For every contradiction you report:
+- "fact" must be copied verbatim from the BASELINE NOTES.
+- "response_quote" must be copied verbatim from the LATEST STORY RESPONSE.
+- "category" must be exactly one of: permanent_trait, backstory, world_rule, death.
+- "why_not_progression" must explain why this is a permanent property rather than ordinary story progression.
+
+Output strict JSON and nothing else, in exactly this shape:
+{"contradictions":[{"fact":"...","response_quote":"...","category":"permanent_trait|backstory|world_rule|death","why_not_progression":"..."}]}
+If nothing qualifies, or if you are unsure, output exactly:
+{"contradictions":[]}`
   );
 }
 

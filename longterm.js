@@ -67,6 +67,7 @@ import {
   META_KEY,
   MAX_RETIRED_POOL,
 } from './constants.js';
+import { replaceTemplate } from './template-utils.js';
 import {
   applyGraphDefaults,
   loadCharacterEntityRegistry,
@@ -918,6 +919,8 @@ export async function consolidateMemories(characterName, force = false) {
  * @param {boolean} [updateTelemetry=false] - If true, increment retrieval_count for injected memories.
  *   Only pass true from the post-extraction path (one real AI response turn). All other callers
  *   (chat load, settings change, etc.) leave telemetry unchanged to avoid inflating the signal.
+ * @param {number|null} [budgetOverride=null] - Optional per-turn injection budget. Used instead
+ *   of the persisted longterm_inject_budget without writing the temporary value to settings.
  */
 /**
  * Determines how a memory should be handled during injection based on its
@@ -939,7 +942,11 @@ function shouldInjectMemory(memory, respondingChar) {
   return 'secondhand';
 }
 
-export async function injectMemories(characterName, updateTelemetry = false) {
+export async function injectMemories(
+  characterName,
+  updateTelemetry = false,
+  budgetOverride = null,
+) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.longterm_enabled || !characterName) {
@@ -966,7 +973,10 @@ export async function injectMemories(characterName, updateTelemetry = false) {
   // Trim to token budget using hybrid scoring when current-turn context is
   // available. On chat load (updateTelemetry=false) there is no "current turn"
   // to read entity mentions from, so plain utility scoring is used instead.
-  const budget = settings.longterm_inject_budget ?? 500;
+  // A per-turn adaptive budget may be supplied without mutating the persisted
+  // settings value. Falling back to settings keeps chat-load/settings paths
+  // on the user's configured budget.
+  const budget = budgetOverride ?? settings.longterm_inject_budget ?? 500;
   const fullTokens = estimateTokens(memories.map((m) => `- ${m.content}`).join('\n'));
   const protectedSet = new Set(
     selectProtectedMemories(memories, ['relationship', 'preference', 'fact']),
@@ -1103,7 +1113,7 @@ export async function injectMemories(characterName, updateTelemetry = false) {
     // When epistemic_secondhand_framing is false, non-witnessed memories are omitted.
   }
   const memoryText = memoryLines.join('\n');
-  const content = template.replace('{{memories}}', memoryText);
+  const content = replaceTemplate(template, '{{memories}}', memoryText);
 
   reportTierTrimStats(PROMPT_KEY_LONG, estimateTokens(content), fullTokens);
   setMacroContent(MACRO_NAMES.longterm, content);
@@ -1143,7 +1153,7 @@ export async function injectMemories(characterName, updateTelemetry = false) {
       return;
     }
     const triggeredText = triggeredLines.join('\n');
-    const triggeredContent = template.replace('{{memories}}', triggeredText);
+    const triggeredContent = replaceTemplate(template, '{{memories}}', triggeredText);
     setMacroContent(MACRO_NAMES.triggered, triggeredContent);
     if (isMacroActive(MACRO_NAMES.triggered)) {
       setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
@@ -1243,7 +1253,7 @@ export function injectRelationshipHistory(characterName, updateTelemetry = false
   if (lines.length === 0) return clear();
 
   const template = settings.relationships_template || 'Relationship history:\n{{relationships}}';
-  const content = template.replace('{{relationships}}', lines.join('\n'));
+  const content = replaceTemplate(template, '{{relationships}}', lines.join('\n'));
   reportTierTrimStats(PROMPT_KEY_RELATIONSHIPS, estimateTokens(content), fullTokens);
 
   setMacroContent(MACRO_NAMES.relationships, content);

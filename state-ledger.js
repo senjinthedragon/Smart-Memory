@@ -208,7 +208,8 @@ export async function clearStateLedger() {
  * against the recent messages, parses the response, and merges the results
  * into the stored ledger as sparse updates.
  *
- * @param {string|null} characterName - Card character name for LT registry lookup.
+ * @param {string|string[]|null} characterName - Card character name(s) for LT registry lookup.
+ *   Group chats pass every active member so entities are gathered across the whole group.
  * @param {Object[]} messages - Recent messages to extract state from.
  * @param {Function|null} [abortCheck] - Optional zero-arg function; if it returns true the write is skipped (chat switched).
  * @returns {Promise<number>} Number of entity cards updated.
@@ -225,7 +226,14 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
     if (!chatExcerpt.trim()) return 0;
 
     // Build entity list from both registries, filtered to types in scope.
-    const ltEntities = characterName ? loadCharacterEntityRegistry(characterName) : [];
+    // Group chats pass an array so entities from every active member are
+    // included instead of only the selected character.
+    const characterNames = Array.isArray(characterName)
+      ? characterName.filter(Boolean)
+      : characterName
+        ? [characterName]
+        : [];
+    const ltEntities = characterNames.flatMap((name) => loadCharacterEntityRegistry(name));
     const sessionEntities = loadSessionEntityRegistry();
     const seen = new Set();
     const entityList = [];
@@ -356,8 +364,8 @@ export function injectStateLedger(updateTelemetry = false) {
     setExtensionPrompt(
       PROMPT_KEY_STATE_LEDGER,
       content,
-      settings.state_ledger_position ?? extension_prompt_types.IN_CHAT,
-      settings.state_ledger_depth ?? 1,
+      settings.state_ledger_position ?? extension_prompt_types.IN_PROMPT,
+      settings.state_ledger_depth ?? 0,
       false,
       settings.state_ledger_role ?? extension_prompt_roles.SYSTEM,
     );

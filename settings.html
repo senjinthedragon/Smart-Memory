@@ -1511,19 +1511,20 @@
             </label>
           </div>
 
-          <div class="sm-block sm-profile-b-only" style="margin-top: 8px">
-            <label class="checkbox_label">
-              <input id="sm_auto_repair" type="checkbox" />
+          <div class="sm-block" style="margin-top: 8px">
+            <label for="sm_continuity_mode">
+              Continuity mode
               <span
-                >Auto-repair contradictions
-                <span class="sm-profile-tag">Profile B</span>
-                <span
-                  class="sm-info"
-                  data-tooltip="When contradictions are found, automatically generate a brief corrective note and inject it into the next AI response. Profile B only. Uses one extra model call per check."
-                  >ⓘ</span
-                ></span
+                class="sm-info"
+                data-tooltip="How to act on a detected contradiction. Notify only reports the issue without changing the story - recommended, because the checker only sees lagging baseline notes and can be wrong. Auto-repair queues a forward-only note for the next response that never retracts events already written."
+                >i</span
               >
             </label>
+            <select id="sm_continuity_mode" class="text_pole">
+              <option value="off">Off</option>
+              <option value="warn">Notify only (Recommended)</option>
+              <option value="repair">Auto-repair (forward-only note)</option>
+            </select>
           </div>
         </div>
       </details>

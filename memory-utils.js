@@ -34,12 +34,16 @@
  *                             accepts embedFn, lastTurnText, w5, and recentText in context
  * classifyTurn              - heuristic turn-type classifier (dialogue/action/transition/intimate)
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
+ * splitSummarySections      - splits a formatted short-term summary into numbered sections
+ * truncateSummaryToBudget   - trims earlier summary sections while preserving Current Moment and Next Beat
+ * partitionEpistemicEntriesBySubject - groups group-chat epistemic entries into per-character buckets
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
  * the embedFn parameter so tests can run under plain Node without loading extensions.js.
  */
 
 import { cosineSimilarity, jaccardSimilarity } from './similarity.js';
+import { estimateTokens } from './constants.js';
 
 function tokenSet(text) {
   return new Set((text || '').toLowerCase().split(/\s+/).filter(Boolean));
@@ -907,4 +911,190 @@ export function adaptiveBudgets(settings, turnType) {
   }
 
   return adjusted;
+}
+
+// ---- Summary section helpers ------------------------------------------------
+
+// Matches a numbered summary section header at the start of a line, e.g. "3. Key Events:".
+const SUMMARY_SECTION_RE = /^[ \t]*(\d+)\.\s/gm;
+
+/**
+ * Splits a formatted short-term summary into its numbered sections.
+ *
+ * Returns the text before the first section as `preamble` and one entry per
+ * numbered section. Any text that does not follow the numbered format keeps
+ * the whole input in `preamble` with an empty `sections` array.
+ *
+ * @param {string} summary
+ * @returns {{ preamble: string, sections: Array<{num: number, text: string}> }}
+ */
+export function splitSummarySections(summary) {
+  const text = String(summary ?? '');
+  const matches = [...text.matchAll(SUMMARY_SECTION_RE)];
+  if (matches.length === 0) return { preamble: text.trim(), sections: [] };
+
+  const preamble = text.slice(0, matches[0].index).trim();
+  const sections = matches.map((match, i) => {
+    const start = match.index ?? 0;
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
+    return { num: Number(match[1]), text: text.slice(start, end).trim() };
+  });
+  return { preamble, sections };
+}
+
+/**
+ * Truncates a plain string to a token budget, cutting from the end.
+ * Falls back to the original string when the budget is not a positive number.
+ *
+ * @param {string} text
+ * @param {number} budget
+ * @returns {string}
+ */
+function truncateTextTail(text, budget) {
+  if (!Number.isFinite(budget) || budget <= 0) return text;
+  if (estimateTokens(text) <= budget) return text;
+  const ratio = budget / estimateTokens(text);
+  const sliceAt = Math.max(1, Math.floor(text.length * ratio));
+  const boundary = text.lastIndexOf('.', sliceAt);
+  const cut = boundary > sliceAt * 0.8 ? boundary + 1 : sliceAt;
+  return `${text.slice(0, cut)} ... [truncated]`;
+}
+
+/**
+ * Head-truncates a numbered section so its most recent content survives.
+ * The section heading is preserved and a short marker is inserted.
+ *
+ * @param {{num: number, text: string}} section
+ * @param {number} maxTokens
+ * @returns {string}
+ */
+function headTruncateSection(section, maxTokens) {
+  if (!Number.isFinite(maxTokens) || maxTokens <= 0) return section.text;
+  if (estimateTokens(section.text) <= maxTokens) return section.text;
+
+  // Preserve the "N. Title:" heading. Sections without one get a generic header.
+  const headingMatch = section.text.match(/^\s*(\d+\.\s*[^:\n]*:)/);
+  const heading = headingMatch ? headingMatch[1] : `${section.num}. `;
+  const body = headingMatch
+    ? section.text.slice((headingMatch.index ?? 0) + heading.length)
+    : section.text;
+  const marker = ' ... [earlier content trimmed]\n';
+  const overhead = estimateTokens(heading + marker);
+  const bodyBudget = Math.max(1, Math.floor(maxTokens - overhead));
+  const ratio = Math.min(1, bodyBudget / Math.max(1, estimateTokens(body)));
+  let sliceAt = Math.max(1, Math.floor(body.length * ratio));
+  let tail = body.slice(body.length - sliceAt);
+
+  // Start at a line/sentence boundary when one is close to the cut point.
+  const lineBreak = tail.indexOf('\n');
+  if (lineBreak >= 0 && lineBreak < tail.length * 0.35) {
+    tail = tail.slice(lineBreak + 1);
+  } else {
+    const sentence = tail.indexOf('. ');
+    if (sentence >= 0 && sentence < tail.length * 0.35) {
+      tail = tail.slice(sentence + 2);
+    }
+  }
+
+  return `${heading}${marker}${tail}`.trim();
+}
+
+/**
+ * Truncates a formatted short-term summary while preserving the most valuable
+ * tail sections - Current Moment (8) and Next Beat (9). Earlier narrative
+ * sections are kept in priority order (Key Events first), and Section 3 is
+ * head-truncated when only a partial section fits.
+ *
+ * When no numbered sections can be parsed, falls back to end truncation.
+ *
+ * @param {string} summary
+ * @param {number} budget - Maximum estimated tokens.
+ * @returns {string}
+ */
+export function truncateSummaryToBudget(summary, budget) {
+  const text = String(summary ?? '');
+  const maxTokens = Number(budget);
+  if (!Number.isFinite(maxTokens) || maxTokens <= 0) return text;
+  if (estimateTokens(text) <= maxTokens) return text;
+
+  const { preamble, sections } = splitSummarySections(text);
+  if (sections.length === 0) return truncateTextTail(text, maxTokens);
+
+  // Sections 8 and 9 are the anchors the model needs to continue the scene.
+  const tailSections = sections.filter((s) => s.num >= 8);
+  if (tailSections.length === 0) return truncateTextTail(text, maxTokens);
+
+  const tailText = tailSections.map((s) => s.text).join('\n\n');
+  const tailTokens = estimateTokens(tailText);
+  const marker = '... [earlier summary sections trimmed]';
+  const markerTokens = estimateTokens(marker);
+
+  // If the anchor sections alone exceed the budget, keep them intact rather
+  // than cutting the Current Moment. They are the highest-value content.
+  if (tailTokens >= maxTokens) return tailText;
+
+  let remaining = maxTokens - tailTokens - markerTokens;
+
+  // Earlier sections retained in priority order. Event chronology (3) matters
+  // most; scene dressing (1) is the first thing to sacrifice.
+  const priority = [3, 6, 5, 2, 4, 7, 1];
+  const keptHead = new Map();
+  for (const num of priority) {
+    const section = sections.find((s) => s.num === num);
+    if (!section) continue;
+    const sectionTokens = estimateTokens(section.text);
+    if (sectionTokens <= remaining) {
+      keptHead.set(num, section.text);
+      remaining -= sectionTokens;
+    } else if (num === 3 && remaining > 40) {
+      keptHead.set(num, headTruncateSection(section, remaining));
+      remaining = 0;
+    }
+  }
+
+  const headText = [...keptHead.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, value]) => value)
+    .join('\n\n');
+  const trimmedHead = headText ? `${headText}\n\n${marker}` : marker;
+  return `${preamble ? `${preamble}\n\n` : ''}${trimmedHead}\n\n${tailText}`;
+}
+
+/**
+ * Partitions parsed epistemic entries into per-character buckets.
+ *
+ * Group extraction returns entries for several characters in one response.
+ * Each entry is assigned to the group member whose name matches its subject
+ * (case-insensitive). Entries whose subject is not a group member are
+ * returned in `skipped` so the caller can log them rather than storing them
+ * under an arbitrary key.
+ *
+ * @param {Array<{subject?: string}>} entries
+ * @param {string[]} memberNames
+ * @returns {{ grouped: Map<string, Array<Object>>, skipped: Array<Object> }}
+ */
+export function partitionEpistemicEntriesBySubject(entries, memberNames) {
+  const canonical = new Map();
+  for (const name of memberNames ?? []) {
+    if (!name) continue;
+    canonical.set(String(name).toLowerCase(), name);
+  }
+
+  const grouped = new Map();
+  for (const name of canonical.values()) grouped.set(name, []);
+
+  const skipped = [];
+  for (const entry of entries ?? []) {
+    const subject = String(entry?.subject ?? '')
+      .trim()
+      .toLowerCase();
+    const name = canonical.get(subject);
+    if (!name) {
+      skipped.push(entry);
+      continue;
+    }
+    grouped.get(name).push({ ...entry, subject: name });
+  }
+
+  return { grouped, skipped };
 }
