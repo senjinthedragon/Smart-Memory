@@ -297,6 +297,8 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
   if (!settings.session_enabled) return 0;
 
   try {
+    if (abortCheck?.()) return 0;
+
     const chatHistory = recentMessages
       .filter((m) => m.mes && !m.is_system)
       .map((m) => `${m.name}: ${m.mes}`)
@@ -324,10 +326,12 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
     const longtermText =
       longtermMemories.length > 0 ? formatMemoriesForPrompt(longtermMemories.slice(0, 15)) : '';
 
+    if (abortCheck?.()) return 0;
     const response = await generateMemoryExtract(
       buildSessionExtractionPrompt(chatHistory, existingText, longtermText),
       { responseLength: settings.session_response_length ?? 500 },
     );
+    if (abortCheck?.()) return 0;
 
     smLog('[SmartMemory] Session extraction response:', response);
 
@@ -338,6 +342,7 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
       superseded: supersessionMap,
       confirmed: confirmedIds,
     } = await verifySessionCandidates(parseSessionOutput(response), existing);
+    if (abortCheck?.()) return 0;
     if (incoming.length === 0) return 0;
 
     // Tag each new memory with the source message range so users can jump back
@@ -352,6 +357,7 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
 
     const max = settings.session_max_memories ?? 30;
     const merged = await deduplicateSession(existing, incoming, max);
+    if (abortCheck?.()) return 0;
 
     // Apply supersession links. For each candidate that supersedes an existing
     // memory: mark the old memory as retired (superseded_by + valid_to) and
@@ -407,6 +413,7 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
     const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
     if (getHardwareProfile() === 'b' || settings.longterm_triggers_enabled) {
       for (const mem of finalActive) {
+        if (abortCheck?.()) return 0;
         if (existingKeys.has(`${mem.type}|${mem.content}`)) continue;
         if (Array.isArray(mem.triggers) && mem.triggers.length > 0) continue;
         try {
@@ -414,6 +421,7 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
           const triggerResponse = await generateMemoryExtract(triggerPrompt, {
             responseLength: 60,
           });
+          if (abortCheck?.()) return 0;
           const raw = parseTriggerResponse(triggerResponse, mem.content);
           mem.triggers = filterTriggersByFrequency(raw, finalActive);
           smLog(
@@ -440,7 +448,8 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
     // than waiting for the next consolidation cycle.
     if (entityRegistry.length > 0) {
       reconcileEntityRegistry(entityRegistry, finalActive);
-      if (!abortCheck?.()) await saveSessionEntityRegistry(entityRegistry);
+      if (abortCheck?.()) return 0;
+      await saveSessionEntityRegistry(entityRegistry);
     }
 
     // Newly retired active memories move to the retired pool.

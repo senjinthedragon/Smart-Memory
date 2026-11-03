@@ -44,6 +44,8 @@
  * sameGroupId               - null-safe, string-coerced group-id comparison
  * safeStorageKey            - guards special object keys (__proto__, constructor, prototype)
  * escapeHtml                - escapes a value for safe HTML text/attribute interpolation
+ * computeSourceRange        - resolves the real chat range covered by a set of extraction-window messages
+ * memorySupportedAfterRollback - conservative rollback predicate: keeps missing/incomplete/other-chat provenance
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
  * the embedFn parameter so tests can run under plain Node without loading extensions.js.
@@ -1441,4 +1443,77 @@ export function bumpOperationRevision() {
  */
 export function getOperationRevision() {
   return operationRevision;
+}
+
+/**
+ * Resolves the real chat range covered by a set of extraction-window messages.
+ *
+ * Extraction windows can be sparse: group chats pass a per-character FILTERED
+ * array, so the window's chat indices cannot be derived from its length. Each
+ * message is located by identity (`chat.indexOf(m)`); when some messages were
+ * cloned or replaced they cannot be found, and the resulting min/max would be
+ * too narrow to faithfully bracket the window. `complete` records whether every
+ * message was located so callers can preserve provenance conservatively.
+ *
+ * @param {Array<object>} messages
+ * @param {Array<object>} chat
+ * @returns {{start: number, end: number, complete: boolean}}
+ *   start/end are the min/max real indices found; complete is true only when
+ *   EVERY message was located (so the range faithfully brackets the window).
+ */
+export function computeSourceRange(messages, chat) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { start: 0, end: 0, complete: false };
+  }
+
+  const found = [];
+  for (const m of messages) {
+    const idx = Array.isArray(chat) ? chat.indexOf(m) : -1;
+    if (idx >= 0) found.push(idx);
+  }
+
+  const complete = found.length === messages.length && found.length > 0;
+  if (found.length > 0) {
+    return { start: Math.min(...found), end: Math.max(...found), complete };
+  }
+  return { start: 0, end: 0, complete: false };
+}
+
+/**
+ * Returns true when a stored memory's support survives a rollback to
+ * targetMsgIndex. Conservative by design: when provenance is missing,
+ * incomplete, or belongs to another chat, the memory is KEPT (returns true).
+ * Only a memory whose every recorded source range starts after the rollback
+ * point - and whose provenance is otherwise certain - is considered unsupported.
+ *
+ * @param {object} mem
+ * @param {number} targetMsgIndex
+ * @param {string|null} currentChatId
+ * @returns {boolean}
+ */
+export function memorySupportedAfterRollback(mem, targetMsgIndex, currentChatId) {
+  const ranges = mem?.source_messages;
+  if (!Array.isArray(ranges) || ranges.length === 0) return true;
+
+  // Only prune memories whose provenance explicitly records THIS chat. If the
+  // memory has no chat id, or this context has none, or they differ, it cannot
+  // be safely attributed to the discarded branch, so it is kept.
+  if (
+    mem?.source_chat_id == null ||
+    currentChatId == null ||
+    mem.source_chat_id !== currentChatId
+  ) {
+    return true;
+  }
+
+  // Partial lookup (cloned/replaced messages) yields a range that does not
+  // faithfully bracket the window, so treat the memory as uncertain and keep it.
+  if (mem?.source_incomplete === true) return true;
+
+  const starts = ranges
+    .map((range) => (Array.isArray(range) ? range[0] : null))
+    .filter((start) => Number.isInteger(start));
+  if (starts.length === 0) return true;
+
+  return Math.min(...starts) <= targetMsgIndex;
 }

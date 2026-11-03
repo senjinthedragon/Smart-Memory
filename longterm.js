@@ -102,6 +102,8 @@ import {
   filterTriggersByFrequency,
   sameGroupId,
   safeStorageKey,
+  computeSourceRange,
+  memorySupportedAfterRollback,
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
@@ -432,11 +434,12 @@ export function clearRelationshipHistory(characterName) {
 }
 
 /**
- * Returns true when a memory is attributable to the discarded branch: it has at
- * least one source range, its earliest source start index lies after the
- * rollback point, and it was sourced from the current chat (so a same-named
- * character in another chat is never affected). Memories with no source range
- * are treated as coming from an unknown/older branch and preserved.
+ * Returns true when a memory is attributable to the discarded branch and should
+ * be pruned. Delegates to the conservative predicate in memory-utils.js, which
+ * keeps a memory whenever its provenance is missing, incomplete (a partial
+ * message lookup), belongs to another chat, or has no usable integer range.
+ * Only a memory whose earliest source start lies after the rollback point - and
+ * whose provenance is otherwise certain - is pruned.
  *
  * @param {Object} memory
  * @param {number} targetMsgIndex - Highest chat index whose memories should survive.
@@ -444,14 +447,7 @@ export function clearRelationshipHistory(characterName) {
  * @returns {boolean}
  */
 function isMemoryAfterRollback(memory, targetMsgIndex, currentChatId) {
-  const ranges = memory?.source_messages;
-  if (!Array.isArray(ranges) || ranges.length === 0) return false;
-  const starts = ranges
-    .map((range) => (Array.isArray(range) ? range[0] : null))
-    .filter((start) => Number.isInteger(start));
-  if (starts.length === 0) return false;
-  if (Math.min(...starts) <= targetMsgIndex) return false;
-  return (memory.source_chat_id ?? null) === currentChatId;
+  return !memorySupportedAfterRollback(memory, targetMsgIndex, currentChatId);
 }
 
 /**
@@ -712,27 +708,17 @@ export async function extractAndStoreMemories(
     // can jump back to the passage that prompted the extraction.
     const context = getContext();
     const chat = context.chat ?? [];
-    // Locate the ACTUAL chat indices of the messages that were extracted. Group
+    // Resolve the ACTUAL chat indices of the messages that were extracted. Group
     // chats pass a per-character FILTERED array to this function, so the indices
-    // are sparse and cannot be derived from recentMessages.length.
-    const indices = [];
-    for (const m of recentMessages) {
-      const idx = chat.indexOf(m);
-      if (idx >= 0) indices.push(idx);
-    }
-    let windowStart;
-    let windowEnd;
-    if (indices.length > 0) {
-      windowStart = Math.min(...indices);
-      windowEnd = Math.max(...indices);
-    } else {
-      // Fallback: message objects were cloned/replaced and cannot be located.
-      // Use the conservative contiguous estimate, but never claim a range narrower
-      // than the most recent surviving turn.
-      const chatLen = chat.length || 1;
-      windowEnd = Math.max(0, chatLen - 2);
-      windowStart = Math.max(0, windowEnd - recentMessages.length + 1);
-    }
+    // are sparse and cannot be derived from recentMessages.length. `complete` is
+    // only true when EVERY window message was located; a partial lookup (cloned
+    // or replaced message objects) is recorded as incomplete so the rollback
+    // pruner keeps the memory conservatively.
+    const {
+      start: windowStart,
+      end: windowEnd,
+      complete,
+    } = computeSourceRange(recentMessages, chat);
     const sourceChatId = getCurrentChatId() ?? null;
     // Derive the characters present in this extraction window so the injection
     // path can downgrade memories the responding character did not witness.
@@ -740,6 +726,7 @@ export async function extractAndStoreMemories(
     for (const mem of newMemories) {
       mem.source_messages = [[windowStart, windowEnd]];
       mem.source_chat_id = sourceChatId;
+      mem.source_incomplete = !complete; // preserve conservatively on rollback
       mem.witnessed_by = witnessedBy;
     }
 
@@ -1092,29 +1079,51 @@ export async function consolidateMemories(characterName, force = false, abortChe
       );
       if (abortCheck?.()) return totalRemoved;
 
-      // Carry source provenance forward: for each reconciled entry that matches
-      // a pre-consolidation memory by ID, inherit its source_messages and
-      // source_chat_id. Synthesized composite entries get the most recent range
-      // from the unprocessed batch they were derived from.
+      // Carry source provenance forward. A reconciled entry that matches a
+      // pre-consolidation memory by ID inherits that memory's ranges. A
+      // synthesized composite has no single source, so it inherits the UNION of
+      // every contributing range from the type's inputs - keeping only the most
+      // recent range would discard older support and let the rollback pruner
+      // delete the entry even though earlier supporting messages survive. Any
+      // contributor marked incomplete (or contributors drawn from different
+      // chats) makes the merged entry incomplete, so it is kept conservatively.
       const allInputs = [...base, ...unprocessed];
-      const mostRecentSource = unprocessed.reduce((best, m) => {
-        const ranges = m.source_messages;
-        if (!Array.isArray(ranges) || ranges.length === 0) return best;
-        const last = ranges[ranges.length - 1];
-        return !best || last[1] > best[1] ? last : best;
-      }, null);
-      const mostRecentChatId =
-        unprocessed.find((m) => Array.isArray(m.source_messages) && m.source_messages.length > 0)
-          ?.source_chat_id ?? null;
+      const unionSourceRanges = (contributors) => {
+        const ranges = [];
+        const seenRanges = new Set();
+        const chatIdByKey = new Map();
+        let incomplete = false;
+        for (const mem of contributors) {
+          if (!mem) continue;
+          if (mem.source_incomplete === true) incomplete = true;
+          if (mem.source_chat_id != null && !chatIdByKey.has(String(mem.source_chat_id))) {
+            chatIdByKey.set(String(mem.source_chat_id), mem.source_chat_id);
+          }
+          const list = Array.isArray(mem.source_messages) ? mem.source_messages : [];
+          for (const range of list) {
+            if (!Array.isArray(range)) continue;
+            const [start, end] = range;
+            if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
+            const key = `${start}:${end}`;
+            if (seenRanges.has(key)) continue;
+            seenRanges.add(key);
+            ranges.push([start, end]);
+          }
+        }
+        // Ambiguous provenance across chats must not cause a deletion.
+        if (chatIdByKey.size > 1) incomplete = true;
+        const chatId = chatIdByKey.size === 1 ? [...chatIdByKey.values()][0] : null;
+        return { ranges, incomplete, chatId };
+      };
       for (const entry of reconciledType) {
         const match = allInputs.find((m) => m.id === entry.id);
-        if (match && Array.isArray(match.source_messages) && match.source_messages.length > 0) {
-          entry.source_messages = match.source_messages;
-          entry.source_chat_id = match.source_chat_id ?? null;
-        } else if (!entry.source_messages?.length && mostRecentSource) {
-          entry.source_messages = [mostRecentSource];
-          entry.source_chat_id = mostRecentChatId;
+        const contributors = match ? [match] : allInputs;
+        const { ranges, incomplete, chatId } = unionSourceRanges(contributors);
+        if (ranges.length > 0) {
+          entry.source_messages = ranges;
+          entry.source_chat_id = chatId;
         }
+        if (incomplete) entry.source_incomplete = true;
       }
 
       // Replace this type's entries. Other types are untouched.

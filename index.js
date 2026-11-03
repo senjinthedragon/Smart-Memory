@@ -188,6 +188,16 @@ let generationInProgress = false;
 // so extraction can resume instead of being suppressed forever.
 let generationStartTime = 0;
 
+// Timestamp of the most recent GENERATION_STARTED (type='normal'). Unlike
+// generationStartTime, this is never reset, so terminal handlers can reject a
+// stale GENERATION_ENDED/GENERATION_STOPPED that arrives within a tiny grace
+// window of a brand-new generation. A generation cannot legitimately finish
+// within milliseconds of starting, so this is a safe best-effort heuristic.
+// Host generation events carry no generation id, so exact correlation is not
+// possible; the token-scoped watchdog plus this timestamp are the available
+// guards.
+let lastGenerationStartAt = 0;
+
 // Timer that force-clears generationInProgress when no terminal generation event
 // arrives. The flag is normally cleared by MESSAGE_RECEIVED or by the terminal
 // GENERATION_STOPPED/GENERATION_ENDED events, but a generation that is aborted or
@@ -1146,9 +1156,12 @@ async function onCharacterMessageRendered(messageId, type) {
 // into one deferred run ensures the context is stable before we act on it.
 let chatChangedTimer = null;
 
-// Incremented each time onChatChangedImpl starts. Async callbacks (recap, extraction)
-// capture this value and bail out if it has changed by the time they resolve - prevents
-// a slow operation from a previous chat writing into a different chat's metadata.
+// Incremented synchronously by onChatChanged at event receipt. Async callbacks
+// (recap, extraction) capture this value and bail out if it has changed by the
+// time they resolve - prevents a slow operation from a previous chat writing
+// into a different chat's metadata. Bumping synchronously (rather than after the
+// debounce in onChatChangedImpl) ensures work from the old chat is invalidated
+// immediately instead of during the context-stabilization window.
 let chatLoadId = 0;
 
 // Sentinel thrown inside the extraction try/finally when a chat switch is detected
@@ -1156,6 +1169,17 @@ let chatLoadId = 0;
 const CHAT_SWITCHED = Symbol('chat-switched');
 
 function onChatChanged() {
+  // Invalidate all in-flight work SYNCHRONOUSLY at event receipt, before the
+  // debounced onChatChangedImpl() runs. The debounce exists only so the host can
+  // settle context (groupId, chatMetadata) before the heavier UI/load
+  // restoration; it must not delay invalidation, or tasks from the old chat
+  // would still observe the "current" revision/load-id during the 100ms window
+  // and could write or inject stale content.
+  ++chatLoadId;
+  bumpOperationRevision();
+  abortCurrentMemoryGeneration();
+  abortEmbeddingRequests();
+
   // A chat switch ends any generation in this context. Clear the flag
   // immediately so a stuck value cannot suppress extraction in the new chat.
   generationInProgress = false;
@@ -1171,9 +1195,11 @@ function onChatChanged() {
  * an away recap if the user has been gone longer than the configured threshold.
  */
 async function onChatChangedImpl() {
-  ++chatLoadId;
-  // Invalidate any in-flight background task from the previous chat/branch.
-  bumpOperationRevision();
+  // NOTE: chatLoadId/operationRevision were already bumped and any in-flight
+  // generation/embedding aborts issued synchronously in onChatChanged(), at
+  // event receipt. Do not invalidate again here: doing so would double-count
+  // the revision for a single chat change and would delay invalidation until
+  // after the debounce.
 
   // Reset per-load flags so warnings and trim indicators start fresh for the new chat.
   resetEpistemicWarnFlag();
@@ -1197,11 +1223,10 @@ async function onChatChangedImpl() {
   continuityCheckRunning = false;
   recapSuppressed = false;
   catchUpCancelled = true;
-  // Cancel any in-flight Ollama/OpenAI memory generation from the previous
-  // chat. Without this, the old chat's memory call can finish after the switch
-  // and compete with the new chat's generation for the same model instance.
-  abortCurrentMemoryGeneration();
-  abortEmbeddingRequests();
+  // Aborts for any in-flight Ollama/OpenAI memory generation and embedding
+  // requests from the previous chat were already issued synchronously in
+  // onChatChanged(), so the old chat's memory call cannot compete with the new
+  // chat's generation for the same model instance.
   stopActivityLoader(activeRecapHandle);
   activeRecapHandle = null;
   sceneMessageBuffer = [];
@@ -2257,6 +2282,7 @@ jQuery(async function () {
     if (type === 'normal') {
       generationInProgress = true;
       generationStartTime = Date.now();
+      lastGenerationStartAt = generationStartTime;
       startGenerationWatchdog();
       $('#sm_recap_overlay').remove();
       recapOverlayChatMeta = null;
@@ -2279,12 +2305,21 @@ jQuery(async function () {
   // generation is actually in progress so an uncorrelated late event cannot
   // disturb a gate that is already clear.
   eventSource.on(event_types.GENERATION_STOPPED, () => {
+    // Host generation events carry no generation id, so a terminal event from an
+    // old generation cannot be perfectly correlated with the gate's owner. As a
+    // best-effort guard, ignore a terminal event that arrives within a tiny
+    // grace window of the most recent start: a generation cannot legitimately
+    // finish that quickly, so it must belong to an older, already-finished
+    // generation and must not clear the newer generation's gate.
+    if (Date.now() - lastGenerationStartAt < 150) return;
     if (generationInProgress) {
       generationInProgress = false;
       clearGenerationWatchdog();
     }
   });
   eventSource.on(event_types.GENERATION_ENDED, () => {
+    // Same best-effort grace-window guard as GENERATION_STOPPED above.
+    if (Date.now() - lastGenerationStartAt < 150) return;
     if (generationInProgress) {
       generationInProgress = false;
       clearGenerationWatchdog();

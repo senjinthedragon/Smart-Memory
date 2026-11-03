@@ -14,9 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pipelines (long-term extraction and consolidation, session, arc, state-ledger,
   epistemic, continuity, and profile extraction, plus canon generation, and the
   full catch-up routine) abort before any write when a chat switch, swipe, edit,
-  or delete changes the branch. On rollback, chat-scoped state is restored and
+  or delete changes the branch. Chat changes invalidate synchronously at event
+  receipt (revision, load-id, and active request aborts) before the debounced
+  UI/load restoration runs. On rollback, chat-scoped state is restored and
   persistent long-term memories whose real source range lies after the rollback
-  point (for the current chat) are pruned.
+  point (for the current chat) are pruned. Provenance is conservative:
+  memories with missing, incomplete, or other-chat provenance are kept.
   _Limitation:_ cancellation is transport-enforced for Ollama and
   OpenAI-compatible sources and for embeddings; main-API, WebLLM, and
   connection-profile generation remain host-managed, so for those the revision

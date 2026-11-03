@@ -43,6 +43,7 @@ import {
   MODULE_NAME,
   META_KEY,
   PROMPT_KEY_LONG,
+  PROMPT_KEY_TRIGGERED,
   PROMPT_KEY_SESSION,
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
@@ -127,7 +128,12 @@ import {
   runStateCardExtraction,
 } from './state-ledger.js';
 import { generateProfiles, injectProfiles, clearProfiles, loadProfiles } from './profiles.js';
-import { clearUnifiedSlot, injectUnified, maybeInjectUnified } from './unified-inject.js';
+import {
+  clearUnifiedSlot,
+  injectUnified,
+  maybeInjectUnified,
+  invalidateUnifiedCache,
+} from './unified-inject.js';
 import { getTierHWStats, clearTierStats } from './trim-stats.js';
 import { showMemoryGraph } from './graph.js';
 import {
@@ -439,6 +445,21 @@ async function reinjectAfterBudgetChange(characterName) {
   injectStateLedger();
   maybeInjectUnified();
   updateTokenDisplay();
+}
+
+/**
+ * Clears a single prompt slot after an injector resumed following cancellation.
+ * Every tier's inject function writes its slot through setExtensionPrompt, so
+ * clearing means writing an empty NONE-position prompt and invalidating the
+ * unified-injection cache that mirrors the tier content. Used by the catch-up
+ * routine when a chat switch lands during an injector's internal await and the
+ * injector then writes stale content into the newly-active chat.
+ *
+ * @param {string} promptKey - A PROMPT_KEY_* constant identifying the tier slot.
+ */
+function clearTierPrompt(promptKey) {
+  setExtensionPrompt(promptKey, '', extension_prompt_types.NONE, 0);
+  invalidateUnifiedCache(promptKey);
 }
 
 // Minimum budget any tier will be reduced to during auto-tune, and the headroom
@@ -2649,21 +2670,42 @@ export function bindSettingsUI(ctrl) {
         // actually stored, not just what was injected before catch-up started.
         // Wrap with .catch so an embedding failure here does not abort the
         // entire catch-up run via the outer catch block.
-        if (settings.longterm_enabled && characterName && !catchUpCancelled()) {
-          await injectMemories(characterName).catch((err) => {
-            console.error('[SmartMemory] Catch-up inject long-term error:', err);
-          });
-        }
-        if (settings.session_enabled && !catchUpCancelled()) {
-          await injectSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Catch-up inject session error:', err);
-          });
-        }
-        if (settings.arcs_enabled && !catchUpCancelled()) {
-          injectArcs();
-        }
-        if (settings.relationships_enabled && !catchUpCancelled()) {
-          injectRelationshipHistory(characterName);
+        //
+        // injectMemories/injectSessionMemories await embedding-backed
+        // prioritisation internally, so a chat switch during that await lets
+        // them write the previous chat's content into the newly-active chat's
+        // slots. Re-check catchUpCancelled() after each awaited injector, clear
+        // the tier slots it may have written, and abort the rest of this batch.
+        reinjectChunk: {
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.longterm_enabled && characterName) {
+            await injectMemories(characterName).catch((err) => {
+              console.error('[SmartMemory] Catch-up inject long-term error:', err);
+            });
+            if (catchUpCancelled()) {
+              clearTierPrompt(PROMPT_KEY_LONG);
+              clearTierPrompt(PROMPT_KEY_TRIGGERED);
+              break reinjectChunk;
+            }
+          }
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.session_enabled) {
+            await injectSessionMemories().catch((err) => {
+              console.error('[SmartMemory] Catch-up inject session error:', err);
+            });
+            if (catchUpCancelled()) {
+              clearTierPrompt(PROMPT_KEY_SESSION);
+              break reinjectChunk;
+            }
+          }
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.arcs_enabled) {
+            injectArcs();
+          }
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.relationships_enabled) {
+            injectRelationshipHistory(characterName);
+          }
         }
 
         // Advance lastExtractCutoff so the normal extraction window starts from
@@ -2877,29 +2919,54 @@ export function bindSettingsUI(ctrl) {
       // character memories into the now-active chat would overwrite the new
       // chat's slots. Partial extraction results are already persisted.
       if (!catchUpCancelled()) {
-        await injectMemories(characterName);
-        injectRelationshipHistory(characterName);
-        injectSessionMemories();
-        injectSceneHistory();
-        injectArcs();
-        injectStateLedger();
-        // Reset the warn flag so the catch-up final inject can prompt if needed,
-        // then pass warn=true so a single exact-fit dialog fires if the full list
-        // exceeds the current budget.
-        resetEpistemicWarnFlag();
-        injectEpistemicKnowledge(characterName, characterName, false, true, true);
-        injectProfiles(characterName);
-        updateEntityPanel(characterName);
-        updateLongTermUI(characterName);
-        updateRelationshipHistoryUI(characterName);
-        updateEpistemicUI(characterName);
-        updateSessionUI();
-        updateScenesUI();
-        updateArcsUI();
-        updateProfilesUI(loadProfiles(characterName));
-        maybeInjectUnified();
-        updateTokenDisplay();
-        saveSettingsDebounced();
+        finalReinject: {
+          if (catchUpCancelled()) break finalReinject;
+          await injectMemories(characterName);
+          // injectMemories awaits embedding-backed prioritisation internally,
+          // so a chat switch during that await lets it write the previous
+          // chat's content into the new chat's slots. Clear the tier and abort
+          // the rest of the reinjection if that happened.
+          if (catchUpCancelled()) {
+            clearTierPrompt(PROMPT_KEY_LONG);
+            clearTierPrompt(PROMPT_KEY_TRIGGERED);
+            break finalReinject;
+          }
+          if (catchUpCancelled()) break finalReinject;
+          injectRelationshipHistory(characterName);
+          if (catchUpCancelled()) break finalReinject;
+          // Await the session injector so a late write cannot land after the
+          // cancellation check below (it awaits embeddings internally too).
+          await injectSessionMemories();
+          if (catchUpCancelled()) {
+            clearTierPrompt(PROMPT_KEY_SESSION);
+            break finalReinject;
+          }
+          if (catchUpCancelled()) break finalReinject;
+          injectSceneHistory();
+          if (catchUpCancelled()) break finalReinject;
+          injectArcs();
+          if (catchUpCancelled()) break finalReinject;
+          injectStateLedger();
+          if (catchUpCancelled()) break finalReinject;
+          // Reset the warn flag so the catch-up final inject can prompt if needed,
+          // then pass warn=true so a single exact-fit dialog fires if the full list
+          // exceeds the current budget.
+          resetEpistemicWarnFlag();
+          injectEpistemicKnowledge(characterName, characterName, false, true, true);
+          if (catchUpCancelled()) break finalReinject;
+          injectProfiles(characterName);
+          updateEntityPanel(characterName);
+          updateLongTermUI(characterName);
+          updateRelationshipHistoryUI(characterName);
+          updateEpistemicUI(characterName);
+          updateSessionUI();
+          updateScenesUI();
+          updateArcsUI();
+          updateProfilesUI(loadProfiles(characterName));
+          maybeInjectUnified();
+          updateTokenDisplay();
+          saveSettingsDebounced();
+        }
       }
 
       if (catchUpCancelled()) {

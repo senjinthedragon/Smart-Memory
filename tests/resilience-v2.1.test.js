@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateTokens } from '../constants.js';
 import { migrateLegacyCharacterKeys } from '../settings-migration.js';
+import { computeSourceRange, memorySupportedAfterRollback } from '../memory-utils.js';
 import {
   mergeStateCardFields,
   pruneStateLedger,
@@ -113,4 +114,39 @@ test('migrateLegacyCharacterKeys: does not overwrite an existing NUL key and is 
 test('migrateLegacyCharacterKeys: tolerates missing characters map', () => {
   assert.equal(migrateLegacyCharacterKeys({}), false);
   assert.equal(migrateLegacyCharacterKeys(null), false);
+});
+
+test('computeSourceRange: reports real indices and completeness', () => {
+  const a = { mes: 'a' };
+  const b = { mes: 'b' };
+  const chat = [{ mes: 'x' }, a, { mes: 'y' }, b];
+  assert.deepEqual(computeSourceRange([a, b], chat), { start: 1, end: 3, complete: true });
+  // Partial lookup (one message cloned / not present) => incomplete.
+  const c = { mes: 'c' };
+  assert.deepEqual(computeSourceRange([a, c], chat), { start: 1, end: 1, complete: false });
+  // No messages or none locatable.
+  assert.deepEqual(computeSourceRange([], chat), { start: 0, end: 0, complete: false });
+  assert.deepEqual(computeSourceRange([c], chat), { start: 0, end: 0, complete: false });
+});
+
+test('memorySupportedAfterRollback: prunes only when provenance is complete and fully after target', () => {
+  const mem = { source_messages: [[10, 20]], source_chat_id: 'c' };
+  // earliest support (10) survives a rollback to 15 => keep
+  assert.equal(memorySupportedAfterRollback(mem, 15, 'c'), true);
+  // earliest support (10) is after a rollback to 5 => not supported
+  assert.equal(memorySupportedAfterRollback(mem, 5, 'c'), false);
+});
+
+test('memorySupportedAfterRollback: keeps uncertain, other-chat, and provenance-less memories', () => {
+  assert.equal(memorySupportedAfterRollback({ source_messages: [[10, 20]] }, 5, 'c'), true); // no chat id
+  assert.equal(
+    memorySupportedAfterRollback({ source_messages: [[10, 20]], source_incomplete: true }, 5, 'c'),
+    true,
+  );
+  assert.equal(
+    memorySupportedAfterRollback({ source_messages: [[10, 20]], source_chat_id: 'other' }, 5, 'c'),
+    true,
+  );
+  assert.equal(memorySupportedAfterRollback({}, 5, 'c'), true);
+  assert.equal(memorySupportedAfterRollback({ source_messages: [] }, 5, 'c'), true);
 });
