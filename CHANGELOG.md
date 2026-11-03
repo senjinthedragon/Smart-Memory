@@ -120,6 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Mid-chat delete rollback.** SillyTavern's `MESSAGE_DELETED` always passes
+  the **new chat length**, never the deleted index. The handler now recovers the
+  deleted turn by diffing surviving message object identities against a snapshot
+  captured on load/send/receive (`resolveDeletedIndexFromRefs`), so deleting a
+  message in the middle of a chat rolls state back to the turn before it and
+  prunes later snapshots — instead of rolling back to the chat tip. Verified in
+  a real SillyTavern end-to-end run: deleting index 5 of a 15-message chat
+  rewinds `lastExtractCutoff` to exactly 4 and prunes later snapshots, and a
+  "delete from here" range delete targets the deleted start index exactly.
 - **Epistemic and State Ledger placement.** SillyTavern only honours depth for
   `IN_CHAT`; `IN_PROMPT` ignores it and sits at the very top. Both tiers now
   default to `IN_CHAT` depth 2 (near the end of the prompt), and the migration

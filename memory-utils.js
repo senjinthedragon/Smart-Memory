@@ -1878,3 +1878,34 @@ export function recapCompletionOwnsSlot({
   if (activeHandle != null && activeHandle !== capturedHandle) return false;
   return true;
 }
+
+/**
+ * Derives the index of the message SillyTavern just deleted.
+ *
+ * SillyTavern emits MESSAGE_DELETED with the NEW chat length, never the deleted
+ * index. Surviving messages keep their object references across the host's
+ * splice, so the deleted turn is found by locating the first index where the
+ * current chat diverges from the last captured reference snapshot. Correct for
+ * both a single mid-chat delete and a "delete from here" range delete.
+ *
+ * Pure and runtime-free so it can be unit-tested under Node.
+ *
+ * @param {Array<object>|null} prevRefs - object references captured before the delete.
+ * @param {Array<object>} currChat - the surviving chat array.
+ * @param {number} emittedLength - the value ST passed (the new chat length).
+ * @returns {number} index of the deleted message in the pre-delete chat.
+ */
+export function resolveDeletedIndexFromRefs(prevRefs, currChat, emittedLength) {
+  const chat = Array.isArray(currChat) ? currChat : [];
+  if (Array.isArray(prevRefs)) {
+    const n = Math.min(prevRefs.length, chat.length);
+    for (let i = 0; i < n; i++) {
+      if (chat[i] !== prevRefs[i]) return i;
+    }
+    if (chat.length <= prevRefs.length) return chat.length;
+    return Math.max(0, chat.length - 1);
+  }
+  return Number.isInteger(emittedLength)
+    ? Math.max(0, emittedLength - 1)
+    : Math.max(0, chat.length - 1);
+}

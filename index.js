@@ -133,6 +133,7 @@ import {
   correlateGenerationGate,
   isDuplicateChatLoad,
   recapCompletionOwnsSlot,
+  resolveDeletedIndexFromRefs,
 } from './memory-utils.js';
 import { clearUnifiedSlot, maybeInjectUnified } from './unified-inject.js';
 import { registerSmartMemoryMacros } from './macros.js';
@@ -404,6 +405,7 @@ function stopActivityLoader(handle) {
  * instead of the discarded branch.
  */
 function refreshAfterStateRollback() {
+  captureChatRefs();
   try {
     const context = getContext();
     const characterName = context.groupId ? selectedGroupCharacter : getCurrentCharacterName();
@@ -505,11 +507,45 @@ let sceneMessageBuffer = [];
 // once for the same message (e.g. during swipes or re-renders).
 let sceneBufferLastIndex = -1;
 
+// Snapshot of the chat message object references captured after each known-good
+// chat state. SillyTavern emits MESSAGE_DELETED with the NEW chat length, never
+// the deleted index, so the deleted turn is recovered by diffing object identity
+// against this snapshot (surviving messages keep their references across a
+// splice).
+let lastChatRefs = null;
+
 // ---- Helpers ------------------------------------------------------------
 
 /** Returns the settings object for this extension. */
 function getSettings() {
   return extension_settings[MODULE_NAME];
+}
+
+/**
+ * Captures the current chat's message object references for delete diffing.
+ * Call after every known-good chat state (load, message sent/received, and
+ * after a swipe/edit/delete rollback) so a later MESSAGE_DELETED can locate the
+ * removed turn by identity.
+ */
+function captureChatRefs() {
+  const chat = getContext().chat;
+  lastChatRefs = Array.isArray(chat) ? [...chat] : null;
+}
+
+/**
+ * Derives the index of the message SillyTavern just deleted.
+ *
+ * SillyTavern always emits MESSAGE_DELETED with the NEW chat length (see
+ * `deleteMessage`/`deleteLastMessage` in the host), not the deleted index. The
+ * deleted turn is therefore recovered by finding the first index where the
+ * surviving chat diverges from the last captured reference snapshot. This is
+ * correct for both single mid-chat deletes and "delete from here" range deletes.
+ *
+ * @param {number} emittedLength - the value ST passed (the new chat length).
+ * @returns {number} index of the deleted message in the pre-delete chat.
+ */
+function resolveDeletedIndex(emittedLength) {
+  return resolveDeletedIndexFromRefs(lastChatRefs, getContext().chat ?? [], emittedLength);
 }
 
 /** Returns the active character name, or null if no character is loaded. */
@@ -599,6 +635,7 @@ function clearAllInjections() {
  * context threshold) so the latency cost is negligible in practice.
  */
 async function onCharacterMessageRendered(messageId, type) {
+  captureChatRefs();
   // Fail-safe: if a terminal generation event was missed, the flag can stick
   // true and block extraction indefinitely. Clear it once it is clearly stale.
   if (generationInProgress && Date.now() - generationStartTime > 60000) {
@@ -1299,6 +1336,7 @@ function onChatChanged() {
  * an away recap if the user has been gone longer than the configured threshold.
  */
 async function onChatChangedImpl() {
+  captureChatRefs();
   // Capture the load id and operation revision at entry. After every await and
   // before each mutating UI/state write below, bail out if either changed: a
   // newer chat event (implGen) or a branch rewrite (implRev - swipe/edit/delete)
@@ -2458,6 +2496,7 @@ jQuery(async function () {
   // and other types (e.g. expression classification) are extension background
   // calls that should not dismiss the overlay.
   eventSource.on(event_types.MESSAGE_SENT, () => {
+    captureChatRefs();
     $('#sm_recap_overlay').remove();
     recapOverlayChatMeta = null;
     // If a recap is still generating when the message is sent, suppress the
@@ -2686,15 +2725,13 @@ jQuery(async function () {
     // Discard any queued note rather than risk applying it to a different turn.
     clearRepair();
     // Roll the chat-scoped state back to the surviving turn before the deleted
-    // one so its facts, state cards, arcs, secrets, and retcons are gone. ST
-    // passes either the deleted index or the new chat length. Disambiguate by
-    // range: a value inside the surviving chat is a deleted index (roll back to
-    // the turn before it); anything out of range is the new length, so use the
-    // last surviving turn.
-    const targetIndex =
-      Number.isInteger(messageId) && messageId >= 0 && messageId <= context.chat.length
-        ? messageId - 1
-        : context.chat.length - 1;
+    // one so its facts, state cards, arcs, secrets, and retcons are gone.
+    // SillyTavern emits MESSAGE_DELETED with the NEW chat length, never the
+    // deleted index, so derive the deleted turn by diffing object identity
+    // against the last captured chat snapshot. This is correct for both a single
+    // mid-chat delete and a "delete from here" range delete.
+    const deletedIndex = resolveDeletedIndex(messageId);
+    const targetIndex = Math.max(0, deletedIndex - 1);
     const meta = context.chatMetadata?.[META_KEY];
     // Rewind the extraction cursor so deleted/rewritten turns are re-extracted
     // rather than skipped by the next pass.
