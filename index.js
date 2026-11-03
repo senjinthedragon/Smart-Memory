@@ -1411,6 +1411,11 @@ async function onChatChangedImpl() {
           setStatusMessage('Generating recap...');
           activeRecapHandle = startActivityLoader(settings, 'Generating recap...');
           const groupRecapHandle = activeRecapHandle;
+          // Load identity captured when this recap started. It is passed to the
+          // detached completion so ownership can be proven by the load id even
+          // when chatMetadata is null (a null/null metadata comparison is not
+          // proof of ownership).
+          const recapLoadId = implGen;
           generateRecap()
             .then((recap) => {
               // The recap promise is detached from onChatChangedImpl, so it can
@@ -1425,6 +1430,8 @@ async function onChatChangedImpl() {
                   currentMeta: getContext().chatMetadata,
                   capturedHandle: groupRecapHandle,
                   activeHandle: activeRecapHandle,
+                  capturedLoadId: recapLoadId,
+                  currentLoadId: chatLoadId,
                 })
               ) {
                 return;
@@ -1448,6 +1455,8 @@ async function onChatChangedImpl() {
                   currentMeta: getContext().chatMetadata,
                   capturedHandle: groupRecapHandle,
                   activeHandle: activeRecapHandle,
+                  capturedLoadId: recapLoadId,
+                  currentLoadId: chatLoadId,
                 })
               ) {
                 return;
@@ -1539,6 +1548,11 @@ async function onChatChangedImpl() {
         setStatusMessage('Generating recap...');
         activeRecapHandle = startActivityLoader(settings, 'Generating recap...');
         const soloRecapHandle = activeRecapHandle;
+        // Load identity captured when this recap started. It is passed to the
+        // detached completion so ownership can be proven by the load id even
+        // when chatMetadata is null (a null/null metadata comparison is not
+        // proof of ownership).
+        const recapLoadId = implGen;
         generateRecap()
           .then((recap) => {
             // The recap promise is detached from onChatChangedImpl, so it can
@@ -1553,6 +1567,8 @@ async function onChatChangedImpl() {
                 currentMeta: getContext().chatMetadata,
                 capturedHandle: soloRecapHandle,
                 activeHandle: activeRecapHandle,
+                capturedLoadId: recapLoadId,
+                currentLoadId: chatLoadId,
               })
             ) {
               return;
@@ -1579,6 +1595,8 @@ async function onChatChangedImpl() {
                 currentMeta: getContext().chatMetadata,
                 capturedHandle: soloRecapHandle,
                 activeHandle: activeRecapHandle,
+                capturedLoadId: recapLoadId,
+                currentLoadId: chatLoadId,
               })
             ) {
               return;

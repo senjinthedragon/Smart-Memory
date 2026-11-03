@@ -1670,6 +1670,15 @@ export const GENERATION_TERMINAL_COALESCE_MS = 100;
  * ENDED) are collapsed by the `lastTerminalAt` window so a generation is only
  * dequeued once.
  *
+ * The window is scoped to a single terminal pair, not across generations:
+ * - `start` resets `lastTerminalAt` to -Infinity, so a new generation's genuine
+ *   terminal is never mistaken for a duplicate of a previous generation's.
+ * - A `terminal` with `pending === 0` is a stale signal for an already-cleared
+ *   gate; it is a NO-OP and deliberately does NOT advance `lastTerminalAt`
+ *   (advancing it would let a stale terminal suppress the next real one).
+ * - Within a generation, a second `terminal` inside the window is the paired
+ *   STOPPED+ENDED duplicate and does not dequeue again.
+ *
  * `complete` (MESSAGE_RECEIVED) opens the gate for the finished generation but
  * deliberately retains its pending slot for the terminal that follows, so an
  * older generation cannot be dequeued by a newer one's terminal.
@@ -1694,19 +1703,31 @@ export function correlateGenerationGate(state, event, now = 0) {
 
   switch (event) {
     case 'start':
-      // A new generation opens the gate and enqueues one pending slot.
-      return { pending: pending + 1, inProgress: true, lastTerminalAt };
+      // A new generation opens the gate and enqueues one pending slot. The
+      // coalescing marker is reset: a new generation MUST invalidate the prior
+      // terminal-pair window, otherwise a genuine terminal for this generation
+      // arriving within GENERATION_TERMINAL_COALESCE_MS of a stale terminal for
+      // an already-cleared gate would be swallowed as a duplicate and leave the
+      // gate stuck until the watchdog.
+      return { pending: pending + 1, inProgress: true, lastTerminalAt: -Infinity };
     case 'complete':
       // MESSAGE_RECEIVED: the finished generation's gate opens, but its pending
       // slot is retained for the terminal that follows it.
       return { pending, inProgress: false, lastTerminalAt };
     case 'terminal': {
+      // No pending generation: this terminal belongs to an already-cleared gate
+      // (e.g. the trailing ENDED after a terminal that already cleared). It is a
+      // NO-OP that must NOT update the coalescing marker - doing so would let a
+      // stale terminal suppress a genuine upcoming terminal for the next
+      // generation.
+      if (pending === 0) {
+        return { pending: 0, inProgress: false, lastTerminalAt };
+      }
       // Collapse STOPPED+ENDED for one aborted generation into a single
       // dequeue so one generation is never dequeued twice.
       if (now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS) {
         return { pending, inProgress, lastTerminalAt: now };
       }
-      // No pending generation: a stale terminal for an already-cleared gate.
       // The only pending generation is the active one: dequeue and clear. More
       // than one pending: this terminal belongs to an older generation, so
       // dequeue it but keep the newer generation's gate set.
@@ -1751,16 +1772,27 @@ export function isDuplicateChatLoad(previous, next, elapsedMs) {
  *
  * The recap promise is detached from onChatChangedImpl, so it can resolve after
  * the user has switched chats and a different recap has claimed the slot.
- * Ownership is proven by the captured chatMetadata object reference (a per-load
- * identity) plus the activity-loader handle: a different metadata object, or a
- * slot now held by another handle, means this completion is stale and must
- * return before any cleanup/UI mutation.
+ * Ownership must be *proven*, never assumed: a `null === null` metadata
+ * comparison is not proof that this completion belongs to the current chat.
+ *
+ * Proof is established by either:
+ * - a load id (`chatLoadId`) supplied on either side - the strongest identity,
+ *   and valid even when `chatMetadata` is null. Both sides must match; a
+ *   mismatch means a different chat load now owns the UI.
+ * - otherwise, a non-null, identical `chatMetadata` object reference. When no
+ *   load id is supplied, two null metadata values are treated as unproven.
+ *
+ * Even when identity matches, if both metadata references are present they must
+ * agree, and a slot now held by another activity handle makes this completion
+ * stale.
  *
  * @param {object} p
  * @param {object|null} p.capturedMeta - chatMetadata the recap was generated for.
  * @param {object|null} p.currentMeta - getContext().chatMetadata at resolution.
  * @param {JQuery|null} p.capturedHandle - activity loader captured at start.
  * @param {JQuery|null} p.activeHandle - current activeRecapHandle.
+ * @param {number|null} [p.capturedLoadId] - chatLoadId captured at recap start.
+ * @param {number|null} [p.currentLoadId] - chatLoadId at resolution.
  * @returns {boolean}
  */
 export function recapCompletionOwnsSlot({
@@ -1768,10 +1800,21 @@ export function recapCompletionOwnsSlot({
   currentMeta,
   capturedHandle,
   activeHandle,
+  capturedLoadId,
+  currentLoadId,
 }) {
-  // The recap belongs to one chat load; a different (or null/non-null mismatched)
-  // chatMetadata means the chat changed underneath it.
-  if (capturedMeta !== currentMeta) return false;
+  if (capturedLoadId != null || currentLoadId != null) {
+    // A load id is a valid ownership proof even when metadata is null; a
+    // mismatch means a different chat load now owns the UI.
+    if (capturedLoadId !== currentLoadId) return false;
+  } else if (capturedMeta == null || currentMeta == null || capturedMeta !== currentMeta) {
+    // No load id: only a non-null, identical metadata reference proves we still
+    // own the slot. `null === null` is NOT ownership.
+    return false;
+  }
+  // Identity matched. If both metadata references are present they must agree
+  // (a matching load id cannot vouch for a different chat's metadata object).
+  if (capturedMeta != null && currentMeta != null && capturedMeta !== currentMeta) return false;
   // Another recap has claimed the active slot since this one started.
   if (activeHandle != null && activeHandle !== capturedHandle) return false;
   return true;

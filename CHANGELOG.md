@@ -49,8 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NUL-sentinel encoding so previously-stored data stays reachable.
 - **Generation-identity watchdog.** The 90-second `generationInProgress`
   fail-safe watchdog is token-scoped so a stale timer cannot clear a newer
-  generation's gate. Real terminal events (`GENERATION_STOPPED`/`ENDED`) always
-  clear the gate, so an immediate user cancel cannot leave extraction stuck.
+  generation's gate. Generation start/terminal events are paired FIFO
+  (`correlateGenerationGate`): a new generation invalidates the prior
+  terminal-pair coalescing marker, a terminal with no pending generation is a
+  no-op, and back-to-back `GENERATION_STOPPED`+`ENDED` for one generation count
+  once — so a delayed stop from an older generation cannot clear a newer gate,
+  and an immediate user cancel cannot leave extraction stuck. Because host
+  events carry no generation id, a generation that never emits a terminal is
+  held open until the watchdog or a chat switch resets it (conservative:
+  extraction is briefly suppressed rather than running on partial text).
 - **Complete tier clearing.** Cancelled catch-up clears the tier's extension
   slot, macro content, and the materialized unified prompt/cache so stale
   context cannot linger in macro or unified injection modes.

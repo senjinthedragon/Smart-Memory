@@ -225,6 +225,67 @@ test('generation gate: reset (chat switch) clears pending and gate', () => {
   assert.equal(s.inProgress, false);
 });
 
+// ---- H-1: terminal coalescing must not cross generation boundaries -----------
+
+test('generation gate: stale terminal then start then real terminal within the window still clears', () => {
+  let s = freshGate();
+  // A stale terminal for an already-cleared gate must not arm the coalescing
+  // marker for the generation that starts immediately afterwards.
+  s = correlateGenerationGate(s, 'terminal', 0);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+
+  s = correlateGenerationGate(s, 'start', 10);
+  assert.equal(s.pending, 1);
+  assert.equal(s.inProgress, true);
+
+  // The real terminal lands inside the old 100ms window; it must clear.
+  s = correlateGenerationGate(s, 'terminal', 50);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+});
+
+test('generation gate: start A / terminal A / start B / terminal B inside one window clears', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'terminal', 10); // A clears
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+
+  s = correlateGenerationGate(s, 'start', 20); // B
+  assert.equal(s.pending, 1);
+  assert.equal(s.inProgress, true);
+
+  s = correlateGenerationGate(s, 'terminal', 30); // B clears - not swallowed as A's duplicate
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+});
+
+test('generation gate: STOPPED+ENDED for one generation at the same epoch clears once', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0);
+  s = correlateGenerationGate(s, 'terminal', 0);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+
+  // The trailing ENDED is a no-op, not a second dequeue or a stuck gate.
+  s = correlateGenerationGate(s, 'terminal', 0);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+});
+
+test('generation gate: complete retains the slot and the trailing terminal clears it', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0);
+  s = correlateGenerationGate(s, 'complete', 20);
+  assert.equal(s.pending, 1, 'the pending slot is retained for the trailing terminal');
+  assert.equal(s.inProgress, false, 'normal completion opens the gate');
+
+  s = correlateGenerationGate(s, 'terminal', 40);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+});
+
 // ---- L-2: duplicate chat-load coalescing -------------------------------------
 
 test('isDuplicateChatLoad: same normalized id coalesces within the window', () => {
@@ -319,8 +380,10 @@ test('recapCompletionOwnsSlot: a different active handle makes the completion st
   );
 });
 
-test('recapCompletionOwnsSlot: null metadata on both sides is not stale', () => {
+test('recapCompletionOwnsSlot: null metadata with no load ids is not ownership', () => {
   const handle = {};
+  // null === null is not proof of ownership: without a load id a stale recap
+  // must not assume it still owns the current chat's UI.
   assert.equal(
     recapCompletionOwnsSlot({
       capturedMeta: null,
@@ -328,6 +391,55 @@ test('recapCompletionOwnsSlot: null metadata on both sides is not stale', () => 
       capturedHandle: handle,
       activeHandle: handle,
     }),
+    false,
+  );
+});
+
+// ---- M-2b: recap ownership must be proven, not assumed -----------------------
+
+test('recapCompletionOwnsSlot: a load-id mismatch makes the completion stale', () => {
+  const handle = {};
+  assert.equal(
+    recapCompletionOwnsSlot({
+      capturedMeta: null,
+      currentMeta: null,
+      capturedHandle: handle,
+      activeHandle: handle,
+      capturedLoadId: 3,
+      currentLoadId: 4,
+    }),
+    false,
+  );
+});
+
+test('recapCompletionOwnsSlot: null metadata with matching load ids still owns the slot', () => {
+  const handle = {};
+  assert.equal(
+    recapCompletionOwnsSlot({
+      capturedMeta: null,
+      currentMeta: null,
+      capturedHandle: handle,
+      activeHandle: handle,
+      capturedLoadId: 7,
+      currentLoadId: 7,
+    }),
     true,
+  );
+});
+
+test('recapCompletionOwnsSlot: mismatched non-null metadata fails even with matching load ids', () => {
+  const metaA = {};
+  const metaB = {};
+  const handle = {};
+  assert.equal(
+    recapCompletionOwnsSlot({
+      capturedMeta: metaA,
+      currentMeta: metaB,
+      capturedHandle: handle,
+      activeHandle: handle,
+      capturedLoadId: 7,
+      currentLoadId: 7,
+    }),
+    false,
   );
 });
