@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateTokens } from '../constants.js';
+import { migrateLegacyCharacterKeys } from '../settings-migration.js';
 import {
   mergeStateCardFields,
   pruneStateLedger,
@@ -59,4 +60,57 @@ test('parseProfileOutput: distinguishes absent (null) from present-but-empty (em
   assert.equal(parsed.character_state, 'Hero');
   assert.equal(parsed.world_state, ''); // present but empty -> can clear
   assert.equal(parsed.relationship_matrix, null); // absent -> preserve
+});
+
+test('parseProfileOutput: all-present-but-empty returns clearable object, not null', () => {
+  const parsed = parseProfileOutput(
+    '<character_state></character_state><world_state></world_state><relationship_matrix></relationship_matrix>',
+  );
+  assert.notEqual(parsed, null);
+  assert.equal(parsed.character_state, '');
+  assert.equal(parsed.world_state, '');
+  assert.equal(parsed.relationship_matrix, '');
+});
+
+test('parseProfileOutput: no tags at all still returns null', () => {
+  assert.equal(parseProfileOutput('just some prose'), null);
+  assert.equal(parseProfileOutput(''), null);
+});
+
+test('migrateLegacyCharacterKeys: moves underscore-encoded keys to NUL form', () => {
+  const settings = {
+    characters: {
+      _constructor: { memories: ['a'] },
+      _prototype: { canon: { text: 'x' } },
+      ___proto__: { memories: ['b'] },
+      Elara: { memories: ['c'] },
+    },
+  };
+  const changed = migrateLegacyCharacterKeys(settings);
+  assert.equal(changed, true);
+  assert.ok('\u0000constructor' in settings.characters);
+  assert.ok('\u0000prototype' in settings.characters);
+  assert.ok('\u0000__proto__' in settings.characters);
+  assert.ok(!('_constructor' in settings.characters));
+  assert.ok(!('_prototype' in settings.characters));
+  assert.ok(!('___proto__' in settings.characters));
+  assert.deepEqual(settings.characters.Elara, { memories: ['c'] });
+});
+
+test('migrateLegacyCharacterKeys: does not overwrite an existing NUL key and is idempotent', () => {
+  const settings = {
+    characters: {
+      _constructor: { memories: ['legacy'] },
+      '\u0000constructor': { memories: ['current'] },
+    },
+  };
+  assert.equal(migrateLegacyCharacterKeys(settings), false);
+  assert.deepEqual(settings.characters['\u0000constructor'], { memories: ['current'] });
+  // Second run is a no-op.
+  assert.equal(migrateLegacyCharacterKeys(settings), false);
+});
+
+test('migrateLegacyCharacterKeys: tolerates missing characters map', () => {
+  assert.equal(migrateLegacyCharacterKeys({}), false);
+  assert.equal(migrateLegacyCharacterKeys(null), false);
 });

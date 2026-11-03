@@ -26,6 +26,8 @@
  *
  * migrateEpistemicStateLedgerPlacement - normalises the epistemic and
  *   state-ledger injection placement to IN_CHAT depth 2.
+ * migrateLegacyCharacterKeys - moves legacy underscore-encoded character keys
+ *   to the current NUL-encoded safeStorageKey form.
  */
 
 /**
@@ -80,4 +82,48 @@ export function migrateEpistemicStateLedgerPlacement(settings, promptTypes = {},
 
   settings.migrated_legacy_placement = true;
   return settings;
+}
+
+/**
+ * Legacy underscore encoding for reserved character names. `safeStorageKey`
+ * used to prefix `__proto__`, `constructor`, and `prototype` with a single
+ * underscore; it now uses a NUL (`\u0000`) sentinel instead. Data stored under
+ * the old keys is unreachable once the encoder changed, so move it to the
+ * current form.
+ *
+ * Only touches `settings.characters`. A legacy entry is moved only when the
+ * NUL-encoded target key is absent, so a value already written under the new
+ * key is never overwritten. Idempotent: after the move the legacy key is gone
+ * and the function reports no change on subsequent calls.
+ *
+ * Mutates the supplied settings object.
+ *
+ * @param {Object} settings - The extension_settings[MODULE_NAME] object.
+ * @returns {boolean} True when at least one legacy key was moved.
+ */
+export function migrateLegacyCharacterKeys(settings) {
+  if (!settings || typeof settings !== 'object' || !settings.characters) return false;
+
+  /** Legacy underscore key -> NUL-encoded safeStorageKey target. */
+  const LEGACY_KEY_MAP = {
+    _constructor: '\u0000constructor',
+    _prototype: '\u0000prototype',
+    ___proto__: '\u0000__proto__',
+  };
+
+  const characters = settings.characters;
+  let changed = false;
+
+  for (const [legacyKey, targetKey] of Object.entries(LEGACY_KEY_MAP)) {
+    if (
+      Object.prototype.hasOwnProperty.call(characters, legacyKey) &&
+      !Object.prototype.hasOwnProperty.call(characters, targetKey)
+    ) {
+      characters[targetKey] = characters[legacyKey];
+      delete characters[legacyKey];
+      changed = true;
+    }
+  }
+
+  return changed;
 }

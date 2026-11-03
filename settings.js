@@ -33,6 +33,7 @@ import {
   setExtensionPrompt,
   saveSettingsDebounced,
   getMaxContextSize,
+  getCurrentChatId,
   stopGeneration,
 } from '../../../../script.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../../scripts/popup.js';
@@ -100,8 +101,11 @@ import {
 } from './scenes.js';
 import { extractArcs, injectArcs, clearArcs, clearArcSummaries, loadArcSummaries } from './arcs.js';
 import { runModelTest } from './model-test.js';
-import { migrateEpistemicStateLedgerPlacement } from './settings-migration.js';
-import { sameGroupId } from './memory-utils.js';
+import {
+  migrateEpistemicStateLedgerPlacement,
+  migrateLegacyCharacterKeys,
+} from './settings-migration.js';
+import { getOperationRevision, sameGroupId } from './memory-utils.js';
 
 /** Set to true while a model test is running to allow cancellation. */
 let modelTestRunning = false;
@@ -112,6 +116,7 @@ import {
   clearEmbeddingFailed,
   saveEmbeddingApiKey,
   hasEmbeddingApiKey,
+  abortEmbeddingRequests,
 } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
 import { clearSessionEntityRegistry } from './graph-migration.js';
@@ -691,6 +696,14 @@ export function loadSettings() {
   // it is unit-testable; it also sets migrated_legacy_placement so this never
   // runs again.
   migrateEpistemicStateLedgerPlacement(extension_settings[MODULE_NAME], extension_prompt_types);
+
+  // Migration: move character data stored under the legacy underscore-encoded
+  // keys (_constructor/_prototype/___proto__) to the NUL-sentinel
+  // safeStorageKey form. Superseded encodings left these entries unreachable.
+  // Idempotent and never overwrites an entry that already uses the new key.
+  if (migrateLegacyCharacterKeys(extension_settings[MODULE_NAME])) {
+    saveSettingsDebounced();
+  }
 }
 
 // ---- Settings UI binding ------------------------------------------------
@@ -2478,6 +2491,21 @@ export function bindSettingsUI(ctrl) {
     // extraction runs for every character, not just the one in the selector.
     // Solo chats collapse to a single-element array using the active character.
     const catchUpContext = getContext();
+
+    // H-3: pin this catch-up run to the chat/branch it started on, captured
+    // alongside catchUpContext. The shared pipeline functions re-read
+    // getContext() when they execute, so a chat switch (or a swipe/edit/delete
+    // that bumps the operation revision) mid-run would otherwise let old
+    // content be stored into the newly-active chat. catchUpCancelled() is
+    // threaded into every pipeline call and checked before each persistent
+    // write.
+    const catchUpChatId = getCurrentChatId();
+    const catchUpRev = getOperationRevision();
+    const catchUpCancelled = () =>
+      ctrl.catchUpCancelled === true ||
+      getOperationRevision() !== catchUpRev ||
+      getCurrentChatId() !== catchUpChatId;
+
     const catchUpCharacterNames = (() => {
       if (!catchUpContext.groupId) return [characterName];
       const group = catchUpContext.groups?.find((g) => sameGroupId(g.id, catchUpContext.groupId));
@@ -2537,7 +2565,7 @@ export function bindSettingsUI(ctrl) {
       const catchUpTokenBudget = Math.max(500, Math.floor(getMaxContextSize(0) * 0.35));
       let i = 0;
       while (i < total) {
-        if (ctrl.catchUpCancelled) break;
+        if (catchUpCancelled()) break;
 
         // Yield to the browser event loop at the start of each chunk so the
         // UI remains responsive and the cancel button stays clickable even
@@ -2564,6 +2592,7 @@ export function bindSettingsUI(ctrl) {
 
         if (settings.longterm_enabled && !isFreshStart()) {
           for (const name of catchUpCharacterNames) {
+            if (catchUpCancelled()) break;
             // Filter chunk to this character's messages + user messages, matching
             // the Phase 2 per-character window filtering used in automatic extraction.
             const nameChunk = catchUpContext.groupId
@@ -2573,38 +2602,45 @@ export function bindSettingsUI(ctrl) {
             setStatusMessage(
               `Catching up... (${i}/${total} messages - extracting long-term for ${name})`,
             );
-            await extractAndStoreMemories(name, nameChunk, setStatusMessage).catch((err) => {
+            await extractAndStoreMemories(
+              name,
+              nameChunk,
+              setStatusMessage,
+              catchUpCancelled,
+            ).catch((err) => {
               console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
             });
             // Consolidate after each chunk so near-duplicates are collapsed before
             // the next chunk can add more similar entries.
-            if (settings.consolidation_enabled) {
+            if (settings.consolidation_enabled && !catchUpCancelled()) {
               setStatusMessage(`Catching up... (${i}/${total} messages - consolidating ${name})`);
-              await consolidateMemories(name).catch((err) => {
+              await consolidateMemories(name, false, catchUpCancelled).catch((err) => {
                 console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
               });
             }
           }
         }
-        if (settings.session_enabled && !isFreshStart()) {
+        if (settings.session_enabled && !isFreshStart() && !catchUpCancelled()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - extracting session)`);
-          await extractSessionMemories(chunk).catch((err) => {
+          await extractSessionMemories(chunk, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up session extraction error (chunk):', err);
           });
-          setStatusMessage(`Catching up... (${i}/${total} messages - consolidating session)`);
-          await consolidateSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
-          });
+          if (!catchUpCancelled()) {
+            setStatusMessage(`Catching up... (${i}/${total} messages - consolidating session)`);
+            await consolidateSessionMemories(false, catchUpCancelled).catch((err) => {
+              console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
+            });
+          }
         }
-        if (settings.arcs_enabled && !isFreshStart()) {
+        if (settings.arcs_enabled && !isFreshStart() && !catchUpCancelled()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - extracting arcs)`);
-          await extractArcs(chunk, characterName).catch((err) => {
+          await extractArcs(chunk, characterName, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
         }
-        if (isStateLedgerEnabled() && !isFreshStart()) {
+        if (isStateLedgerEnabled() && !isFreshStart() && !catchUpCancelled()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - updating state ledger)`);
-          await runStateCardExtraction(characterName, chunk).catch((err) => {
+          await runStateCardExtraction(characterName, chunk, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up state ledger extraction error (chunk):', err);
           });
         }
@@ -2613,27 +2649,27 @@ export function bindSettingsUI(ctrl) {
         // actually stored, not just what was injected before catch-up started.
         // Wrap with .catch so an embedding failure here does not abort the
         // entire catch-up run via the outer catch block.
-        if (settings.longterm_enabled && characterName) {
+        if (settings.longterm_enabled && characterName && !catchUpCancelled()) {
           await injectMemories(characterName).catch((err) => {
             console.error('[SmartMemory] Catch-up inject long-term error:', err);
           });
         }
-        if (settings.session_enabled) {
+        if (settings.session_enabled && !catchUpCancelled()) {
           await injectSessionMemories().catch((err) => {
             console.error('[SmartMemory] Catch-up inject session error:', err);
           });
         }
-        if (settings.arcs_enabled) {
+        if (settings.arcs_enabled && !catchUpCancelled()) {
           injectArcs();
         }
-        if (settings.relationships_enabled) {
+        if (settings.relationships_enabled && !catchUpCancelled()) {
           injectRelationshipHistory(characterName);
         }
 
         // Advance lastExtractCutoff so the normal extraction window starts from
         // where catch-up left off rather than re-processing the same messages.
         const cuMeta = catchUpContext.chatMetadata?.[META_KEY];
-        if (cuMeta) {
+        if (cuMeta && !catchUpCancelled()) {
           const lastChunkMsg = chunk[chunk.length - 1];
           const chatIdx = lastChunkMsg
             ? catchUpContext.chat.lastIndexOf(lastChunkMsg)
@@ -2656,7 +2692,7 @@ export function bindSettingsUI(ctrl) {
         i += chunk.length;
       }
 
-      if (!ctrl.catchUpCancelled) {
+      if (!catchUpCancelled()) {
         // Scene: walk through the full chat detecting and summarizing scenes.
         // When scene_ai_detect is enabled, AI detection runs on each AI message
         // (matching normal flow). When disabled, the heuristic is used instead.
@@ -2685,7 +2721,7 @@ export function bindSettingsUI(ctrl) {
           };
 
           for (let msgIdx = 0; msgIdx < allMessages.length; msgIdx++) {
-            if (ctrl.catchUpCancelled) break;
+            if (catchUpCancelled()) break;
             const msg = allMessages[msgIdx];
             sceneBuffer.push(msg);
 
@@ -2721,11 +2757,16 @@ export function bindSettingsUI(ctrl) {
                 });
                 if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
               }
-              if (isEpistemicEnabled() && !isFreshStart()) {
+              if (isEpistemicEnabled() && !isFreshStart() && !catchUpCancelled()) {
                 setStatusMessage(
                   `Summarizing scene ${sceneCount}... (extracting epistemic knowledge)`,
                 );
-                await extractEpistemicKnowledge(sceneBuffer, characterName).catch((err) => {
+                await extractEpistemicKnowledge(
+                  sceneBuffer,
+                  characterName,
+                  '',
+                  catchUpCancelled,
+                ).catch((err) => {
                   console.error('[SmartMemory] Catch-up epistemic extraction error:', err);
                 });
               }
@@ -2734,7 +2775,7 @@ export function bindSettingsUI(ctrl) {
           }
 
           // Summarize any remaining messages after the last break as the current scene.
-          if (!ctrl.catchUpCancelled && sceneBuffer.length >= minMessages) {
+          if (!catchUpCancelled() && sceneBuffer.length >= minMessages) {
             const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
               console.error('[SmartMemory] Catch-up final scene summary failed:', err);
               return null;
@@ -2743,17 +2784,24 @@ export function bindSettingsUI(ctrl) {
               sceneHistory.push({ summary: sceneSummary, ts: Date.now(), source_memory_ids: [] });
               if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
             }
-            if (isEpistemicEnabled() && !isFreshStart()) {
+            if (isEpistemicEnabled() && !isFreshStart() && !catchUpCancelled()) {
               setStatusMessage('Extracting epistemic knowledge from final scene...');
-              await extractEpistemicKnowledge(sceneBuffer, characterName).catch((err) => {
+              await extractEpistemicKnowledge(
+                sceneBuffer,
+                characterName,
+                '',
+                catchUpCancelled,
+              ).catch((err) => {
                 console.error('[SmartMemory] Catch-up epistemic extraction error (final):', err);
               });
             }
           }
 
-          await saveSceneHistory(sceneHistory).catch((err) => {
-            console.error('[SmartMemory] Catch-up scene history save failed:', err);
-          });
+          if (!catchUpCancelled()) {
+            await saveSceneHistory(sceneHistory).catch((err) => {
+              console.error('[SmartMemory] Catch-up scene history save failed:', err);
+            });
+          }
           ctrl.sceneMessageBuffer = [];
           // Keep the cursor at the end of the chat so the next render does not
           // re-ingest the entire history into the fresh scene buffer.
@@ -2766,16 +2814,17 @@ export function bindSettingsUI(ctrl) {
         // across the whole chat). Forces consolidation regardless of threshold.
         if (settings.longterm_enabled && settings.consolidation_enabled) {
           for (const name of catchUpCharacterNames) {
+            if (catchUpCancelled()) break;
             setStatusMessage(`Consolidating long-term memories for ${name}...`);
-            await consolidateMemories(name, true).catch((err) => {
+            await consolidateMemories(name, true, catchUpCancelled).catch((err) => {
               console.error('[SmartMemory] Catch-up final consolidation failed:', err);
             });
           }
           updateTokenDisplay();
         }
-        if (settings.session_enabled) {
+        if (settings.session_enabled && !catchUpCancelled()) {
           setStatusMessage('Consolidating session memories...');
-          await consolidateSessionMemories(true).catch((err) => {
+          await consolidateSessionMemories(true, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up final session consolidation failed:', err);
           });
           updateTokenDisplay();
@@ -2783,9 +2832,9 @@ export function bindSettingsUI(ctrl) {
 
         // Short-term compaction runs once at the end - it uses the real token
         // count to decide what to include, so chunking doesn't apply.
-        if (settings.compaction_enabled) {
+        if (settings.compaction_enabled && !catchUpCancelled()) {
           setStatusMessage('Extracting short-term memories...');
-          await runCompaction({ includeLastMessage: true })
+          await runCompaction({ includeLastMessage: true, abortCheck: catchUpCancelled })
             .then((summary) => {
               if (summary) {
                 injectSummary(summary);
@@ -2801,10 +2850,11 @@ export function bindSettingsUI(ctrl) {
 
       // Generate character & world profiles once at the end of a completed run.
       // Skipped on cancel - partial data may produce low-quality profiles.
-      if (!ctrl.catchUpCancelled && settings.profiles_enabled) {
+      if (!catchUpCancelled() && settings.profiles_enabled) {
         for (const name of catchUpCharacterNames) {
+          if (catchUpCancelled()) break;
           setStatusMessage(`Generating character & world profiles for ${name}...`);
-          const profiles = await generateProfiles(name).catch((err) => {
+          const profiles = await generateProfiles(name, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up profile generation failed:', err);
             return null;
           });
@@ -2826,7 +2876,7 @@ export function bindSettingsUI(ctrl) {
       // may still be holding the previous chat's context, and injecting its
       // character memories into the now-active chat would overwrite the new
       // chat's slots. Partial extraction results are already persisted.
-      if (!ctrl.catchUpCancelled) {
+      if (!catchUpCancelled()) {
         await injectMemories(characterName);
         injectRelationshipHistory(characterName);
         injectSessionMemories();
@@ -2852,7 +2902,7 @@ export function bindSettingsUI(ctrl) {
         saveSettingsDebounced();
       }
 
-      if (ctrl.catchUpCancelled) {
+      if (catchUpCancelled()) {
         setStatusMessage('Catch-up cancelled.');
         toastr.warning('Catch-up cancelled. Partial results have been saved.', 'Smart Memory', {
           timeOut: 5000,
@@ -2881,7 +2931,10 @@ export function bindSettingsUI(ctrl) {
     ctrl.catchUpCancelled = true;
     // Abort any in-flight memory model call immediately so cancellation does
     // not wait for a long local generation to finish before taking effect.
+    // Embedding fetches are also aborted so a pending similarity/index request
+    // cannot keep the run alive or write after the chat has changed.
     abortCurrentMemoryGeneration();
+    abortEmbeddingRequests();
     $(this).prop('disabled', true);
     setStatusMessage('Cancelling...');
   });

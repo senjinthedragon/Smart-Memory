@@ -711,10 +711,28 @@ export async function extractAndStoreMemories(
     // Tag each new memory with the source message range and chat ID so users
     // can jump back to the passage that prompted the extraction.
     const context = getContext();
-    const chatLen = context.chat?.length ?? 1;
-    // Window ends one before the last message (last AI turn is excluded from extraction).
-    const windowEnd = Math.max(0, chatLen - 2);
-    const windowStart = Math.max(0, windowEnd - recentMessages.length + 1);
+    const chat = context.chat ?? [];
+    // Locate the ACTUAL chat indices of the messages that were extracted. Group
+    // chats pass a per-character FILTERED array to this function, so the indices
+    // are sparse and cannot be derived from recentMessages.length.
+    const indices = [];
+    for (const m of recentMessages) {
+      const idx = chat.indexOf(m);
+      if (idx >= 0) indices.push(idx);
+    }
+    let windowStart;
+    let windowEnd;
+    if (indices.length > 0) {
+      windowStart = Math.min(...indices);
+      windowEnd = Math.max(...indices);
+    } else {
+      // Fallback: message objects were cloned/replaced and cannot be located.
+      // Use the conservative contiguous estimate, but never claim a range narrower
+      // than the most recent surviving turn.
+      const chatLen = chat.length || 1;
+      windowEnd = Math.max(0, chatLen - 2);
+      windowStart = Math.max(0, windowEnd - recentMessages.length + 1);
+    }
     const sourceChatId = getCurrentChatId() ?? null;
     // Derive the characters present in this extraction window so the injection
     // path can downgrade memories the responding character did not witness.
@@ -733,7 +751,7 @@ export async function extractAndStoreMemories(
     // Apply supersession links. For each candidate that supersedes an existing
     // memory: mark the old memory as retired (superseded_by + valid_to) and
     // link the new memory back to it (supersedes + valid_from).
-    const messageIndex = Math.max(0, chatLen - 1);
+    const messageIndex = Math.max(0, chat.length - 1);
 
     const newlyRetiredIds = new Set();
     for (const [candText, oldId] of supersessionMap) {

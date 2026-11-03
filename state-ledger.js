@@ -367,10 +367,21 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
       : characterName
         ? [characterName]
         : [];
+    // Seed the active card characters before consulting the registries. A chat
+    // can begin before any registry entity exists for the active character, so
+    // without this seed a valid [state:Elara:character] card would be rejected
+    // by the allowlist below and never extracted on the first pass.
+    const seedCharacters = characterNames.filter(Boolean);
     const ltEntities = characterNames.flatMap((name) => loadCharacterEntityRegistry(name));
     const sessionEntities = loadSessionEntityRegistry();
     const seen = new Set();
     const entityList = [];
+    for (const name of seedCharacters) {
+      const k = ledgerKey(name, 'character');
+      if (seen.has(k)) continue;
+      seen.add(k);
+      entityList.push({ name, type: 'character' });
+    }
     for (const e of [...ltEntities, ...sessionEntities]) {
       if (!STATE_CARD_TYPES.has(e.type)) continue;
       const k = ledgerKey(e.name, e.type);
@@ -400,15 +411,12 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
     const ledger = loadStateLedger();
 
     // Strict (name, type) whitelist. Only the canonical key for an entity the
-    // extension already knows about (present in a registry) may be merged, and
-    // every active character is seeded as its canonical `name|character` card.
-    // This rejects hallucinated entities AND type-confused cards (e.g.
-    // "elara|place" for the character Elara) so they can never enter the ledger
-    // or the injected prompt.
+    // extension already knows about (present in a registry, or an active card
+    // character seeded above) may be merged. This rejects hallucinated entities
+    // AND type-confused cards (e.g. "elara|place" for the character Elara) so
+    // they can never enter the ledger or the injected prompt. The seed uses the
+    // canonical `name|character` key only - no widening beyond that.
     const allowedKeys = new Set(entityList.map((e) => ledgerKey(e.name, e.type)));
-    for (const name of characterNames) {
-      allowedKeys.add(ledgerKey(name, 'character'));
-    }
 
     let count = 0;
     let pruned = 0;

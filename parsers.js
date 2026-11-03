@@ -422,7 +422,9 @@ function stripHtmlTags(text) {
  * Partial output (one or two sections found) is returned with the missing
  * sections as null rather than empty strings, so callers can distinguish an
  * omitted section from one the model deliberately left blank - a partial
- * profile is still better than no profile.
+ * profile is still better than no profile. All-present-but-empty output is
+ * returned as an object of empty strings (not null) so those sections can be
+ * cleared by the caller's three-state merge.
  *
  * @param {string} response - Raw model output from buildProfileGenerationPrompt.
  * @returns {{character_state: string|null, world_state: string|null, relationship_matrix: string|null}|null}
@@ -440,18 +442,19 @@ export function parseProfileOutput(response) {
     return m ? m[1].trim() : null;
   }
 
-  const character_state = extractSection('character_state');
-  const world_state = extractSection('world_state');
-  const relationship_matrix = extractSection('relationship_matrix');
-
-  // All three missing = unusable response.
-  if (!character_state && !world_state && !relationship_matrix) return null;
-
-  return {
-    character_state: character_state ?? null,
-    world_state: world_state ?? null,
-    relationship_matrix: relationship_matrix ?? null,
+  const sections = {
+    character_state: extractSection('character_state'),
+    world_state: extractSection('world_state'),
+    relationship_matrix: extractSection('relationship_matrix'),
   };
+
+  // Distinguish "all sections absent" (unusable response) from "sections
+  // present but empty" (a deliberate clear). extractSection returns null only
+  // for an absent tag; a present-but-empty tag yields ''.
+  const anyPresent = Object.values(sections).some((v) => v !== null);
+  if (!anyPresent) return null;
+
+  return sections;
 }
 
 // ---- Trigger keyword parser ---------------------------------------------

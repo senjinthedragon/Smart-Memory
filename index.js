@@ -114,6 +114,7 @@ import {
   getHardwareProfile,
   getEmbeddingBatch,
   cosineSimilarity,
+  abortEmbeddingRequests,
 } from './embeddings.js';
 import { jaccardSimilarity } from './similarity.js';
 import { generateCanon, injectCanon } from './canon.js';
@@ -195,8 +196,18 @@ let generationStartTime = 0;
 // remains as a secondary guard.
 let generationWatchdogId = null;
 
+// Monotonic token identifying the generation that currently owns the
+// generationInProgress gate. Incremented every time a new generation starts so
+// the watchdog callback can detect that a newer generation has taken ownership
+// and leave its gate alone. Terminal events are imperfectly correlated with the
+// generation they belong to, so this keeps a stale watchdog fire from clearing a
+// newer generation's flag.
+let activeGenerationToken = 0;
+
 /**
- * Cancels the generation watchdog timer, if one is running.
+ * Cancels the generation watchdog timer, if one is running. The stored timer id
+ * is cleared regardless of which generation owns the gate; the timer callback
+ * itself guards by token so a newer generation is never cleared by a stale fire.
  */
 function clearGenerationWatchdog() {
   if (generationWatchdogId) {
@@ -207,11 +218,15 @@ function clearGenerationWatchdog() {
 
 /**
  * Starts (or restarts) the watchdog that clears generationInProgress if no
- * terminal generation event arrives within 90 seconds.
+ * terminal generation event arrives within 90 seconds. Increments the
+ * generation token so this watchdog only clears the flag while its own
+ * generation still owns the gate.
  */
 function startGenerationWatchdog() {
   clearGenerationWatchdog();
+  const myToken = ++activeGenerationToken;
   generationWatchdogId = setTimeout(() => {
+    if (activeGenerationToken !== myToken) return; // a newer generation owns the gate
     generationInProgress = false;
     generationStartTime = 0;
     generationWatchdogId = null;
@@ -883,7 +898,11 @@ async function onCharacterMessageRendered(messageId, type) {
               // Run consolidation after extraction if new memories were added.
               if (count > 0 && settings.consolidation_enabled && !consolidationRunning) {
                 consolidationRunning = true;
-                const removed = await consolidateMemories(characterName).catch((err) => {
+                const removed = await consolidateMemories(
+                  characterName,
+                  false,
+                  branchChanged,
+                ).catch((err) => {
                   console.error('[SmartMemory] Consolidation error:', err);
                   return 0;
                 });
@@ -1182,6 +1201,7 @@ async function onChatChangedImpl() {
   // chat. Without this, the old chat's memory call can finish after the switch
   // and compete with the new chat's generation for the same model instance.
   abortCurrentMemoryGeneration();
+  abortEmbeddingRequests();
   stopActivityLoader(activeRecapHandle);
   activeRecapHandle = null;
   sceneMessageBuffer = [];
@@ -1845,7 +1865,11 @@ async function onGroupWrapperFinished({ type } = {}) {
                   });
                   if (count > 0 && settings.consolidation_enabled && !consolidationRunning) {
                     consolidationRunning = true;
-                    const removed = await consolidateMemories(characterName).catch((err) => {
+                    const removed = await consolidateMemories(
+                      characterName,
+                      false,
+                      branchChanged,
+                    ).catch((err) => {
                       console.error('[SmartMemory] Consolidation error:', err);
                       return 0;
                     });
@@ -2243,20 +2267,28 @@ jQuery(async function () {
     }
   });
   eventSource.on(event_types.MESSAGE_RECEIVED, () => {
-    generationInProgress = false;
-    clearGenerationWatchdog();
+    if (generationInProgress) {
+      generationInProgress = false;
+      clearGenerationWatchdog();
+    }
   });
   // Terminal generation paths. A cancelled or stopped generation produces no
   // MESSAGE_RECEIVED and no CHARACTER_MESSAGE_RENDERED, which would otherwise
   // leave generationInProgress stuck true and suppress extraction for every
-  // subsequent message. Clear the flag on both terminal events.
+  // subsequent message. Clear the flag on both terminal events, but only while a
+  // generation is actually in progress so an uncorrelated late event cannot
+  // disturb a gate that is already clear.
   eventSource.on(event_types.GENERATION_STOPPED, () => {
-    generationInProgress = false;
-    clearGenerationWatchdog();
+    if (generationInProgress) {
+      generationInProgress = false;
+      clearGenerationWatchdog();
+    }
   });
   eventSource.on(event_types.GENERATION_ENDED, () => {
-    generationInProgress = false;
-    clearGenerationWatchdog();
+    if (generationInProgress) {
+      generationInProgress = false;
+      clearGenerationWatchdog();
+    }
   });
   // Allow external extensions to dismiss the recap overlay programmatically
   // (e.g. Discord Connector can dispatch this when the user sends a command
@@ -2319,6 +2351,7 @@ jQuery(async function () {
     generationStartTime = 0;
     clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
+    abortEmbeddingRequests();
     // A swipe rewrites the message the continuity check was anchored to, so
     // any queued note is no longer valid for this branch of the story.
     clearRepair();
@@ -2376,6 +2409,7 @@ jQuery(async function () {
     generationStartTime = 0;
     clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
+    abortEmbeddingRequests();
     if (!Number.isInteger(messageId)) return;
 
     const context = getContext();
@@ -2419,6 +2453,7 @@ jQuery(async function () {
     generationStartTime = 0;
     clearGenerationWatchdog();
     abortCurrentMemoryGeneration();
+    abortEmbeddingRequests();
     const context = getContext();
     const chatSet = new Set(context.chat);
     sceneMessageBuffer = sceneMessageBuffer.filter((m) => chatSet.has(m));

@@ -11,15 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Chat & branch operation revision tokens.** Introduced `operationRevision`,
   `bumpOperationRevision()`, and `branchChanged()` guards. The guarded async
-  pipelines (long-term, session, arc, state-ledger, epistemic, continuity, and
-  profile extraction, plus canon generation) abort before any write when a chat
-  switch, swipe, edit, or delete changes the branch. On rollback, chat-scoped
-  state is restored and persistent long-term memories whose source range is after
-  the rollback point (for the current chat) are pruned.
+  pipelines (long-term extraction and consolidation, session, arc, state-ledger,
+  epistemic, continuity, and profile extraction, plus canon generation, and the
+  full catch-up routine) abort before any write when a chat switch, swipe, edit,
+  or delete changes the branch. On rollback, chat-scoped state is restored and
+  persistent long-term memories whose real source range lies after the rollback
+  point (for the current chat) are pruned.
   _Limitation:_ cancellation is transport-enforced for Ollama and
-  OpenAI-compatible sources; main-API, WebLLM, and connection-profile
-  generation remain host-managed, so for those the revision guard prevents
-  the stale write rather than aborting the underlying request.
+  OpenAI-compatible sources and for embeddings; main-API, WebLLM, and
+  connection-profile generation remain host-managed, so for those the revision
+  guard prevents the stale write rather than aborting the underlying request.
 - **Strict entity allowlist for State Ledger.** State card extraction now admits
   only canonical `(name, type)` pairs drawn from the active entity registry plus
   seeded `character` entries for active characters, and rejects unknown or
@@ -34,8 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Multi-controller abort and abort-aware retries.** `generate.js` tracks a set
   of active AbortControllers and makes retry delays abort-aware, so swipes and
   cancellations immediately abort in-flight Ollama and OpenAI-compatible
-  network activity. `embeddings.js` tracks and can abort its own in-flight
-  embedding requests.
+  network activity. `embeddings.js` tracks and aborts its own in-flight
+  embedding requests, and branch-change handlers invoke both.
+- **Legacy storage-key migration.** A one-time, idempotent
+  `migrateLegacyCharacterKeys` moves pre-existing underscore-encoded character
+  stores (`_constructor`, `_prototype`, `___proto__`) onto the collision-free
+  NUL-sentinel encoding so previously-stored data stays reachable.
+- **Generation-identity watchdog.** The 90-second `generationInProgress`
+  fail-safe watchdog is token-scoped so a stale terminal event or timer cannot
+  clear a newer generation's gate.
 - **Metadata bounding and retention caps.** Arc summaries are capped to 50 recent
   items, canon prompt arc summary inputs are capped to 20, and epistemic entries are
   capped to 100 per chat. Epistemic `[retire]` directives are guarded against mass
