@@ -180,6 +180,16 @@ import { clearTierTrimStats, resetTrimToastFlag, markChatLoadComplete } from './
 // CHARACTER_MESSAGE_RENDERED.
 let generationInProgress = false;
 
+// Timestamp recorded when generationInProgress was last set to true. Used as a
+// fail-safe in onCharacterMessageRendered: if a terminal generation event is
+// somehow missed and the flag is left stuck, it is cleared once clearly stale
+// so extraction can resume instead of being suppressed forever.
+let generationStartTime = 0;
+
+// Monotonic revision counter for the current chat branch. Incremented on every
+export { bumpOperationRevision, getOperationRevision } from './memory-utils.js';
+import { bumpOperationRevision, getOperationRevision } from './memory-utils.js';
+
 // Guards prevent re-entrant model calls if ST fires events faster than
 // the previous async job completes.
 let messagesSinceLastExtraction = 0;
@@ -473,6 +483,12 @@ function clearAllInjections() {
  * context threshold) so the latency cost is negligible in practice.
  */
 async function onCharacterMessageRendered(messageId, type) {
+  // Fail-safe: if a terminal generation event was missed, the flag can stick
+  // true and block extraction indefinitely. Clear it once it is clearly stale.
+  if (generationInProgress && Date.now() - generationStartTime > 60000) {
+    generationInProgress = false;
+  }
+
   // Skip intermediate streaming renders - MESSAGE_RECEIVED clears this flag
   // before the final CHARACTER_MESSAGE_RENDERED fires in both streaming and
   // non-streaming paths, so extraction only runs once per completed message.
@@ -536,10 +552,13 @@ async function onCharacterMessageRendered(messageId, type) {
   const characterName = getCurrentCharacterName();
   advanceDurableRetcons(characterName);
 
-  // Capture the current chat generation so we can abort before any write if
-  // the user switches chats while a model call is in progress.
+  // Capture the current chat generation and operation revision so we can abort
+  // before any write if the user switches chats or rewrites the branch (swipe,
+  // edit, delete) while a model call is in progress.
   const capturedGen = chatLoadId;
+  const capturedRev = getOperationRevision();
   const chatChanged = () => chatLoadId !== capturedGen;
+  const branchChanged = () => chatChanged() || getOperationRevision() !== capturedRev;
 
   const lastMsg = context.chat
     .slice()
@@ -579,7 +598,7 @@ async function onCharacterMessageRendered(messageId, type) {
       // returning and this timeout firing, bail immediately. Without this check,
       // compaction evaluates the new chat and injectCanon briefly injects the
       // previous character's canon into the wrong chat.
-      if (chatChanged()) return;
+      if (branchChanged()) return;
 
       // Tracks whether a scene-break epistemic pass already ran this turn so the
       // periodic extraction batch below does not duplicate the model call.
@@ -610,7 +629,7 @@ async function onCharacterMessageRendered(messageId, type) {
               source !== memory_sources.main
                 ? startActivityLoader(settings, 'Updating story summary...')
                 : null;
-            const summary = await runCompaction({ abortCheck: chatChanged });
+            const summary = await runCompaction({ abortCheck: branchChanged });
             stopActivityLoader(compactionHandle);
             if (summary) {
               injectSummary(summary);
@@ -643,7 +662,7 @@ async function onCharacterMessageRendered(messageId, type) {
             sceneCheckText,
             sceneMessageBuffer,
             prevAiMsgText,
-            chatChanged,
+            branchChanged,
           );
           if (wasBreak) {
             injectSceneHistory();
@@ -770,7 +789,7 @@ async function onCharacterMessageRendered(messageId, type) {
             const turnType = classifyTurn(lastAiMessage);
             const budgets = adaptiveBudgets(settings, turnType);
 
-            if (chatChanged()) throw CHAT_SWITCHED;
+            if (branchChanged()) throw CHAT_SWITCHED;
             if (settings.session_enabled && sessionWindow.length > 0 && !isFreshStart()) {
               // Snapshot existing memory ids before extraction so we can identify
               // which memories are new and link them to the current scene.
@@ -780,7 +799,7 @@ async function onCharacterMessageRendered(messageId, type) {
                   .filter(Boolean),
               );
 
-              const count = await extractSessionMemories(sessionWindow, chatChanged).catch(
+              const count = await extractSessionMemories(sessionWindow, branchChanged).catch(
                 (err) => {
                   console.error('[SmartMemory] Session extraction error:', err);
                   return 0;
@@ -789,7 +808,7 @@ async function onCharacterMessageRendered(messageId, type) {
               // Run session consolidation after extraction - fires per-type when threshold is reached.
               if (!consolidationRunning) {
                 consolidationRunning = true;
-                await consolidateSessionMemories(false, chatChanged).catch((err) => {
+                await consolidateSessionMemories(false, branchChanged).catch((err) => {
                   console.error('[SmartMemory] Session consolidation error:', err);
                 });
                 consolidationRunning = false;
@@ -812,7 +831,7 @@ async function onCharacterMessageRendered(messageId, type) {
               }
             }
 
-            if (chatChanged()) throw CHAT_SWITCHED;
+            if (branchChanged()) throw CHAT_SWITCHED;
             if (
               settings.longterm_enabled &&
               characterName &&
@@ -863,7 +882,7 @@ async function onCharacterMessageRendered(messageId, type) {
             // apart, leaving character knowledge stale when a secret is revealed
             // mid-scene. Run a lightweight pass on each extraction batch unless a
             // scene-break pass already covered this turn's buffer.
-            if (chatChanged()) throw CHAT_SWITCHED;
+            if (branchChanged()) throw CHAT_SWITCHED;
             if (isEpistemicEnabled() && characterName && !isFreshStart() && !epistemicThisPass) {
               const epistemicWindow = longtermWindow.length > 0 ? longtermWindow : sessionWindow;
               if (epistemicWindow.length > 0) {
@@ -881,14 +900,14 @@ async function onCharacterMessageRendered(messageId, type) {
             // resolution in this pass (the count only grows when an arc closes).
             const arcSummaryCountBefore = settings.arcs_enabled ? loadArcSummaries().length : 0;
 
-            if (chatChanged()) throw CHAT_SWITCHED;
+            if (branchChanged()) throw CHAT_SWITCHED;
             if (settings.arcs_enabled && !isFreshStart()) {
               // Arc extraction uses a wider window than other tiers so it can catch
               // arcs opened earlier in the session, but is capped to avoid overflowing
               // the model's context on long chats. Existing arcs are passed to the
               // prompt so resolution still works even outside this window.
               const arcWindow = getStableExtractionWindow(context.chat, 100);
-              const count = await extractArcs(arcWindow, characterName, chatChanged).catch(
+              const count = await extractArcs(arcWindow, characterName, branchChanged).catch(
                 (err) => {
                   console.error('[SmartMemory] Arc extraction error:', err);
                   return 0;
@@ -899,9 +918,9 @@ async function onCharacterMessageRendered(messageId, type) {
               total += count;
             }
 
-            if (chatChanged()) throw CHAT_SWITCHED;
+            if (branchChanged()) throw CHAT_SWITCHED;
             if (!isFreshStart()) {
-              await runStateCardExtraction(characterName, longtermWindow, chatChanged).catch(
+              await runStateCardExtraction(characterName, longtermWindow, branchChanged).catch(
                 (err) => {
                   console.error('[SmartMemory] State ledger extraction error:', err);
                 },
@@ -913,10 +932,11 @@ async function onCharacterMessageRendered(messageId, type) {
             // latest memories. Sequential - same constraint as the other tiers.
             // Skipped in freshStart chats - no new memories were written so
             // regeneration would waste a model call producing the same output.
-            if (chatChanged()) throw CHAT_SWITCHED;
+            if (branchChanged()) throw CHAT_SWITCHED;
             if (settings.profiles_enabled && characterName && !isFreshStart()) {
-              await generateProfiles(characterName, chatChanged)
+              await generateProfiles(characterName, branchChanged)
                 .then((profiles) => {
+                  if (branchChanged()) return;
                   if (profiles) {
                     injectProfiles(characterName, budgets.profiles);
                     updateProfilesUI(profiles);
@@ -930,7 +950,7 @@ async function onCharacterMessageRendered(messageId, type) {
             // Profile B only: auto-regenerate canon when a new arc resolved this
             // pass. Gating on an increase (not just count >= 2) avoids a model call
             // on every extraction batch once the chat has two summaries.
-            if (chatChanged()) throw CHAT_SWITCHED;
+            if (branchChanged()) throw CHAT_SWITCHED;
             if (
               settings.canon_enabled &&
               settings.arcs_enabled &&
@@ -943,6 +963,11 @@ async function onCharacterMessageRendered(messageId, type) {
                 .then(() => injectCanon(characterName))
                 .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
             }
+
+            // The branch can be rewritten during the final model calls. If it
+            // was, abort now rather than writing memories/state/UI for a branch
+            // the user has discarded.
+            if (branchChanged()) return;
 
             // Refresh entity panel after extraction since new entities may have been linked.
             updateEntityPanel(characterName);
@@ -998,9 +1023,10 @@ async function onCharacterMessageRendered(messageId, type) {
       ) {
         messagesSinceLastProfileRegen = 0;
         const schedProfileHandle = startActivityLoader(settings, 'Updating profiles...');
-        generateProfiles(characterName, chatChanged)
+        generateProfiles(characterName, branchChanged)
           .then((profiles) => {
             stopActivityLoader(schedProfileHandle);
+            if (branchChanged()) return;
             if (profiles) {
               injectProfiles(characterName);
               updateProfilesUI(profiles);
@@ -1029,10 +1055,9 @@ async function onCharacterMessageRendered(messageId, type) {
         !continuityCheckRunning
       ) {
         continuityCheckRunning = true;
-        // Capture the chat generation so a result from a previous chat can never
-        // render, toast, or queue a note against the chat the user switched to.
-        const continuityGen = chatLoadId;
-        const isCurrentChat = () => chatLoadId === continuityGen;
+        // Capture the branch state so a result from a discarded branch can never
+        // render, toast, or queue a note against the replacement branch.
+        const isCurrentChat = () => !branchChanged();
         const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
         checkContinuity(characterName, isCurrentChat)
           .then((result) => {
@@ -1073,6 +1098,10 @@ let chatLoadId = 0;
 const CHAT_SWITCHED = Symbol('chat-switched');
 
 function onChatChanged() {
+  // A chat switch ends any generation in this context. Clear the flag
+  // immediately so a stuck value cannot suppress extraction in the new chat.
+  generationInProgress = false;
+  generationStartTime = 0;
   clearTimeout(chatChangedTimer);
   chatChangedTimer = setTimeout(() => onChatChangedImpl().catch(console.error), 100);
 }
@@ -1084,6 +1113,8 @@ function onChatChanged() {
  */
 async function onChatChangedImpl() {
   ++chatLoadId;
+  // Invalidate any in-flight background task from the previous chat/branch.
+  bumpOperationRevision();
 
   // Reset per-load flags so warnings and trim indicators start fresh for the new chat.
   resetEpistemicWarnFlag();
@@ -1429,6 +1460,12 @@ async function onGroupMemberDrafted(chId) {
   const characterName = context.characters[chId]?.name;
   if (!characterName) return;
 
+  // Capture the operation revision so a branch change (swipe/edit/delete)
+  // during the awaits below does not leave this character's slots half-swapped
+  // with stale branch data.
+  const capturedRev = getOperationRevision();
+  const branchChanged = () => getOperationRevision() !== capturedRev;
+
   // Migrate per-character data on first access in this session. Fast no-op
   // once already at the current schema version.
   ensureCharacterMigrated(characterName);
@@ -1449,9 +1486,11 @@ async function onGroupMemberDrafted(chId) {
   updateShortTermUI(summary);
 
   await injectMemories(characterName);
+  if (branchChanged()) return;
   injectRelationshipHistory(characterName);
   injectEpistemicKnowledge(characterName, characterName);
   await injectSessionMemories();
+  if (branchChanged()) return;
   injectSceneHistory();
   injectArcs();
   injectProfiles(characterName);
@@ -1497,10 +1536,13 @@ async function onGroupWrapperFinished({ type } = {}) {
   const context = getContext();
   if (!context.chat || context.chat.length === 0) return;
 
-  // Capture the current chat generation so we can abort before any write if
-  // the user switches chats while a model call is in progress.
+  // Capture the current chat generation and operation revision so we can abort
+  // before any write if the user switches chats or rewrites the branch (swipe,
+  // edit, delete) while a model call is in progress.
   const capturedGen = chatLoadId;
+  const capturedRev = getOperationRevision();
   const chatChanged = () => chatLoadId !== capturedGen;
+  const branchChanged = () => chatChanged() || getOperationRevision() !== capturedRev;
 
   // Snapshot before any await - onGroupWrapperStarted resets respondedThisRound
   // for the next round and can fire while this function is mid-await if the user
@@ -1531,7 +1573,7 @@ async function onGroupWrapperFinished({ type } = {}) {
   setTimeout(() => {
     (async () => {
       // Guard: bail if the user switched chats during the deferral window.
-      if (chatChanged()) return;
+      if (branchChanged()) return;
 
       // Tracks whether a scene-break epistemic pass already ran this round so
       // the periodic extraction below does not duplicate the model call.
@@ -1555,7 +1597,7 @@ async function onGroupWrapperFinished({ type } = {}) {
               source !== memory_sources.main
                 ? startActivityLoader(settings, 'Updating story summary...')
                 : null;
-            const summary = await runCompaction({ abortCheck: chatChanged });
+            const summary = await runCompaction({ abortCheck: branchChanged });
             stopActivityLoader(compactionHandle);
             if (summary) {
               injectSummary(summary);
@@ -1583,7 +1625,7 @@ async function onGroupWrapperFinished({ type } = {}) {
             sceneCheckText,
             sceneMessageBuffer,
             prevAiMsgText,
-            chatChanged,
+            branchChanged,
           );
           if (wasBreak) {
             injectSceneHistory();
@@ -1692,7 +1734,7 @@ async function onGroupWrapperFinished({ type } = {}) {
               const turnType = classifyTurn(lastAiMessage);
               const budgets = adaptiveBudgets(settings, turnType);
 
-              if (chatChanged()) throw CHAT_SWITCHED;
+              if (branchChanged()) throw CHAT_SWITCHED;
               // Session extraction is chat-wide - all characters share one session store.
               if (settings.session_enabled && sessionWindow.length > 0 && !isFreshStart()) {
                 const priorSessionIds = new Set(
@@ -1701,7 +1743,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                     .filter(Boolean),
                 );
 
-                const count = await extractSessionMemories(sessionWindow, chatChanged).catch(
+                const count = await extractSessionMemories(sessionWindow, branchChanged).catch(
                   (err) => {
                     console.error('[SmartMemory] Session extraction error:', err);
                     return 0;
@@ -1709,7 +1751,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 );
                 if (!consolidationRunning) {
                   consolidationRunning = true;
-                  await consolidateSessionMemories(false, chatChanged).catch((err) => {
+                  await consolidateSessionMemories(false, branchChanged).catch((err) => {
                     console.error('[SmartMemory] Session consolidation error:', err);
                   });
                   consolidationRunning = false;
@@ -1731,7 +1773,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 }
               }
 
-              if (chatChanged()) throw CHAT_SWITCHED;
+              if (branchChanged()) throw CHAT_SWITCHED;
               // Long-term extraction and profiles run per character since each
               // character has their own store. Sequential per CLAUDE.md constraint.
               for (const characterName of roundResponders) {
@@ -1778,8 +1820,9 @@ async function onGroupWrapperFinished({ type } = {}) {
                 }
 
                 if (settings.profiles_enabled && characterName && !isFreshStart()) {
-                  await generateProfiles(characterName, chatChanged)
+                  await generateProfiles(characterName, branchChanged)
                     .then((profiles) => {
+                      if (branchChanged()) return;
                       if (profiles) {
                         // Only update the UI panel if this is the character currently
                         // shown in the selector - other characters' profiles are stored
@@ -1794,7 +1837,7 @@ async function onGroupWrapperFinished({ type } = {}) {
 
               // Periodic group epistemic refresh so knowledge revealed between scene
               // breaks is captured. One pass partitions entries across every member.
-              if (chatChanged()) throw CHAT_SWITCHED;
+              if (branchChanged()) throw CHAT_SWITCHED;
               if (
                 isEpistemicEnabled() &&
                 !isFreshStart() &&
@@ -1817,7 +1860,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 }
               }
 
-              if (chatChanged()) throw CHAT_SWITCHED;
+              if (branchChanged()) throw CHAT_SWITCHED;
               // Arc extraction is chat-wide - once per round after all characters.
               // Snapshot summary count first so the canon check below can detect a
               // new resolution without re-running extraction.
@@ -1825,7 +1868,7 @@ async function onGroupWrapperFinished({ type } = {}) {
 
               if (settings.arcs_enabled && !isFreshStart()) {
                 const arcWindow = getStableExtractionWindow(context.chat, 100);
-                const count = await extractArcs(arcWindow, null, chatChanged).catch((err) => {
+                const count = await extractArcs(arcWindow, null, branchChanged).catch((err) => {
                   console.error('[SmartMemory] Arc extraction error:', err);
                   return 0;
                 });
@@ -1858,15 +1901,17 @@ async function onGroupWrapperFinished({ type } = {}) {
                 }
               }
 
-              if (chatChanged()) throw CHAT_SWITCHED;
+              if (branchChanged()) throw CHAT_SWITCHED;
               if (!isFreshStart()) {
                 // Pass every active member so entities from the whole group's
                 // registries are available, not just the selected character's.
-                await runStateCardExtraction(activeGroupMembers, longtermWindow, chatChanged).catch(
-                  (err) => {
-                    console.error('[SmartMemory] State ledger extraction error:', err);
-                  },
-                );
+                await runStateCardExtraction(
+                  activeGroupMembers,
+                  longtermWindow,
+                  branchChanged,
+                ).catch((err) => {
+                  console.error('[SmartMemory] State ledger extraction error:', err);
+                });
                 injectStateLedger(true);
               }
 
@@ -1886,6 +1931,11 @@ async function onGroupWrapperFinished({ type } = {}) {
                     .catch((err) => console.error('[SmartMemory] Auto-canon error:', err));
                 }
               }
+
+              // The branch can be rewritten during the final model calls. If it
+              // was, abort now rather than writing memories/state/UI for a branch
+              // the user has discarded.
+              if (branchChanged()) return;
 
               // Refresh entity panel with the last character who responded.
               const lastResponder = [...roundResponders].at(-1);
@@ -1942,9 +1992,10 @@ async function onGroupWrapperFinished({ type } = {}) {
         messagesSinceLastProfileRegen = 0;
         for (const characterName of roundResponders) {
           const schedProfileHandle = startActivityLoader(settings, 'Updating profiles...');
-          generateProfiles(characterName, chatChanged)
+          generateProfiles(characterName, branchChanged)
             .then((profiles) => {
               stopActivityLoader(schedProfileHandle);
+              if (branchChanged()) return;
               if (profiles) {
                 injectProfiles(characterName);
                 if (characterName === selectedGroupCharacter) updateProfilesUI(profiles);
@@ -1977,10 +2028,9 @@ async function onGroupWrapperFinished({ type } = {}) {
         !continuityCheckRunning
       ) {
         continuityCheckRunning = true;
-        // Capture the chat generation so a result from a previous chat can never
-        // render, toast, or queue a note against the chat the user switched to.
-        const continuityGen = chatLoadId;
-        const isCurrentChat = () => chatLoadId === continuityGen;
+        // Capture the branch state so a result from a discarded branch can never
+        // render, toast, or queue a note against the replacement branch.
+        const isCurrentChat = () => !branchChanged();
         const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
         checkContinuity(lastResponder, isCurrentChat)
           .then((result) => {
@@ -2131,6 +2181,7 @@ jQuery(async function () {
     // MESSAGE_RECEIVED and CHARACTER_MESSAGE_RENDERED.
     if (type === 'normal') {
       generationInProgress = true;
+      generationStartTime = Date.now();
       $('#sm_recap_overlay').remove();
       recapOverlayChatMeta = null;
       // Inject a queued continuity note before the model sees the prompt.
@@ -2140,6 +2191,16 @@ jQuery(async function () {
     }
   });
   eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+    generationInProgress = false;
+  });
+  // Terminal generation paths. A cancelled or stopped generation produces no
+  // MESSAGE_RECEIVED and no CHARACTER_MESSAGE_RENDERED, which would otherwise
+  // leave generationInProgress stuck true and suppress extraction for every
+  // subsequent message. Clear the flag on both terminal events.
+  eventSource.on(event_types.GENERATION_STOPPED, () => {
+    generationInProgress = false;
+  });
+  eventSource.on(event_types.GENERATION_ENDED, () => {
     generationInProgress = false;
   });
   // Allow external extensions to dismiss the recap overlay programmatically
@@ -2191,6 +2252,12 @@ jQuery(async function () {
   // memory operation returns an empty response and is skipped cleanly - it will
   // retry on the next accepted message.
   eventSource.on(event_types.MESSAGE_SWIPED, (messageId) => {
+    // A swipe discards the previous branch. Bump the revision so any in-flight
+    // background task is invalidated, clear the generation flag, and abort any
+    // external memory generation immediately.
+    bumpOperationRevision();
+    generationInProgress = false;
+    generationStartTime = 0;
     abortCurrentMemoryGeneration();
     // A swipe rewrites the message the continuity check was anchored to, so
     // any queued note is no longer valid for this branch of the story.
@@ -2237,6 +2304,13 @@ jQuery(async function () {
   // cursor, and rewind the scene buffer so the rewritten text is processed
   // again instead of being skipped as already-seen.
   eventSource.on(event_types.MESSAGE_EDITED, (messageId) => {
+    // An edit rewrites the branch. Bump the revision so any in-flight
+    // background task is invalidated, clear the generation flag, and abort any
+    // external memory generation before touching state.
+    bumpOperationRevision();
+    generationInProgress = false;
+    generationStartTime = 0;
+    abortCurrentMemoryGeneration();
     if (!Number.isInteger(messageId)) return;
 
     const context = getContext();
@@ -2268,6 +2342,13 @@ jQuery(async function () {
   // still exist in the chat. Without this, a deleted message would remain in
   // the buffer and be included in the next scene summary.
   eventSource.on(event_types.MESSAGE_DELETED, (messageId) => {
+    // A delete rewrites the branch. Bump the revision so any in-flight
+    // background task is invalidated, clear the generation flag, and abort any
+    // external memory generation before touching state.
+    bumpOperationRevision();
+    generationInProgress = false;
+    generationStartTime = 0;
+    abortCurrentMemoryGeneration();
     const context = getContext();
     const chatSet = new Set(context.chat);
     sceneMessageBuffer = sceneMessageBuffer.filter((m) => chatSet.has(m));
@@ -2277,9 +2358,14 @@ jQuery(async function () {
     clearRepair();
     // Roll the chat-scoped state back to the surviving turn before the deleted
     // one so its facts, state cards, arcs, secrets, and retcons are gone. ST
-    // passes either the deleted index or the new chat length; both resolve to
-    // the last surviving turn via `messageId - 1`.
-    const targetIndex = Number.isInteger(messageId) ? messageId - 1 : context.chat.length - 1;
+    // passes either the deleted index or the new chat length. Disambiguate by
+    // range: a value inside the surviving chat is a deleted index (roll back to
+    // the turn before it); anything out of range is the new length, so use the
+    // last surviving turn.
+    const targetIndex =
+      Number.isInteger(messageId) && messageId >= 0 && messageId <= context.chat.length
+        ? messageId - 1
+        : context.chat.length - 1;
     const meta = context.chatMetadata?.[META_KEY];
     // Rewind the extraction cursor so deleted/rewritten turns are re-extracted
     // rather than skipped by the next pass.

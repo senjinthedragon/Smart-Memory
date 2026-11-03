@@ -112,6 +112,7 @@ import {
   markTrimToastFired,
   isChatLoadComplete,
 } from './trim-stats.js';
+import { sameGroupId, escapeHtml } from './memory-utils.js';
 import {
   loadEpistemicKnowledge,
   saveEpistemicKnowledge,
@@ -208,7 +209,7 @@ export const PERSONAL_TIERS = [
 export function getGroupMembers() {
   const context = getContext();
   if (!context.groupId) return null;
-  const group = context.groups?.find((g) => g.id === context.groupId);
+  const group = context.groups?.find((g) => sameGroupId(g.id, context.groupId));
   if (!group) return null;
   return (group.members ?? [])
     .map((avatarId) => context.characters.find((c) => c.avatar === avatarId)?.name)
@@ -730,7 +731,7 @@ export function updateSessionUI() {
       ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
       : '';
     const supersededByLink = isRetired
-      ? `<button class="sm_superseded_by_link menu_button" data-superseded-by="${mem.superseded_by}" title="Jump to the memory that replaced this one">→ superseded by</button>`
+      ? `<button class="sm_superseded_by_link menu_button" data-superseded-by="${escapeHtml(mem.superseded_by)}" title="Jump to the memory that replaced this one">→ superseded by</button>`
       : '';
     const conflictBadge = hasConflict
       ? `<span class="sm_memory_conflict_badge" title="This memory conflicts with ${mem.contradicts.length} other ${mem.contradicts.length === 1 ? 'memory' : 'memories'} - run the continuity checker to review"><i class="fa-solid fa-triangle-exclamation"></i></span>`
@@ -739,7 +740,7 @@ export function updateSessionUI() {
     const importanceDots = '●'.repeat(mem.importance ?? 1);
     const expiration = mem.expiration ?? 'session';
     const $item = $(`
-            <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${mem.id || ''}" ${isRetired ? 'style="display:none"' : ''}>
+            <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${escapeHtml(mem.id || '')}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_importance sm_importance_${mem.importance ?? 1}" title="Importance ${mem.importance ?? 1}/3">${importanceDots}</span>
                 <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
@@ -1205,7 +1206,7 @@ export function updateEntityPanel(characterName) {
     const safeName = $('<div>').text(entity.name).html();
 
     const $row = $(`
-      <div class="sm_entity_row" data-entity-id="${entity.id}" style="position:relative;">
+      <div class="sm_entity_row" data-entity-id="${escapeHtml(entity.id)}" style="position:relative;">
         <span class="sm_entity_type_badge sm_entity_type_${entity.type}" data-clickable title="Click to change type">
           <i class="fa-solid ${icon}"></i> ${entity.type}
         </span>
@@ -1643,7 +1644,7 @@ export function renderMemoriesList(memories, characterName) {
       ? '<span class="sm_memory_retired_badge" title="This memory was superseded by a newer fact">retired</span>'
       : '';
     const supersededByLink = isRetired
-      ? `<button class="sm_superseded_by_link menu_button" data-superseded-by="${mem.superseded_by}" title="Jump to the memory that replaced this one">→ superseded by</button>`
+      ? `<button class="sm_superseded_by_link menu_button" data-superseded-by="${escapeHtml(mem.superseded_by)}" title="Jump to the memory that replaced this one">→ superseded by</button>`
       : '';
     const conflictBadge = hasConflict
       ? `<span class="sm_memory_conflict_badge" title="This memory conflicts with ${mem.contradicts.length} other ${mem.contradicts.length === 1 ? 'memory' : 'memories'} - run the continuity checker to review"><i class="fa-solid fa-triangle-exclamation"></i></span>`
@@ -1652,17 +1653,17 @@ export function renderMemoriesList(memories, characterName) {
     const importanceDots = '●'.repeat(mem.importance ?? 1);
     const expiration = mem.expiration ?? 'permanent';
     const $item = $(`
-            <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${mem.id || ''}" ${isRetired ? 'style="display:none"' : ''}>
+            <div class="sm_memory_item${retiredClass}" data-index="${idx}" data-memory-id="${escapeHtml(mem.id || '')}" ${isRetired ? 'style="display:none"' : ''}>
                 <span class="sm_memory_type sm_type_${mem.type}">${mem.type}</span>
                 <span class="sm_memory_importance sm_importance_${mem.importance ?? 1}" title="Importance ${mem.importance ?? 1}/3">${importanceDots}</span>
                 <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
                 ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
                 ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 && mem.source_chat_id === getContext().chatId ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" data-source-end="${mem.source_messages[mem.source_messages.length - 1][1]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
-                <button class="sm_edit_memory menu_button" data-memory-id="${mem.id || ''}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
+                <button class="sm_edit_memory menu_button" data-memory-id="${escapeHtml(mem.id || '')}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
                 </button>
-                <button class="sm_delete_memory menu_button" data-memory-id="${mem.id || ''}" title="Delete this memory">
+                <button class="sm_delete_memory menu_button" data-memory-id="${escapeHtml(mem.id || '')}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
             </div>

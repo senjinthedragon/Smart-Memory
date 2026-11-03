@@ -104,7 +104,9 @@ export function parseExtractionOutput(text) {
     const type = match[1].toLowerCase();
     const modifiers = match[2]; // e.g. ":2:permanent" or ":2:permanent:entity=Senjin,Alex"
     const trailing = stripTrailingTag(match[3].trim());
-    const content = trailing.content;
+    // Nested/malformed bracket tags can leave leading `]` noise on the content
+    // (e.g. `[fact:...:entity=[Nested]] Content` yields `] Content`). Strip it.
+    const content = trailing.content.replace(/^[\]\s]+/, '').trim();
 
     if (!MEMORY_TYPES.includes(type) || content.length <= 5) continue;
 
@@ -122,12 +124,13 @@ export function parseExtractionOutput(text) {
       : (trailing.expiration ?? 'permanent');
 
     // Extract optional entity names list. Stops at the next colon so reordering
-    // does not bleed into other fields.
-    const entityMatch = modifiers.match(/entity=([^:[\]]*)/i);
+    // does not bleed into other fields. Nested/malformed brackets may leave a
+    // name wrapped in `[`/`]`; strip those before use.
+    const entityMatch = modifiers.match(/entity=([^:\n]*)/i);
     const rawEntityNames = entityMatch
       ? entityMatch[1]
           .split(',')
-          .map((n) => n.trim())
+          .map((n) => n.replace(/[[\]]/g, '').trim())
           .filter((n) => n.length > 0)
       : [];
 
@@ -184,7 +187,8 @@ export function parseSessionOutput(text) {
     const type = match[1].toLowerCase();
     const modifiers = match[2];
     const trailing = stripTrailingTag(match[3].trim());
-    const content = trailing.content;
+    // Same malformed/nested bracket resilience as parseExtractionOutput.
+    const content = trailing.content.replace(/^[\]\s]+/, '').trim();
 
     if (!SESSION_TYPES.includes(type) || content.length <= 3) continue;
 
@@ -198,11 +202,11 @@ export function parseSessionOutput(text) {
       ? expirationMatch[1].toLowerCase()
       : (trailing.expiration ?? 'session');
 
-    const entityMatch = modifiers.match(/entity=([^:[\]]*)/i);
+    const entityMatch = modifiers.match(/entity=([^:\n]*)/i);
     const rawEntityNames = entityMatch
       ? entityMatch[1]
           .split(',')
-          .map((n) => n.trim())
+          .map((n) => n.replace(/[[\]]/g, '').trim())
           .filter((n) => n.length > 0)
       : [];
 
@@ -416,10 +420,12 @@ function stripHtmlTags(text) {
  *
  * Returns null if none of the three sections are present (bad output).
  * Partial output (one or two sections found) is returned with the missing
- * sections as empty strings - a partial profile is better than no profile.
+ * sections as null rather than empty strings, so callers can distinguish an
+ * omitted section from one the model deliberately left blank - a partial
+ * profile is still better than no profile.
  *
  * @param {string} response - Raw model output from buildProfileGenerationPrompt.
- * @returns {{character_state: string, world_state: string, relationship_matrix: string}|null}
+ * @returns {{character_state: string|null, world_state: string|null, relationship_matrix: string|null}|null}
  */
 export function parseProfileOutput(response) {
   if (!response) return null;
@@ -442,9 +448,9 @@ export function parseProfileOutput(response) {
   if (!character_state && !world_state && !relationship_matrix) return null;
 
   return {
-    character_state: character_state ?? '',
-    world_state: world_state ?? '',
-    relationship_matrix: relationship_matrix ?? '',
+    character_state: character_state ?? null,
+    world_state: world_state ?? null,
+    relationship_matrix: relationship_matrix ?? null,
   };
 }
 
@@ -664,6 +670,96 @@ export function detectSceneBreakHeuristic(messageText) {
   return SCENE_BREAK_PATTERNS.some((pattern) => pattern.test(messageText));
 }
 
+// ---- State Ledger bounds & pruning -----------------------------------------
+
+/**
+ * Maximum character length allowed for any single state card field string.
+ * Prevents prompt-injection or malformed model responses from bloating the
+ * ledger or token footprint.
+ */
+export const MAX_STATE_FIELD_LENGTH = 500;
+
+/**
+ * Maximum number of state cards retained in the ledger. When exceeded,
+ * non-character cards are pruned oldest-first so character state - the most
+ * narratively important - survives longest.
+ */
+export const MAX_STATE_LEDGER_CARDS = 100;
+
+/**
+ * Truncates a string to `max` characters without splitting a surrogate pair
+ * (which would leave a lone surrogate / broken emoji or rare CJK glyph).
+ *
+ * @param {string} value
+ * @param {number} max
+ * @returns {string}
+ */
+function safeTruncate(value, max) {
+  if (value.length <= max) return value;
+  let end = max;
+  const code = value.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return value.slice(0, end);
+}
+
+/**
+ * Truncates any string field longer than MAX_STATE_FIELD_LENGTH. Non-string
+ * values (partial-removal descriptors) pass through untouched. Pure, so it is
+ * safe to call from tests.
+ *
+ * @param {Object} fields
+ * @returns {Object}
+ */
+export function capStateFieldValues(fields) {
+  const capped = {};
+  for (const [field, value] of Object.entries(fields ?? {})) {
+    capped[field] =
+      typeof value === 'string' && value.length > MAX_STATE_FIELD_LENGTH
+        ? safeTruncate(value, MAX_STATE_FIELD_LENGTH)
+        : value;
+  }
+  return capped;
+}
+
+/**
+ * Enforces MAX_STATE_LEDGER_CARDS by deleting cards in place. Non-character
+ * cards are removed first (oldest insertion order first); if that is not enough
+ * to cover the excess, the oldest remaining cards are removed as well.
+ *
+ * @param {Object} ledger
+ * @param {number} [max=MAX_STATE_LEDGER_CARDS]
+ * @returns {number} Number of cards removed.
+ */
+export function pruneStateLedger(ledger, max = MAX_STATE_LEDGER_CARDS) {
+  const keys = Object.keys(ledger);
+  if (keys.length <= max) return 0;
+
+  const excess = keys.length - max;
+  let removed = 0;
+
+  // Pass 1: delete non-character cards oldest-first (by insertion order, which
+  // Object.keys preserves for non-integer keys).
+  for (const key of keys) {
+    if (removed >= excess) break;
+    const type = ledger[key]?.type ?? (key.includes('|') ? key.split('|')[1] : key.split(':')[1]);
+    if (type !== 'character' && !key.endsWith('|character')) {
+      delete ledger[key];
+      removed++;
+    }
+  }
+
+  // Pass 2: if still over the cap, delete oldest remaining cards regardless of type.
+  if (removed < excess) {
+    for (const key of Object.keys(ledger)) {
+      if (removed >= excess) break;
+      delete ledger[key];
+      removed++;
+    }
+  }
+
+  return removed;
+}
+
 // ---- Epistemic extraction parser ----------------------------------------
 
 // Matches: [hiding] Concealer from Target | content
@@ -726,11 +822,19 @@ export function parseEpistemicResponse(text) {
 const EPISTEMIC_RETIRE_LINE_RE = /^\[retire\]/i;
 
 /**
+ * Maximum number of existing entries the model may retire in a single
+ * epistemic extraction pass. Caps runaway `[retire]` output so one bad response
+ * cannot wipe a character's whole knowledge base.
+ */
+export const MAX_EPISTEMIC_RETIREMENTS = 5;
+
+/**
  * Extracts the set of 1-based entry indices the model flagged for retirement.
  *
  * Expects lines of the form `[retire] <number>` mixed in with the regular
- * epistemic output. Invalid or out-of-range indices are silently ignored by
- * the caller.
+ * epistemic output. Only positive integers are returned - zero, negatives, and
+ * non-numeric noise are ignored. At most MAX_EPISTEMIC_RETIREMENTS indices are
+ * returned per pass; further valid indices are dropped.
  *
  * Lenient parsing: accepts `[retire]3`, `[retire] #2`, `[retire] 1, 3`,
  * trailing punctuation, and other weak-model variations by extracting all
@@ -743,10 +847,18 @@ export function parseEpistemicRetireIndices(text) {
   const indices = new Set();
   if (!text) return indices;
   for (const raw of text.split('\n')) {
+    if (indices.size >= MAX_EPISTEMIC_RETIREMENTS) break;
     const trimmed = raw.trim();
     if (!EPISTEMIC_RETIRE_LINE_RE.test(trimmed)) continue;
     const nums = trimmed.replace(EPISTEMIC_RETIRE_LINE_RE, '').match(/\d+/g);
-    if (nums) nums.forEach((n) => indices.add(Number(n)));
+    if (!nums) continue;
+    for (const n of nums) {
+      const value = Number(n);
+      // Only 1-based positive integers are meaningful entry indices.
+      if (!Number.isInteger(value) || value <= 0) continue;
+      indices.add(value);
+      if (indices.size >= MAX_EPISTEMIC_RETIREMENTS) break;
+    }
   }
   return indices;
 }

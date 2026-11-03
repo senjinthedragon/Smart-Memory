@@ -100,7 +100,10 @@ async function saveProfiles(profiles, characterName) {
 export function areProfilesStale(thresholdMs = DEFAULT_STALE_THRESHOLD_MS, characterName) {
   const profiles = loadProfiles(characterName);
   if (!profiles) return true;
-  return Date.now() - (profiles.generated_at ?? 0) > thresholdMs;
+  // Coerce before comparing: a missing or non-numeric generated_at (e.g. from
+  // an older stored shape) is treated as 0 so those profiles always regenerate.
+  const generatedAt = Number(profiles.generated_at) || 0;
+  return Date.now() - generatedAt > thresholdMs;
 }
 
 // ---- Generation ---------------------------------------------------------
@@ -162,7 +165,16 @@ export async function generateProfiles(characterName, abortCheck = null) {
       return null;
     }
 
-    const profiles = { ...parsed, generated_at: Date.now() };
+    // Merge with any previously stored sections. Weak models frequently emit
+    // only one or two of the three sections; overwriting wholesale would blank
+    // the missing sections and drop context the AI was already relying on.
+    const existing = loadProfiles(characterName) || {};
+    const profiles = {
+      character_state: parsed.character_state || existing.character_state || '',
+      world_state: parsed.world_state || existing.world_state || '',
+      relationship_matrix: parsed.relationship_matrix || existing.relationship_matrix || '',
+      generated_at: Date.now(),
+    };
     if (abortCheck?.()) return null;
     await saveProfiles(profiles, characterName);
     return profiles;

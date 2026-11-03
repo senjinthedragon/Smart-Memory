@@ -244,7 +244,19 @@ prompt/parse changes can be checked without a live model.
 
 ## 11. Revision history
 
-### v2 critique fixes (current)
+### v2.1 adversarial resilience fixes (current)
+
+- **Branch revision guarding.** Added synchronous `operationRevision` / `bumpOperationRevision()` token bumped on chat change, swipe, edit, delete, and abort. Async pipelines abort before writing state if `branchChanged()`.
+- **State Ledger allowlist enforcement.** Enforced strict allowlist matching active entities/characters, rejecting hallucinated cards. Bounded cards to 100 with character-preferential pruning; capped field strings to 500 characters.
+- **Unicode-aware token budgeting.** `estimateTokens` weights non-Latin scripts (CJK, Arabic, Thai, Devanagari) at 1.5 tokens/char to prevent context blowout.
+- **Multi-controller aborts & abort-aware sleep.** Abort controllers are tracked in a Set; retry sleep is abort-aware so cancellations immediately stop network requests.
+- **Metadata bounding.** Arc summaries capped at 50, canon prompt arc input capped at 20, epistemic entries capped at 100 per chat; mass retirement guarded and clamped to 5 positive integers.
+- **Prototype pollution protection.** `safeStorageKey` guards object keys (`__proto__`, `constructor`, `prototype`).
+- **Group ID normalization.** `sameGroupId` unifies string vs numeric group ID comparisons across UI, settings, and memory tiers.
+- **Profile partial output merging.** Partial model XML outputs merge into existing profiles without blanking omitted sections.
+- **Unified cache invalidation.** Invalidation added to relationship history and triggered memory clear paths; reinjection wired to settings toggle.
+
+### v2 critique fixes
 
 - **N1** Unicode-aware entity boundaries; CJK/Thai substring fallback.
 - **N2** Snapshots on manual state mutations (state cards, arcs, epistemic).

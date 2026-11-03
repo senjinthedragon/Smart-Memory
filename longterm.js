@@ -99,6 +99,8 @@ import {
   trimByPriority,
   keywordSet,
   filterTriggersByFrequency,
+  sameGroupId,
+  safeStorageKey,
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
@@ -218,7 +220,7 @@ async function verifyLongtermCandidates(candidates, existing) {
 export function loadCharacterMemories(characterName) {
   if (!characterName) return [];
   const chars = extension_settings[MODULE_NAME].characters;
-  const memories = chars?.[characterName]?.memories ?? [];
+  const memories = chars?.[safeStorageKey(characterName)]?.memories ?? [];
   // Migrate: entries without the consolidated flag are pre-existing stable memories.
   // Entries without an importance score default to 2 (medium).
   // applyGraphDefaults is a safety net for entries that predate the one-shot
@@ -254,8 +256,9 @@ export function saveCharacterMemories(characterName, memories) {
   }
   // Spread the existing character object so the entity registry and any other
   // fields stored alongside memories (e.g. entities, canon) are preserved.
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
+  const key = safeStorageKey(characterName);
+  const existing = extension_settings[MODULE_NAME].characters[key] ?? {};
+  extension_settings[MODULE_NAME].characters[key] = {
     ...existing,
     memories,
     lastUpdated: Date.now(),
@@ -348,8 +351,9 @@ export function applyRetconToLongterm(characterName, retcon) {
  */
 export function clearCharacterMemories(characterName) {
   if (!characterName) return;
-  if (extension_settings[MODULE_NAME].characters?.[characterName]) {
-    delete extension_settings[MODULE_NAME].characters[characterName];
+  const key = safeStorageKey(characterName);
+  if (extension_settings[MODULE_NAME].characters?.[key]) {
+    delete extension_settings[MODULE_NAME].characters[key];
   }
 }
 
@@ -365,7 +369,8 @@ export function clearCharacterMemories(characterName) {
 export function loadRelationshipHistory(characterName) {
   if (!characterName) return {};
   const raw =
-    extension_settings[MODULE_NAME].characters?.[characterName]?.relationship_history ?? {};
+    extension_settings[MODULE_NAME].characters?.[safeStorageKey(characterName)]
+      ?.relationship_history ?? {};
   // Normalize entries still in the old flat format { descriptors: string[], magnitude: string }
   // to the current per-descriptor format { descriptors: Array<{word, magnitude}> }.
   // This is a read-time safety net in case the schema migration did not run yet.
@@ -396,8 +401,9 @@ export function saveRelationshipHistory(characterName, history) {
   if (!extension_settings[MODULE_NAME].characters) {
     extension_settings[MODULE_NAME].characters = {};
   }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
+  const key = safeStorageKey(characterName);
+  const existing = extension_settings[MODULE_NAME].characters[key] ?? {};
+  extension_settings[MODULE_NAME].characters[key] = {
     ...existing,
     relationship_history: history,
   };
@@ -410,7 +416,7 @@ export function saveRelationshipHistory(characterName, history) {
  */
 export function clearRelationshipHistory(characterName) {
   if (!characterName) return;
-  const char = extension_settings[MODULE_NAME].characters?.[characterName];
+  const char = extension_settings[MODULE_NAME].characters?.[safeStorageKey(characterName)];
   if (char) delete char.relationship_history;
 }
 
@@ -1231,6 +1237,7 @@ export async function injectMemories(
     if (triggeredLines.length === 0) {
       setMacroContent(MACRO_NAMES.triggered, '');
       setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
+      invalidateUnifiedCache(PROMPT_KEY_TRIGGERED);
       return;
     }
     const triggeredText = triggeredLines.join('\n');
@@ -1238,6 +1245,7 @@ export async function injectMemories(
     setMacroContent(MACRO_NAMES.triggered, triggeredContent);
     if (isMacroActive(MACRO_NAMES.triggered)) {
       setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
+      invalidateUnifiedCache(PROMPT_KEY_TRIGGERED);
     } else {
       setExtensionPrompt(
         PROMPT_KEY_TRIGGERED,
@@ -1251,6 +1259,7 @@ export async function injectMemories(
   } else {
     setMacroContent(MACRO_NAMES.triggered, '');
     setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_TRIGGERED);
   }
 }
 
@@ -1273,6 +1282,7 @@ export function injectRelationshipHistory(characterName, updateTelemetry = false
   const clear = () => {
     setMacroContent(MACRO_NAMES.relationships, '');
     setExtensionPrompt(PROMPT_KEY_RELATIONSHIPS, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_RELATIONSHIPS);
     if (updateTelemetry) updateRelationshipTelemetry(0);
   };
 
@@ -1293,7 +1303,7 @@ export function injectRelationshipHistory(characterName, updateTelemetry = false
   // Also include names of characters currently in a group chat.
   const groupNames = new Set();
   if (context.groupId) {
-    const group = context.groups?.find((g) => g.id === context.groupId);
+    const group = context.groups?.find((g) => sameGroupId(g.id, context.groupId));
     if (group) {
       for (const avatarId of group.members ?? []) {
         const c = context.characters?.find((ch) => ch.avatar === avatarId);
@@ -1340,6 +1350,7 @@ export function injectRelationshipHistory(characterName, updateTelemetry = false
   setMacroContent(MACRO_NAMES.relationships, content);
   if (isMacroActive(MACRO_NAMES.relationships)) {
     setExtensionPrompt(PROMPT_KEY_RELATIONSHIPS, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_RELATIONSHIPS);
     if (updateTelemetry) updateRelationshipTelemetry(estimateTokens(content));
     return;
   }

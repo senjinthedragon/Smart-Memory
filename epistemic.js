@@ -60,7 +60,11 @@ import {
   generateMemoryId,
 } from './constants.js';
 import { buildEpistemicExtractionPrompt } from './prompts.js';
-import { parseEpistemicResponse, parseEpistemicRetireIndices } from './parsers.js';
+import {
+  parseEpistemicResponse,
+  parseEpistemicRetireIndices,
+  MAX_EPISTEMIC_RETIREMENTS,
+} from './parsers.js';
 import { getSceneParticipants } from './scenes.js';
 import { generateMemoryExtract } from './generate.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
@@ -251,6 +255,10 @@ export function saveEpistemicKnowledge(characterName, entries) {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  // Cap stored entries to the 100 most recent. Without this, repeated scene
+  // extractions accumulate stale perspectives indefinitely and the chat-scoped
+  // store grows without bound.
+  if (entries.length > 100) entries = entries.slice(-100);
   context.chatMetadata[META_KEY].epistemic_knowledge = entries;
   context.saveMetadata()?.catch?.(console.error);
   snapshotCurrentState();
@@ -415,6 +423,43 @@ function normalizeParsedSubjects(entries, characterName) {
 }
 
 /**
+ * Guards against a model retiring the entire existing entry list in one pass.
+ *
+ * A response that flags every entry for retirement is almost always a model
+ * failure (e.g. it echoed the whole list with [retire] tags) rather than a
+ * genuine scene-level reset, and applying it would wipe the character's
+ * knowledge map. When the flagged count covers all existing entries and there
+ * are more than two, log a warning and keep only the first
+ * MAX_EPISTEMIC_RETIREMENTS retirements.
+ *
+ * The incoming set is also validated here: only positive integers are kept, and
+ * at most MAX_EPISTEMIC_RETIREMENTS indices are honored per pass.
+ *
+ * @param {Set<number>} retireIndices - 1-based indices flagged by the model.
+ * @param {Object[]} existing - Existing entries the indices refer to.
+ * @returns {Set<number>} Possibly-trimmed retire index set.
+ */
+function guardMassRetirement(retireIndices, existing) {
+  // Drop anything that is not a valid 1-based positive integer.
+  const valid = new Set();
+  for (const n of retireIndices) {
+    if (Number.isInteger(n) && n > 0) valid.add(n);
+    if (valid.size >= MAX_EPISTEMIC_RETIREMENTS) break;
+  }
+  retireIndices = valid;
+
+  if (existing.length > 2 && retireIndices.size >= existing.length) {
+    console.warn(
+      `[SmartMemory] Epistemic mass-retirement guard: model flagged ${retireIndices.size} of ${existing.length} entries for retirement. Retiring only the first ${MAX_EPISTEMIC_RETIREMENTS} to protect the knowledge map.`,
+    );
+    retireIndices = new Set(
+      [...retireIndices].sort((a, b) => a - b).slice(0, MAX_EPISTEMIC_RETIREMENTS),
+    );
+  }
+  return retireIndices;
+}
+
+/**
  * Runs the epistemic extraction pass for a completed scene.
  *
  * Called at scene breaks only - not every extraction cycle. Epistemic facts are
@@ -459,7 +504,7 @@ export async function extractEpistemicKnowledge(
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
     // Parse retire indices first so the caller can filter before dedup.
-    const retireIndices = parseEpistemicRetireIndices(response);
+    const retireIndices = guardMassRetirement(parseEpistemicRetireIndices(response), existing);
     const retiredCount = retireIndices.size;
 
     // Filter existing entries - remove any the model flagged as superseded.
@@ -552,7 +597,7 @@ export async function extractAndPartitionGroupEpistemic(sceneMessages, groupMemb
 
     if (!response || response.trim().toUpperCase() === 'NONE') return 0;
 
-    const retireIndices = parseEpistemicRetireIndices(response);
+    const retireIndices = guardMassRetirement(parseEpistemicRetireIndices(response), existing);
     const retiredCount = retireIndices.size;
 
     // Retire indices refer to the combined chat-scoped list.

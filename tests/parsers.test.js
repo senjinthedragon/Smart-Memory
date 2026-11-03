@@ -516,7 +516,8 @@ Alex (character): close friend [confidence: 0.8]
   const result = parseProfileOutput(input);
   assert.ok(result !== null);
   assert.ok(result.character_state.includes('survive'));
-  assert.equal(result.world_state, '');
+  // Omitted sections are null (not ''), so callers can tell they were not produced.
+  assert.equal(result.world_state, null);
   assert.ok(result.relationship_matrix.includes('Alex'));
 });
 

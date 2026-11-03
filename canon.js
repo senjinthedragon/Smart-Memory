@@ -131,7 +131,10 @@ export async function generateCanon(characterName) {
     .slice(0, 30);
   const memoriesText = memories.map((m) => `[${m.type}] ${m.content}`).join('\n');
 
-  const arcTexts = arcSummaries.map((s) => s.summary);
+  // Only the most recent arc summaries contribute to canon. Keep the prompt
+  // bounded on local hardware - older threads are already reflected in canon
+  // from prior generations, so feeding the full history only inflates cost.
+  const arcTexts = arcSummaries.slice(-20).map((s) => s.summary);
   const prompt = buildCanonSummaryPrompt(characterName, arcTexts, memoriesText);
 
   const response = await generateMemoryExtract(prompt, {

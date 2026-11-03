@@ -101,6 +101,7 @@ import {
 import { extractArcs, injectArcs, clearArcs, clearArcSummaries, loadArcSummaries } from './arcs.js';
 import { runModelTest } from './model-test.js';
 import { migrateEpistemicStateLedgerPlacement } from './settings-migration.js';
+import { sameGroupId } from './memory-utils.js';
 
 /** Set to true while a model test is running to allow cancellation. */
 let modelTestRunning = false;
@@ -766,7 +767,7 @@ export function bindSettingsUI(ctrl) {
     const characterName = ctrl.getSelectedCharacterName();
     const characterNames = (() => {
       if (!context.groupId) return characterName ? [characterName] : [];
-      const group = context.groups?.find((g) => g.id === context.groupId);
+      const group = context.groups?.find((g) => sameGroupId(g.id, context.groupId));
       if (!group) return characterName ? [characterName] : [];
       return group.members
         .filter((avatar) => !(group.disabled_members ?? []).includes(avatar))
@@ -1716,6 +1717,7 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
       const characterName = ctrl.getSelectedCharacterName();
       injectRelationshipHistory(characterName);
+      maybeInjectUnified();
     });
 
   $('#sm_relationships_inject_budget_value').text(s.relationships_inject_budget ?? 250);
@@ -2478,7 +2480,7 @@ export function bindSettingsUI(ctrl) {
     const catchUpContext = getContext();
     const catchUpCharacterNames = (() => {
       if (!catchUpContext.groupId) return [characterName];
-      const group = catchUpContext.groups?.find((g) => g.id === catchUpContext.groupId);
+      const group = catchUpContext.groups?.find((g) => sameGroupId(g.id, catchUpContext.groupId));
       if (!group) return [characterName];
       return group.members
         .filter((avatar) => !(group.disabled_members ?? []).includes(avatar))

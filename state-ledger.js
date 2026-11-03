@@ -48,7 +48,19 @@ import {
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_STATE_LEDGER, estimateTokens } from './constants.js';
 import { buildStateCardPrompt } from './prompts.js';
-import { parseStateCardResponse, mergeStateCardFields } from './parsers.js';
+export {
+  MAX_STATE_FIELD_LENGTH,
+  MAX_STATE_LEDGER_CARDS,
+  capStateFieldValues,
+  pruneStateLedger,
+} from './parsers.js';
+import {
+  parseStateCardResponse,
+  mergeStateCardFields,
+  capStateFieldValues,
+  pruneStateLedger,
+  MAX_STATE_LEDGER_CARDS,
+} from './parsers.js';
 import { loadCharacterEntityRegistry, loadSessionEntityRegistry } from './graph-migration.js';
 import { generateMemoryExtract } from './generate.js';
 import { smLog } from './logging.js';
@@ -362,10 +374,41 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
     // semantics so a partial removal never wipes untargeted items.
     if (abortCheck?.()) return 0;
     const ledger = loadStateLedger();
+
+    // Strict entity whitelist. Only entities the extension already knows about
+    // (present in a registry) or active characters may have cards merged. This
+    // rejects hallucinated or prompt-injected entities the model invented so
+    // they can never enter the ledger (or the injected prompt).
+    const allowedKeys = new Set(entityList.map((e) => ledgerKey(e.name, e.type)));
+    const entityNames = new Set(entityList.map((e) => e.name.toLowerCase().trim()));
+    const activeCharacterNames = new Set(characterNames.map((n) => n.toLowerCase().trim()));
+
     let count = 0;
     for (const [key, fields] of updates) {
-      ledger[key] = mergeStateCardFields(ledger[key] ?? {}, fields);
+      const sepIdx = key.lastIndexOf('|');
+      const keyName = sepIdx >= 0 ? key.slice(0, sepIdx) : key;
+      const keyType = sepIdx >= 0 ? key.slice(sepIdx + 1) : '';
+      const type =
+        typeof fields.type === 'string' && fields.type ? fields.type.toLowerCase().trim() : keyType;
+      const permitted =
+        allowedKeys.has(key) ||
+        (STATE_CARD_TYPES.has(type) &&
+          (activeCharacterNames.has(keyName) || entityNames.has(keyName)));
+      if (!permitted) {
+        smLog(`[SmartMemory] State ledger: rejected unknown entity card "${key}".`);
+        continue;
+      }
+      ledger[key] = mergeStateCardFields(ledger[key] ?? {}, capStateFieldValues(fields));
       count++;
+    }
+
+    // Keep the ledger bounded - prune oldest low-priority (non-character) cards
+    // first so metadata cannot grow without limit across long chats.
+    const pruned = pruneStateLedger(ledger);
+    if (pruned > 0) {
+      smLog(
+        `[SmartMemory] State ledger: pruned ${pruned} card(s) over the ${MAX_STATE_LEDGER_CARDS} cap.`,
+      );
     }
     await saveStateLedger(ledger);
 

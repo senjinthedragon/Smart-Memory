@@ -110,14 +110,28 @@ export const MEMORY_GENERATION_BUDGET = 8192;
 export const MAX_RETIRED_POOL = 100;
 
 /**
- * Rough token estimate for a string. Uses the standard ~4 chars-per-token
- * heuristic - accurate enough for budget enforcement without needing an async
- * tokenizer call.
+ * Rough token estimate for a string.
+ *
+ * Uses the standard ~4 chars-per-token heuristic for Latin scripts - accurate
+ * enough for budget enforcement without needing an async tokenizer call.
+ * Non-Latin scripts (CJK, Thai, Arabic, Devanagari, ...) tokenize far less
+ * efficiently (roughly 1.5 tokens per character), so counting them at the
+ * Latin rate would badly under-estimate CJK/Arabic prompts. Script runs are
+ * counted separately and summed.
+ *
  * @param {string} text
  * @returns {number}
  */
 export function estimateTokens(text) {
-  return Math.ceil((text?.length ?? 0) / 4);
+  if (!text) return 0;
+  // Non-Latin characters (CJK, Thai, Arabic, Devanagari, etc.) tokenize to ~1.5 tokens each.
+  // Latin characters average ~0.25 tokens each (4 chars per token).
+  const nonLatinMatch = text.match(
+    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Arabic}\p{Script=Devanagari}]/gu,
+  );
+  const nonLatinCount = nonLatinMatch ? nonLatinMatch.length : 0;
+  const latinCount = text.length - nonLatinCount;
+  return Math.ceil(nonLatinCount * 1.5 + latinCount / 4);
 }
 
 /**

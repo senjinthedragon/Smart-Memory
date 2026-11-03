@@ -274,6 +274,10 @@ export async function saveArcSummaries(summaries) {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  // Cap stored arc summaries to the 50 most recent. Older summaries are only
+  // needed as canon input, which itself caps how many it reads, so retaining
+  // more than this only grows chatMetadata without benefit.
+  if (summaries.length > 50) summaries = summaries.slice(-50);
   context.chatMetadata[META_KEY].arcSummaries = summaries;
   await context.saveMetadata();
 }

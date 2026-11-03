@@ -41,6 +41,9 @@
  * STOPWORDS                 - the shared significant-word stoplist (3+ char tokens)
  * setSmartMemoryLogger      - injects the logger used by the pure helpers (kept runtime-free)
  * partitionEpistemicEntriesBySubject - groups group-chat epistemic entries into per-character buckets
+ * sameGroupId               - null-safe, string-coerced group-id comparison
+ * safeStorageKey            - guards special object keys (__proto__, constructor, prototype)
+ * escapeHtml                - escapes a value for safe HTML text/attribute interpolation
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
  * the embedFn parameter so tests can run under plain Node without loading extensions.js.
@@ -1351,4 +1354,79 @@ export function partitionEpistemicEntriesBySubject(entries, memberNames) {
   }
 
   return { grouped, skipped };
+}
+
+/**
+ * Compares two group ids for equality after coercing both to strings.
+ *
+ * Group ids are stored as numbers in SillyTavern's group list but frequently
+ * compared against a context.groupId that may be a string (or vice versa),
+ * so a strict `===` check silently fails to match the active group. Nullish
+ * values never match, so a missing groupId cannot equal a missing id.
+ *
+ * @param {*} a
+ * @param {*} b
+ * @returns {boolean}
+ */
+export function sameGroupId(a, b) {
+  return a != null && b != null && String(a) === String(b);
+}
+
+/**
+ * Normalises a string used as an object storage key so prototype-polluting
+ * names cannot reach the prototype chain.
+ *
+ * `__proto__`, `constructor`, and `prototype` as bare keys on a plain object
+ * either mutate Object.prototype or resolve to inherited members instead of
+ * the caller's data. Prefixing such keys with an underscore keeps them as
+ * ordinary own properties. Non-strings collapse to an empty string, which
+ * preserves the previous falsy-key behaviour at call sites.
+ *
+ * @param {*} key
+ * @returns {string}
+ */
+export function safeStorageKey(key) {
+  if (typeof key !== 'string') return '';
+  const trimmed = key.trim();
+  if (trimmed === '__proto__' || trimmed === 'constructor' || trimmed === 'prototype') {
+    return '_' + trimmed;
+  }
+  return trimmed;
+}
+
+/**
+ * Escapes a value for safe interpolation into HTML text or quoted attribute
+ * values. All five HTML-significant characters are encoded, so both element
+ * content and double/single-quoted attributes are safe.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+let operationRevision = 0;
+
+/**
+ * Increments the chat & branch operation revision token.
+ * Called whenever a chat changes, message is swiped, edited, deleted, or cancelled.
+ * @returns {number} The new revision token.
+ */
+export function bumpOperationRevision() {
+  operationRevision += 1;
+  return operationRevision;
+}
+
+/**
+ * Returns the current operation revision token.
+ * @returns {number}
+ */
+export function getOperationRevision() {
+  return operationRevision;
 }
