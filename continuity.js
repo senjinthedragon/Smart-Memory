@@ -168,10 +168,13 @@ export function gatherEstablishedFacts(characterName) {
  * returned. Unverifiable or non-permanent issues are dropped.
  *
  * @param {string} characterName - Used to load the correct long-term memories.
+ * @param {(() => boolean)|null} [abortCheck=null] - Returns true when the chat
+ *   changed mid-check; the check then bails without generating or applying a note.
  * @returns {Promise<{issues: Array<Object>, anchorIdx: number, anchorHash: string}|null>}
- *   Null when the check cannot run (chat too short, no AI anchor, no facts).
+ *   Null when the check cannot run (chat too short, no AI anchor, no facts), or
+ *   when it is aborted because the user switched chats.
  */
-export async function checkContinuity(characterName) {
+export async function checkContinuity(characterName, abortCheck = null) {
   const settings = extension_settings[MODULE_NAME] ?? {};
 
   try {
@@ -211,14 +214,21 @@ export async function checkContinuity(characterName) {
     const recentTranscript = buildRecentTranscript(chat, anchorIdx, 6);
     const prompt = buildContinuityPrompt(facts, recentTranscript, latestText);
 
+    // Bail before the model call if the chat already changed.
+    if (abortCheck?.()) return null;
+
     const response = await generateMemoryExtract(prompt, {
       responseLength: settings.continuity_response_length ?? 400,
     });
 
+    // The generation is slow; the user may have switched chats while it ran.
+    // Discard the result rather than applying it to the wrong chat.
+    if (abortCheck?.()) return null;
+
     smLog('[SmartMemory] Continuity check response:', response);
 
     const issues = parseContinuityJson(response).filter((issue) =>
-      validateIssue(issue, latestText, facts),
+      validateIssue(issue, latestText, facts, recentTranscript),
     );
 
     return { issues, anchorIdx, anchorHash };
@@ -299,11 +309,17 @@ function notifyContinuityIssues(issues, queued) {
  *
  * @param {{issues: Array<Object>, anchorIdx: number, anchorHash: string}|null} result
  * @param {string} characterName
+ * @param {(() => boolean)|null} [abortCheck=null] - Returns true when the chat
+ *   changed since the check started; the result is then discarded untouched so
+ *   it cannot render, toast, or queue against a different chat.
  * @returns {{mode: 'off'|'warn'|'repair', issues: Array<Object>}}
  */
-export function handleContinuityResult(result, characterName) {
-  const issues = Array.isArray(result?.issues) ? result.issues : [];
+export function handleContinuityResult(result, characterName, abortCheck = null) {
   const mode = getContinuityMode();
+
+  if (abortCheck?.()) return { mode, issues: [] };
+
+  const issues = Array.isArray(result?.issues) ? result.issues : [];
 
   if (!result || issues.length === 0) {
     clearRepair();

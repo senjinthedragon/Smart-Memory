@@ -383,6 +383,7 @@ EVIDENCE RULES - follow these exactly:
 4. NEVER flag: location changes, items gained/lost/used, injuries, emotions, plans, relationship shifts, newly learned information, time passing, or anything merely not visible in the transcript.
 5. ONLY flag permanent properties: character names, species/race, physical appearance, fixed backstory, hard world rules, or established permanent deaths.
 6. If you are unsure, output no contradiction. Silence is always preferred over a false positive.
+7. ACTIVE IN-STORY TRANSFORMATIONS ARE PROGRESSION: If the response or recent transcript shows a trait being actively transformed, cast by a spell, dyed, disguised, injured, or changed in-scene (e.g. 'a spell turned her eyes crimson', 'she dyed her hair'), this is a story event/progression! NEVER flag it as a contradiction. Only flag unmotivated contradictions where an established permanent trait is suddenly described differently with NO in-story reason, action, or explanation whatsoever.
 
 For every contradiction you report:
 - "fact" must be copied verbatim from the BASELINE NOTES.
@@ -984,9 +985,14 @@ export function buildStateCardPrompt(excerpt, entityList) {
     `STRICT RULES - violations produce unusable output:\n` +
     `- ONLY include fields that are EXPLICITLY stated or DIRECTLY shown in the text.\n` +
     `  Do not infer, deduce, or reason about what is probably true.\n` +
+    `- To update an entity when a temporary condition or item has ENDED, HEALED, or\n` +
+    `  been DROPPED in this scene: write fieldname=cleared or fieldname=none\n` +
+    `  (or !carried_items, injuries=healed).\n` +
+    `- If an attribute (such as location) is simply UNMENTIONED or UNKNOWN in the\n` +
+    `  excerpt, OMIT the field entirely! Do NOT write location=unknown or location=none.\n` +
     `- A field you are not certain about MUST be omitted entirely. NEVER write\n` +
-    `  fieldname=unknown, fieldname=none, fieldname=not mentioned, or any similar\n` +
-    `  placeholder. Either you know the value from the text or the field is absent.\n` +
+    `  fieldname=unknown, fieldname=not mentioned, or any similar placeholder.\n` +
+    `  Either you know the value from the text or the field is absent.\n` +
     `- If an entity is not mentioned in the excerpt, do not output a line for it at all.\n` +
     `  An entity with no known fields produces no output - not a line of unknowns.\n` +
     `- If nothing is known about any entity, output: NONE\n\n` +

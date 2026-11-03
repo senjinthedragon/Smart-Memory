@@ -769,6 +769,34 @@ const STATE_NOISE_VALUES = new Set([
 ]);
 
 /**
+ * Collection-style fields whose values accumulate (injuries, carried items,
+ * environmental hazards, damage, disguises). Only these may be cleared by the
+ * natural-language end-state words below. Attribute fields (location, owner,
+ * mood, ...) must not be wiped by a placeholder like `none` - that usually just
+ * means "unmentioned in this excerpt".
+ */
+const REMOVABLE_COLLECTION_FIELDS = new Set([
+  'injuries',
+  'carried_items',
+  'hazards',
+  'damage',
+  'outfit_disguise',
+]);
+
+/** End-state words that clear a removable collection field. */
+const COLLECTION_CLEAR_VALUES = new Set([
+  'none',
+  'empty',
+  'healed',
+  'cleared',
+  'repaired',
+  'removed',
+]);
+
+/** Attribute fields only clear on an explicit `cleared` (or `!`-prefix). */
+const ATTRIBUTE_CLEAR_VALUES = new Set(['cleared']);
+
+/**
  * Parses the structured state card extraction output into a Map of ledger key
  * to fields object.
  *
@@ -804,17 +832,46 @@ export function parseStateCardResponse(raw) {
     const fields = {};
     const clearedFields = new Set();
     for (const chunk of rest.split('|')) {
-      const eqIdx = chunk.indexOf('=');
+      const trimmedChunk = chunk.trim();
+      if (!trimmedChunk) continue;
+
+      // Bare clearing marker for a collection field: `!carried_items` (no '=').
+      // Only collection fields are recognised this way so a stray `!word` token
+      // cannot silently clear an unrelated attribute.
+      if (trimmedChunk.startsWith('!') && !trimmedChunk.includes('=')) {
+        const bareField = trimmedChunk.slice(1).trim().toLowerCase().replace(/\s+/g, '_');
+        if (REMOVABLE_COLLECTION_FIELDS.has(bareField)) clearedFields.add(bareField);
+        continue;
+      }
+
+      const eqIdx = trimmedChunk.indexOf('=');
       if (eqIdx === -1) continue;
-      const fieldName = chunk.slice(0, eqIdx).trim().toLowerCase().replace(/\s+/g, '_');
+      const fieldName = trimmedChunk
+        .slice(0, eqIdx)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
       if (!fieldName) continue;
-      const value = chunk.slice(eqIdx + 1).trim();
+      const value = trimmedChunk.slice(eqIdx + 1).trim();
       const lowerValue = value.toLowerCase();
 
-      // Explicit clearing signals: an empty value, a bare `none`/`empty`, or a
-      // `!`-prefixed value. These remove a previously stored item/flag instead
-      // of being silently dropped as an unknown placeholder.
-      if (value === '' || value.startsWith('!') || lowerValue === 'none' || lowerValue === 'empty') {
+      // Explicit clearing signals: an empty value or a `!`-prefixed value.
+      // These remove a previously stored value instead of being dropped.
+      if (value === '' || value.startsWith('!')) {
+        clearedFields.add(fieldName);
+        continue;
+      }
+
+      // End-state words only clear collection-style fields. For an attribute
+      // such as `location=none`, `none` is an "unmentioned" placeholder and must
+      // NOT wipe a stored value.
+      if (REMOVABLE_COLLECTION_FIELDS.has(fieldName) && COLLECTION_CLEAR_VALUES.has(lowerValue)) {
+        clearedFields.add(fieldName);
+        continue;
+      }
+
+      // Attribute fields clear only on an explicit `cleared`.
+      if (ATTRIBUTE_CLEAR_VALUES.has(lowerValue)) {
         clearedFields.add(fieldName);
         continue;
       }

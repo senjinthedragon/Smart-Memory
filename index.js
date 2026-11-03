@@ -623,7 +623,10 @@ async function onCharacterMessageRendered(messageId, type) {
               epistemicThisPass = true;
             }
             sceneMessageBuffer = [];
-            sceneBufferLastIndex = -1;
+            // Point the cursor at the current end of chat, not -1. Setting -1
+            // would make the next render slice from index 0 and re-ingest the
+            // entire history into the fresh scene buffer.
+            sceneBufferLastIndex = context.chat.length - 1;
             setStatusMessage('Scene break detected.');
           }
         } catch (err) {
@@ -986,17 +989,23 @@ async function onCharacterMessageRendered(messageId, type) {
         !continuityCheckRunning
       ) {
         continuityCheckRunning = true;
+        // Capture the chat generation so a result from a previous chat can never
+        // render, toast, or queue a note against the chat the user switched to.
+        const continuityGen = chatLoadId;
+        const isCurrentChat = () => chatLoadId === continuityGen;
         const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
-        checkContinuity(characterName)
+        checkContinuity(characterName, isCurrentChat)
           .then((result) => {
-            handleContinuityResult(result, characterName);
+            if (!isCurrentChat()) return;
+            handleContinuityResult(result, characterName, isCurrentChat);
           })
           .catch((err) => {
+            if (!isCurrentChat()) return;
             console.error('[SmartMemory] Auto-continuity check failed:', err);
           })
           .finally(() => {
             stopActivityLoader(continuityHandle);
-            continuityCheckRunning = false;
+            if (isCurrentChat()) continuityCheckRunning = false;
           });
       }
 
@@ -1062,7 +1071,9 @@ async function onChatChangedImpl() {
   stopActivityLoader(activeRecapHandle);
   activeRecapHandle = null;
   sceneMessageBuffer = [];
-  sceneBufferLastIndex = -1;
+  // Point the cursor at the end of the loaded chat so historical messages are
+  // not ingested into the active scene buffer when the next character responds.
+  sceneBufferLastIndex = (getContext().chat?.length ?? 0) - 1;
   respondedThisRound = new Set();
   selectedGroupCharacter = null;
   setContinuityBadge(null);
@@ -1548,7 +1559,10 @@ async function onGroupWrapperFinished({ type } = {}) {
               epistemicThisPass = true;
             }
             sceneMessageBuffer = [];
-            sceneBufferLastIndex = -1;
+            // Point the cursor at the current end of chat, not -1. Setting -1
+            // would make the next render slice from index 0 and re-ingest the
+            // entire history into the fresh scene buffer.
+            sceneBufferLastIndex = context.chat.length - 1;
             setStatusMessage('Scene break detected.');
           }
         } catch (err) {
@@ -1908,17 +1922,23 @@ async function onGroupWrapperFinished({ type } = {}) {
         !continuityCheckRunning
       ) {
         continuityCheckRunning = true;
+        // Capture the chat generation so a result from a previous chat can never
+        // render, toast, or queue a note against the chat the user switched to.
+        const continuityGen = chatLoadId;
+        const isCurrentChat = () => chatLoadId === continuityGen;
         const continuityHandle = startActivityLoader(settings, 'Checking continuity...');
-        checkContinuity(lastResponder)
+        checkContinuity(lastResponder, isCurrentChat)
           .then((result) => {
-            handleContinuityResult(result, lastResponder);
+            if (!isCurrentChat()) return;
+            handleContinuityResult(result, lastResponder, isCurrentChat);
           })
           .catch((err) => {
+            if (!isCurrentChat()) return;
             console.error('[SmartMemory] Auto-continuity check failed:', err);
           })
           .finally(() => {
             stopActivityLoader(continuityHandle);
-            continuityCheckRunning = false;
+            if (isCurrentChat()) continuityCheckRunning = false;
           });
       }
 

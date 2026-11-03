@@ -5,6 +5,7 @@ import {
   buildCurrentSceneStateBlock,
   classifyTurn,
   hybridScore,
+  matchSubjectToMember,
   memoryUtilityScore,
   partitionEpistemicEntriesBySubject,
   prioritizeMemories,
@@ -375,4 +376,110 @@ test('partitionEpistemicEntriesBySubject groups entries per member and skips out
   assert.equal(grouped.get('Bob')[0].subject, 'Bob');
   assert.equal(skipped.length, 1);
   assert.equal(skipped[0].subject, 'Mallory');
+});
+
+test('matchSubjectToMember resolves first names, tokens, and partials', () => {
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Kael Draven']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Kael', ['Elara Voss', 'Kael Draven']), 'Kael Draven');
+  assert.equal(matchSubjectToMember('Picard', ['Jean-Luc Picard']), 'Jean-Luc Picard');
+  assert.equal(matchSubjectToMember('ELARA VOSS', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Draven', ['Kael Draven']), 'Kael Draven');
+  assert.equal(matchSubjectToMember('Nobody', ['Elara Voss', 'Kael Draven']), null);
+  assert.equal(matchSubjectToMember('', ['Elara Voss']), null);
+});
+
+test('partitionEpistemicEntriesBySubject matches first names to full member names', () => {
+  const entries = [
+    { type: 'knows', subject: 'Elara', content: 'the vault code' },
+    { type: 'unaware', subject: 'Kael', content: 'the ambush plan' },
+    { type: 'knows', subject: 'Mallory', content: 'not a member' },
+  ];
+
+  const { grouped, skipped } = partitionEpistemicEntriesBySubject(entries, [
+    'Elara Voss',
+    'Kael Draven',
+  ]);
+
+  assert.equal(grouped.get('Elara Voss')[0].content, 'the vault code');
+  assert.equal(grouped.get('Elara Voss')[0].subject, 'Elara Voss');
+  assert.equal(grouped.get('Kael Draven')[0].content, 'the ambush plan');
+  assert.equal(grouped.get('Kael Draven')[0].subject, 'Kael Draven');
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].subject, 'Mallory');
+});
+
+// =========================================================================
+// Nested numbered lists inside Section 3
+// =========================================================================
+
+function buildNestedListSummary() {
+  return [
+    '1. Scene & Setting: The ancient hall is cold and dark.',
+    '2. Characters Present: Elara and Kael stand before the gate.',
+    '3. Key Events:',
+    '   7. They crossed the bridge at dawn.',
+    '   8. Fought the bandits in the mountain pass.',
+    '   9. Escaped the dungeon through a hidden tunnel.',
+    '4. Relationship Dynamics: Trust is fragile between them.',
+    '5. Revealed Information: The key opens the sealed gate.',
+    '6. Story Threads: The oath remains unfulfilled.',
+    "7. User's Direction: Keep the tone tense and quiet.",
+    '8. Current Moment: Elara stands at the sealed gate with the key in hand.',
+    '9. Next Beat: The gate opens and cold air rushes out.',
+  ].join('\n');
+}
+
+test('splitSummarySections ignores numbered lists nested inside Section 3', () => {
+  const { sections } = splitSummarySections(buildNestedListSummary());
+
+  assert.deepEqual(
+    sections.map((s) => s.num),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
+  );
+
+  const keyEvents = sections.find((s) => s.num === 3);
+  assert.match(keyEvents.text, /Fought the bandits/);
+  assert.match(keyEvents.text, /Escaped the dungeon/);
+
+  const revealed = sections.find((s) => s.num === 5);
+  assert.match(revealed.text, /Revealed Information/);
+  assert.match(revealed.text, /key opens the sealed gate/);
+
+  // Nested items 8 and 9 must not be mistaken for the real anchors.
+  assert.match(sections.find((s) => s.num === 8).text, /Current Moment/);
+  assert.match(sections.find((s) => s.num === 9).text, /Next Beat/);
+});
+
+test('truncateSummaryToBudget does not drop Section 5 when Section 3 has a nested list', () => {
+  const summary = buildNestedListSummary();
+  const trimmed = truncateSummaryToBudget(summary, 220);
+
+  assert.match(trimmed, /5\. Revealed Information:/);
+  assert.match(trimmed, /key opens the sealed gate/);
+  assert.match(trimmed, /8\. Current Moment:/);
+  assert.match(trimmed, /Elara stands at the sealed gate/);
+  assert.match(trimmed, /9\. Next Beat:/);
+  assert.match(trimmed, /The gate opens and cold air rushes out/);
+});
+
+// =========================================================================
+// Scene buffer cursor contract
+// =========================================================================
+
+test('scene buffer cursor: end-of-chat index yields only newly appended messages', () => {
+  const chat = ['m0', 'm1', 'm2'];
+  let sceneBufferLastIndex = chat.length - 1; // 2, set at scene reset / chat load
+
+  // No history is ingested immediately after the cursor is set.
+  assert.deepEqual(chat.slice(sceneBufferLastIndex + 1), []);
+
+  // Only the newly appended turn is picked up.
+  chat.push('m3');
+  assert.deepEqual(chat.slice(sceneBufferLastIndex + 1), ['m3']);
+
+  sceneBufferLastIndex = chat.length - 1;
+  assert.deepEqual(chat.slice(sceneBufferLastIndex + 1), []);
+
+  // The legacy -1 cursor would re-ingest the whole history - the bug we fixed.
+  assert.equal(chat.slice(-1 + 1).length, chat.length);
 });

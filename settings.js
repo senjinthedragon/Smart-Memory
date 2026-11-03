@@ -680,6 +680,26 @@ export function loadSettings() {
     extension_settings[MODULE_NAME].consolidation_enabled =
       extension_settings[MODULE_NAME].longterm_consolidate;
   }
+
+  // Migration: move legacy epistemic/state-ledger injections from IN_CHAT depth 1
+  // (position 1, depth 1) to the in-prompt placement (position 2, depth 0). The
+  // in-chat default let stale extracted state override the active dialogue turn.
+  // Only users still on the untouched old default are moved; an explicit custom
+  // position/depth is preserved.
+  if (
+    extension_settings[MODULE_NAME].epistemic_position === 1 &&
+    extension_settings[MODULE_NAME].epistemic_depth === 1
+  ) {
+    extension_settings[MODULE_NAME].epistemic_position = extension_prompt_types.IN_PROMPT;
+    extension_settings[MODULE_NAME].epistemic_depth = 0;
+  }
+  if (
+    extension_settings[MODULE_NAME].state_ledger_position === 1 &&
+    extension_settings[MODULE_NAME].state_ledger_depth === 1
+  ) {
+    extension_settings[MODULE_NAME].state_ledger_position = extension_prompt_types.IN_PROMPT;
+    extension_settings[MODULE_NAME].state_ledger_depth = 0;
+  }
 }
 
 // ---- Settings UI binding ------------------------------------------------
@@ -2295,9 +2315,10 @@ export function bindSettingsUI(ctrl) {
         history.push({ summary, ts: Date.now() });
         if (history.length > max) history.splice(0, history.length - max);
         await saveSceneHistory(history);
-        // Reset the buffer - we just archived what was in it.
+        // Reset the buffer - we just archived what was in it. Keep the cursor at
+        // the end of the chat so the next render does not re-ingest the history.
         ctrl.sceneMessageBuffer = [];
-        ctrl.sceneBufferLastIndex = -1;
+        ctrl.sceneBufferLastIndex = context.chat.length - 1;
         injectSceneHistory();
         updateScenesUI();
         updateTokenDisplay();
@@ -2742,7 +2763,9 @@ export function bindSettingsUI(ctrl) {
             console.error('[SmartMemory] Catch-up scene history save failed:', err);
           });
           ctrl.sceneMessageBuffer = [];
-          ctrl.sceneBufferLastIndex = -1;
+          // Keep the cursor at the end of the chat so the next render does not
+          // re-ingest the entire history into the fresh scene buffer.
+          ctrl.sceneBufferLastIndex = context.chat.length - 1;
           updateTokenDisplay();
         }
 
@@ -2920,7 +2943,9 @@ export function bindSettingsUI(ctrl) {
     updateEntityPanel(characterName);
     updateTokenDisplay();
     ctrl.sceneMessageBuffer = [];
-    ctrl.sceneBufferLastIndex = -1;
+    // Keep the cursor at the end of the chat so continuing the chat does not
+    // re-ingest the entire history into the fresh scene buffer.
+    ctrl.sceneBufferLastIndex = context.chat.length - 1;
     setStatusMessage('Chat context cleared.');
   });
 
@@ -2988,7 +3013,9 @@ export function bindSettingsUI(ctrl) {
     updateProfilesUI(null);
     updateTokenDisplay();
     ctrl.sceneMessageBuffer = [];
-    ctrl.sceneBufferLastIndex = -1;
+    // Keep the cursor at the end of the chat so continuing the chat does not
+    // re-ingest the entire history into the fresh scene buffer.
+    ctrl.sceneBufferLastIndex = context.chat.length - 1;
     setStatusMessage('Fresh start complete.');
     toastr.success(`All memories cleared for ${nameLabel}.`, 'Smart Memory', {
       timeOut: 4000,
