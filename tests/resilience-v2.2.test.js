@@ -441,6 +441,56 @@ test('generation gate: an ENDED that resolves a cleared pair leaves awaitingPair
   assert.equal(s.awaitingPair, null, 'the trailing ENDED resolves the pair');
 });
 
+// ---- H-4: documented "prefer extraction safety" policy -----------------------
+
+test('generation gate: an unresolved old pair defers to the watchdog (documented safety policy)', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'stopped', 10); // A stops; expects its ENDED
+  s = correlateGenerationGate(s, 'start', 20); // B starts before A's pair resolves
+  assert.equal(s.pending, 1);
+  assert.equal(s.awaitingPair, 'ended');
+
+  // `start A -> stopped A -> start B -> ended B` is indistinguishable from a
+  // delayed `ended A`. The deliberate "prefer extraction safety" policy treats
+  // it as A's outstanding pair and HOLDS B's gate. This is the trade-off: a
+  // wrongly-cleared gate could extract partial streaming text (data corruption),
+  // whereas a held gate only delays extraction and is bounded by the 90s
+  // watchdog and by chat switch/reset.
+  s = correlateGenerationGate(s, 'ended', 30);
+  assert.equal(s.pending, 1, 'the gate stays held for B');
+  assert.equal(s.inProgress, true);
+  assert.equal(s.awaitingPair, null);
+
+  // The watchdog or a chat switch ultimately resets the gate.
+  s = correlateGenerationGate(s, 'reset', 40);
+  assert.equal(s.pending, 0);
+  assert.equal(s.inProgress, false);
+  assert.equal(s.awaitingPair, null);
+});
+
+test('generation gate: a held unresolved pair recovers via reset (watchdog/chat-switch)', () => {
+  let s = freshGate();
+  s = correlateGenerationGate(s, 'start', 0); // A
+  s = correlateGenerationGate(s, 'stopped', 10); // A -> awaiting ENDED
+  s = correlateGenerationGate(s, 'start', 20); // B
+  s = correlateGenerationGate(s, 'ended', 30); // collapses as A's presumed pair
+  assert.deepEqual(s, {
+    pending: 1,
+    inProgress: true,
+    awaitingPair: null,
+    lastTerminalAt: 30,
+  });
+
+  s = correlateGenerationGate(s, 'reset', 90000); // watchdog / chat switch
+  assert.deepEqual(s, {
+    pending: 0,
+    inProgress: false,
+    awaitingPair: null,
+    lastTerminalAt: -Infinity,
+  });
+});
+
 // ---- L-2: duplicate chat-load coalescing -------------------------------------
 
 test('isDuplicateChatLoad: same normalized id coalesces within the window', () => {

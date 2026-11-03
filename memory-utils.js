@@ -1694,6 +1694,23 @@ export const GENERATION_TERMINAL_COALESCE_MS = 100;
  * deliberately retains its pending slot for the terminal that follows, so an
  * older generation cannot be dequeued by a newer one's terminal.
  *
+ * Lifecycle policy: PREFER EXTRACTION SAFETY. With anonymous host events the
+ * orderings `start A -> stopped A -> start B -> ended A` (a delayed old pair that
+ * must not consume B) and `start A -> stopped A -> start B -> ended B` (B's own
+ * terminal) are indistinguishable. When a matching complement arrives inside the
+ * coalescing window it is treated as the outstanding pair and B's gate is held.
+ * This is deliberate: a wrongly-cleared gate would run extraction on partial
+ * streaming text (data corruption), whereas a held gate only delays extraction
+ * and is bounded by the 90s watchdog and by chat switch/reset.
+ *
+ * Bounded recovery: an unresolved pair can never affect a later generation
+ * indefinitely. `awaitingPair` is rewritten on every terminal that consumes a
+ * slot (re-armed to `'ended'` after a STOPPED, otherwise `null`) and `reset`
+ * clears it unconditionally. Pairing also requires
+ * `now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS`, and `lastTerminalAt`
+ * is a concrete timestamp from the STOPPED that armed the pair, so a much-later
+ * terminal cannot collapse and is consumed normally.
+ *
  * Residual constraint: host events carry no generation id, so a STOPPED that
  * never receives its ENDED leaves `awaitingPair` set. Its pending slot is still
  * consumed, so the gate is not stuck on that account; a generation that emits no
@@ -1753,7 +1770,10 @@ export function correlateGenerationGate(state, event, now = 0) {
       if (kind && awaitingPair === kind && now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS) {
         return { pending, inProgress, awaitingPair: null, lastTerminalAt: now };
       }
-      // Consume exactly one pending generation.
+      // Consume exactly one pending generation. Bounded recovery: this always
+      // rewrites awaitingPair (re-armed to 'ended' after a STOPPED, otherwise
+      // null), and reset clears it too, so an unresolved pair cannot affect a
+      // later generation indefinitely.
       const nextPending = pending - 1;
       const nextAwaiting = kind === 'stopped' ? 'ended' : null;
       return {

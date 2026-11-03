@@ -52,13 +52,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generation's gate. Generation start/terminal events are correlated
   (`correlateGenerationGate`) with FIFO pending slots and event-kind pairing:
   `GENERATION_STOPPED` and `GENERATION_ENDED` for the same generation coalesce
-  once, a terminal with no pending generation is a no-op, and a new generation
-  resets the coalescing timestamp — so a delayed stop from an older generation
-  cannot clear a newer gate, and an immediate user cancel cannot leave
-  extraction stuck. Because host events carry no generation id, an unpaired
-  terminal (or a generation that never emits one) is resolved by the watchdog or
-  a chat switch (conservative: extraction is briefly suppressed rather than
-  running on partial text).
+  once, a terminal with no pending generation is a no-op, and an outstanding
+  pair's timestamp/kind are preserved across a new generation so a delayed
+  complement is still recognised. The explicit policy is **prefer extraction
+  safety**: when two orderings are indistinguishable (a delayed old `ENDED` vs a
+  new generation's own `ENDED`), the gate is held rather than risk extracting
+  partial streaming text; the hold is bounded by the 90-second watchdog and by
+  chat switch/reset. Because host events carry no generation id, an unpaired
+  terminal or a generation that never emits one is likewise resolved by the
+  watchdog or a chat switch.
 - **Complete tier clearing.** Cancelled catch-up clears the tier's extension
   slot, macro content, and the materialized unified prompt/cache so stale
   context cannot linger in macro or unified injection modes.
