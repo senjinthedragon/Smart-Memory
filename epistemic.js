@@ -67,7 +67,12 @@ import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
-import { partitionEpistemicEntriesBySubject } from './memory-utils.js';
+import { partitionEpistemicEntriesBySubject, setSmartMemoryLogger } from './memory-utils.js';
+
+// memory-utils is intentionally free of the SillyTavern runtime so it can be
+// unit-tested under plain Node. Wire the real logger so its ambiguity warnings
+// respect the verbose_logging setting in production.
+setSmartMemoryLogger(smLog);
 
 // ---- Per-chat budget override -----------------------------------------------
 

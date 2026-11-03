@@ -624,3 +624,85 @@ test('anchored repair: invalidated when the anchor is not an AI message', () => 
 
   assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), false);
 });
+
+// =========================================================================
+// Over-suppression guards (physical movement / idiom / stopword matching)
+// =========================================================================
+
+test('validateIssue: physical movement "turned" near a trait is not a transformation', () => {
+  // "turned" here is the character turning around, not the eyes changing.
+  const facts = 'Elara has silver eyes.';
+  const latest = 'Elara turned and her blue eyes met his across the room.';
+  const issue = {
+    fact: 'Elara has silver eyes.',
+    response_quote: 'her blue eyes met his',
+    category: 'permanent_trait',
+    why_not_progression: 'Eye colour is permanent and nothing in the scene changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts), true);
+});
+
+test('validateIssue: idiom "changed the subject" does not suppress a hair contradiction', () => {
+  const facts = 'Elara has silver hair.';
+  const latest = 'She changed the subject, and her silver hair caught the lamplight.';
+  const issue = {
+    fact: 'Elara has silver hair.',
+    response_quote: 'her silver hair caught the lamplight',
+    category: 'permanent_trait',
+    why_not_progression: 'Hair colour is permanent and no event changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts), true);
+});
+
+test('validateIssue: a transcript sentence about a different trait never suppresses', () => {
+  // The old matcher linked on the stopword "her", so "Her voice changed to a
+  // whisper" wrongly suppressed a hair contradiction. Only substantive trait
+  // words may link now.
+  const facts = 'Elara has silver hair.';
+  const latest = 'Elara walked into the hall, her silver hair bright under the lanterns.';
+  const transcript = '[Elara] Her voice changed to a whisper as she entered the hall.';
+  const issue = {
+    fact: 'Elara has silver hair.',
+    response_quote: 'her silver hair bright',
+    category: 'permanent_trait',
+    why_not_progression: 'Hair colour is permanent and nothing changed it.',
+  };
+
+  assert.equal(validateIssue(issue, latest, facts, transcript), true);
+});
+
+// =========================================================================
+// Repair note vs. user acknowledgement
+// =========================================================================
+
+test('anchored repair: invalidated when the user reply embraces the changed state', () => {
+  const chat = [
+    { name: 'Elara', mes: 'Her eyes are crimson now.' },
+    { is_user: true, mes: 'I stare into her crimson eyes without fear.' },
+  ];
+  const pendingRepair = {
+    note: 'n',
+    anchorIdx: 0,
+    anchorHash: hashText(chat[0].mes),
+    quotes: ['crimson eyes'],
+  };
+
+  assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), false);
+});
+
+test('anchored repair: stays valid when the user reply does not reference the change', () => {
+  const chat = [
+    { name: 'Elara', mes: 'Her eyes are crimson now.' },
+    { is_user: true, mes: 'I ask what happened at the gate.' },
+  ];
+  const pendingRepair = {
+    note: 'n',
+    anchorIdx: 0,
+    anchorHash: hashText(chat[0].mes),
+    quotes: ['crimson eyes'],
+  };
+
+  assert.equal(isPendingRepairAnchorValid(chat, pendingRepair), true);
+});

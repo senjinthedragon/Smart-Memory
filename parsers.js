@@ -38,6 +38,7 @@
  * parseEpistemicResponse         - parses the five-tag knowledge map output from an epistemic extraction pass
  * parseEpistemicRetireIndices     - extracts the set of 1-based entry indices the model flagged for retirement
  * parseStateCardResponse         - parses structured current-state field output into a Map of key -> fields
+ * mergeStateCardFields           - applies parsed fields onto an existing card with collection add/remove semantics
  *
  * All new memory objects produced by the parse functions carry the full graph
  * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
@@ -783,7 +784,7 @@ const REMOVABLE_COLLECTION_FIELDS = new Set([
   'outfit_disguise',
 ]);
 
-/** End-state words that clear a removable collection field. */
+/** End-state words that clear a removable collection field outright. */
 const COLLECTION_CLEAR_VALUES = new Set([
   'none',
   'empty',
@@ -791,10 +792,131 @@ const COLLECTION_CLEAR_VALUES = new Set([
   'cleared',
   'repaired',
   'removed',
+  'all healed',
+  'all cleared',
+  'none left',
+  'nothing left',
 ]);
 
 /** Attribute fields only clear on an explicit `cleared` (or `!`-prefix). */
 const ATTRIBUTE_CLEAR_VALUES = new Set(['cleared']);
+
+// `<collection>=healed: <item>` / `=dropped: <item>` removes a single item from
+// the stored list instead of wiping the whole field.
+const COLLECTION_PARTIAL_REMOVAL_RE = /^(?:healed|dropped|removed|cleared)\s*:\s*(.+)$/i;
+
+/**
+ * Collection-style fields that accumulate comma/semicolon-separated items.
+ * On merge these get add/remove semantics rather than being replaced wholesale.
+ */
+const STATE_COLLECTION_FIELDS = new Set([
+  'injuries',
+  'carried_items',
+  'hazards',
+  'damage',
+  'outfit_disguise',
+]);
+
+/**
+ * Splits a stored collection string into trimmed, non-empty items.
+ * @param {*} value
+ * @returns {string[]}
+ */
+function splitCollectionItems(value) {
+  return String(value ?? '')
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Case-insensitive item match: exact, substring, or all target tokens present
+ * in the item. Used for partial removals and de-duplication.
+ * @param {string} item
+ * @param {string} target
+ * @returns {boolean}
+ */
+function collectionItemMatches(item, target) {
+  const haystack = String(item ?? '')
+    .toLowerCase()
+    .trim();
+  const needle = String(target ?? '')
+    .toLowerCase()
+    .trim();
+  if (!haystack || !needle) return false;
+  if (haystack === needle || haystack.includes(needle)) return true;
+  const haystackTokens = haystack.split(/\s+/);
+  return needle.split(/\s+/).every((token) => haystackTokens.includes(token));
+}
+
+/**
+ * Appends items to a list, skipping any already present (either direction).
+ * @param {string[]} items
+ * @param {string[]} additions
+ * @returns {string[]}
+ */
+function appendUniqueItems(items, additions) {
+  const result = [...items];
+  for (const raw of additions) {
+    const item = String(raw ?? '').trim();
+    if (!item) continue;
+    const exists = result.some(
+      (existing) => collectionItemMatches(existing, item) || collectionItemMatches(item, existing),
+    );
+    if (!exists) result.push(item);
+  }
+  return result;
+}
+
+/**
+ * Applies parsed state-card fields onto an existing card with collection-aware
+ * add/remove semantics.
+ *
+ * Non-collection fields are replaced (with `''` clearing a field). Collection
+ * fields (`injuries`, `carried_items`, `hazards`, `damage`, `outfit_disguise`):
+ * - a `''` value clears the field entirely
+ * - a `{ removeItems }` descriptor removes matching items and keeps the rest
+ * - a plain string value appends its items if not already present
+ *
+ * Pure - no SillyTavern runtime dependency - so it can be unit-tested directly.
+ *
+ * @param {Object} [existing={}] - Current stored card fields.
+ * @param {Object} [incoming={}] - Parsed fields from parseStateCardResponse.
+ * @returns {Object} The merged field object.
+ */
+export function mergeStateCardFields(existing = {}, incoming = {}) {
+  const merged = { ...(existing ?? {}) };
+  for (const [field, value] of Object.entries(incoming ?? {})) {
+    if (!STATE_COLLECTION_FIELDS.has(field)) {
+      merged[field] = value;
+      continue;
+    }
+
+    const current = typeof merged[field] === 'string' ? splitCollectionItems(merged[field]) : [];
+
+    // Structured partial removal descriptor.
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const removeItems = Array.isArray(value.removeItems) ? value.removeItems : [];
+      const addItems = Array.isArray(value.addItems) ? value.addItems : [];
+      let items = current.filter(
+        (item) => !removeItems.some((r) => collectionItemMatches(item, r)),
+      );
+      items = appendUniqueItems(items, addItems);
+      merged[field] = items.join(', ');
+      continue;
+    }
+
+    // Explicit clear.
+    if (value === '' || value === null || value === undefined) {
+      merged[field] = '';
+      continue;
+    }
+
+    // Plain string value: append new items (deduped), never wipe the rest.
+    merged[field] = appendUniqueItems(current, splitCollectionItems(value)).join(', ');
+  }
+  return merged;
+}
 
 /**
  * Parses the structured state card extraction output into a Map of ledger key
@@ -831,6 +953,8 @@ export function parseStateCardResponse(raw) {
 
     const fields = {};
     const clearedFields = new Set();
+    // field -> array of item names to remove from the stored collection.
+    const removalItems = new Map();
     for (const chunk of rest.split('|')) {
       const trimmedChunk = chunk.trim();
       if (!trimmedChunk) continue;
@@ -854,35 +978,67 @@ export function parseStateCardResponse(raw) {
       if (!fieldName) continue;
       const value = trimmedChunk.slice(eqIdx + 1).trim();
       const lowerValue = value.toLowerCase();
+      const isCollection = REMOVABLE_COLLECTION_FIELDS.has(fieldName);
 
-      // Explicit clearing signals: an empty value or a `!`-prefixed value.
-      // These remove a previously stored value instead of being dropped.
-      if (value === '' || value.startsWith('!')) {
+      // An empty value always clears the field outright.
+      if (value === '') {
         clearedFields.add(fieldName);
         continue;
       }
 
-      // End-state words only clear collection-style fields. For an attribute
-      // such as `location=none`, `none` is an "unmentioned" placeholder and must
-      // NOT wipe a stored value.
-      if (REMOVABLE_COLLECTION_FIELDS.has(fieldName) && COLLECTION_CLEAR_VALUES.has(lowerValue)) {
-        clearedFields.add(fieldName);
+      if (isCollection) {
+        // `field=!item` removes a single item from the stored list rather than
+        // wiping the whole field (`field=!` alone still clears it).
+        if (value.startsWith('!')) {
+          const item = value.slice(1).trim();
+          if (!item) {
+            clearedFields.add(fieldName);
+          } else {
+            const list = removalItems.get(fieldName) ?? [];
+            list.push(item);
+            removalItems.set(fieldName, list);
+          }
+          continue;
+        }
+
+        // `field=healed: item` / `field=dropped: item` partial removal.
+        const partial = value.match(COLLECTION_PARTIAL_REMOVAL_RE);
+        if (partial) {
+          const list = removalItems.get(fieldName) ?? [];
+          list.push(partial[1].trim());
+          removalItems.set(fieldName, list);
+          continue;
+        }
+
+        // End-state words ("all healed", "none left", "cleared", "empty", ...)
+        // clear the whole collection field.
+        if (COLLECTION_CLEAR_VALUES.has(lowerValue)) {
+          clearedFields.add(fieldName);
+          continue;
+        }
+
+        // Strip other noise values - do not store placeholders.
+        if (STATE_NOISE_VALUES.has(lowerValue)) continue;
+
+        // Otherwise the value is a list of items to add/append.
+        fields[fieldName] = value;
         continue;
       }
 
-      // Attribute fields clear only on an explicit `cleared`.
-      if (ATTRIBUTE_CLEAR_VALUES.has(lowerValue)) {
+      // Attribute fields: an explicit `!`-prefix or `cleared` wipes the value.
+      // A placeholder like `location=none` is "unmentioned" and is skipped.
+      if (value.startsWith('!') || ATTRIBUTE_CLEAR_VALUES.has(lowerValue)) {
         clearedFields.add(fieldName);
         continue;
       }
-
-      // Strip other noise values - do not store placeholders.
       if (STATE_NOISE_VALUES.has(lowerValue)) continue;
       fields[fieldName] = value;
     }
 
-    // Drop the entry only if it contributes neither values nor clears.
-    if (Object.keys(fields).length === 0 && clearedFields.size === 0) continue;
+    // Drop the entry only if it contributes no values, clears, or removals.
+    if (Object.keys(fields).length === 0 && clearedFields.size === 0 && removalItems.size === 0) {
+      continue;
+    }
 
     const key = `${name.toLowerCase().trim()}|${type}`;
     // Merge with any earlier line for the same key (model may split across lines).
@@ -890,10 +1046,19 @@ export function parseStateCardResponse(raw) {
     // for stable merging but the prompt should show the character's real name.
     const existing = result.get(key) ?? {};
     const merged = { _name: name, ...existing, ...fields };
-    // An empty string overwrites the stored value during the shallow merge in
-    // state-ledger.js, which is how a field gets cleared.
+    // An empty string clears a field during the collection-aware merge in
+    // mergeStateCardFields (and state-ledger.js), which is how a field is wiped.
     for (const fieldName of clearedFields) {
       merged[fieldName] = '';
+    }
+    // Partial removals become structured descriptors the merge applies against
+    // the stored list, preserving items that were not targeted.
+    for (const [fieldName, items] of removalItems) {
+      const prior =
+        merged[fieldName] && typeof merged[fieldName] === 'object'
+          ? (merged[fieldName].removeItems ?? [])
+          : [];
+      merged[fieldName] = { removeItems: [...prior, ...items] };
     }
     result.set(key, merged);
   }
