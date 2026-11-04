@@ -120,6 +120,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Partial extraction failure no longer loses turns.** If any memory-producing
+  tier (session, long-term, epistemic, arcs, state ledger) throws during a pass —
+  e.g. a transient provider 5xx — the pipeline now leaves `lastExtractCutoff`
+  (and the post-pass state snapshot) unadvanced, so the same window is retried on
+  the next pass instead of being marked permanently processed. Previously a
+  failed tier was logged and swallowed while the cursor still advanced, silently
+  losing those turns' facts forever. Applied to both solo and group pipelines.
 - **Extraction cursor is monotonic (never advances).** `lastExtractCutoff` is a
   high-water mark. Swipe/edit/delete now use `lowerExtractCutoff(current, target)`
   so a rollback rewinds it only when the target is before the cursor, and leaves

@@ -936,6 +936,11 @@ async function onCharacterMessageRendered(messageId, type) {
           const activityHandle = startActivityLoader(settings, 'Extracting memories...');
           try {
             let total = 0;
+            // Set when any memory-producing tier throws (e.g. a transient
+            // provider 5xx). The extraction cursor must NOT advance in that case:
+            // advancing would mark this window's turns as processed and they would
+            // never be re-extracted, silently losing facts.
+            let extractionTierFailed = false;
 
             // Classify the current turn and compute adaptive per-tier token
             // budgets. These are passed directly to the injectors for this
@@ -959,6 +964,7 @@ async function onCharacterMessageRendered(messageId, type) {
               const count = await extractSessionMemories(sessionWindow, branchChanged).catch(
                 (err) => {
                   console.error('[SmartMemory] Session extraction error:', err);
+                  extractionTierFailed = true;
                   return 0;
                 },
               );
@@ -1002,6 +1008,7 @@ async function onCharacterMessageRendered(messageId, type) {
                 branchChanged,
               ).catch((err) => {
                 console.error('[SmartMemory] Long-term extraction error:', err);
+                extractionTierFailed = true;
                 return 0;
               });
               // Run consolidation after extraction if new memories were added.
@@ -1055,6 +1062,7 @@ async function onCharacterMessageRendered(messageId, type) {
                   branchChanged,
                 ).catch((err) => {
                   console.error('[SmartMemory] Periodic epistemic extraction error:', err);
+                  extractionTierFailed = true;
                 });
                 if (shouldRefreshInjections) {
                   injectEpistemicKnowledge(characterName, characterName);
@@ -1077,6 +1085,7 @@ async function onCharacterMessageRendered(messageId, type) {
               const count = await extractArcs(arcWindow, characterName, branchChanged).catch(
                 (err) => {
                   console.error('[SmartMemory] Arc extraction error:', err);
+                  extractionTierFailed = true;
                   return 0;
                 },
               );
@@ -1090,6 +1099,7 @@ async function onCharacterMessageRendered(messageId, type) {
               await runStateCardExtraction(characterName, longtermWindow, branchChanged).catch(
                 (err) => {
                   console.error('[SmartMemory] State ledger extraction error:', err);
+                  extractionTierFailed = true;
                 },
               );
               injectStateLedger(true);
@@ -1149,17 +1159,26 @@ async function onCharacterMessageRendered(messageId, type) {
 
             // Persist the cutoff so the next extraction pass knows where this one ended.
             // Use the index snapshotted before the model calls so messages that arrived
-            // during extraction are not skipped on the next pass.
+            // during extraction are not skipped on the next pass. If any memory tier
+            // failed, DO NOT advance the cursor: the turns in this window must be
+            // re-extracted next pass instead of being marked permanently processed.
             const metaAfter = context.chatMetadata?.[META_KEY];
             if (metaAfter) {
-              metaAfter.lastExtractCutoff = snapshotCutoff;
-              if (shouldRefreshInjections) metaAfter.lastInjectionRefresh = snapshotCutoff;
+              if (!extractionTierFailed) {
+                metaAfter.lastExtractCutoff = snapshotCutoff;
+                if (shouldRefreshInjections) metaAfter.lastInjectionRefresh = snapshotCutoff;
+              }
               context.saveMetadata();
             }
 
             // Record a message-anchored snapshot of the state after this pass so
-            // a later swipe/delete of this turn rolls back cleanly.
-            takeStateSnapshot(snapshotCutoff);
+            // a later swipe/delete of this turn rolls back cleanly. Skipped on a
+            // partial failure so the (incomplete) state is not anchored as canon.
+            if (extractionTierFailed) {
+              setStatusMessage('Extraction incomplete; will retry this window.');
+            } else {
+              takeStateSnapshot(snapshotCutoff);
+            }
           } catch (err) {
             if (err === CHAT_SWITCHED) {
               smLog('[SmartMemory] Extraction aborted: chat switched mid-extraction.');
@@ -2047,6 +2066,9 @@ async function onGroupWrapperFinished({ type } = {}) {
 
             try {
               let total = 0;
+              // Set when any memory-producing tier throws; the cursor must not
+              // advance so this window's turns are re-extracted next round.
+              let extractionTierFailed = false;
 
               // Adaptive budgets are per-turn values passed to injectors below;
               // they are never written into settings, so a save during the model
@@ -2118,6 +2140,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                     branchChanged,
                   ).catch((err) => {
                     console.error('[SmartMemory] Long-term extraction error:', err);
+                    extractionTierFailed = true;
                     return 0;
                   });
                   if (count > 0 && settings.consolidation_enabled && !consolidationRunning) {
@@ -2178,6 +2201,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                     branchChanged,
                   ).catch((err) => {
                     console.error('[SmartMemory] Group periodic epistemic error:', err);
+                    extractionTierFailed = true;
                   });
                   if (selectedGroupCharacter) {
                     injectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
@@ -2197,6 +2221,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 const arcWindow = getStableExtractionWindow(context.chat, 100);
                 const count = await extractArcs(arcWindow, null, branchChanged).catch((err) => {
                   console.error('[SmartMemory] Arc extraction error:', err);
+                  extractionTierFailed = true;
                   return 0;
                 });
                 injectArcs(budgets.arcs);
@@ -2238,6 +2263,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                   branchChanged,
                 ).catch((err) => {
                   console.error('[SmartMemory] State ledger extraction error:', err);
+                  extractionTierFailed = true;
                 });
                 injectStateLedger(true);
               }
@@ -2280,14 +2306,21 @@ async function onGroupWrapperFinished({ type } = {}) {
 
               const metaAfterGroup = context.chatMetadata?.[META_KEY];
               if (metaAfterGroup) {
-                metaAfterGroup.lastExtractCutoff = snapshotCutoffGroup;
-                if (shouldRefreshInjectionsGroup)
-                  metaAfterGroup.lastInjectionRefresh = snapshotCutoffGroup;
+                if (!extractionTierFailed) {
+                  metaAfterGroup.lastExtractCutoff = snapshotCutoffGroup;
+                  if (shouldRefreshInjectionsGroup)
+                    metaAfterGroup.lastInjectionRefresh = snapshotCutoffGroup;
+                }
                 context.saveMetadata();
               }
 
               // Record a message-anchored snapshot after this round's pass.
-              takeStateSnapshot(snapshotCutoffGroup);
+              // Skipped on a partial failure so incomplete state is not anchored.
+              if (extractionTierFailed) {
+                setStatusMessage('Extraction incomplete; will retry this window.');
+              } else {
+                takeStateSnapshot(snapshotCutoffGroup);
+              }
             } catch (err) {
               if (err === CHAT_SWITCHED) {
                 smLog('[SmartMemory] Group extraction aborted: chat switched mid-extraction.');
