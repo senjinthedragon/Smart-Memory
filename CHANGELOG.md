@@ -120,6 +120,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dry-run generations no longer poison the generation gate (critical).**
+  SillyTavern's `PromptManager` runs a post-message **dry-run**
+  (`Generate('normal', {}, true)`) to compute token composition. It emits
+  `GENERATION_STARTED` but never `MESSAGE_RECEIVED` or `GENERATION_ENDED`, so
+  treating it as a real generation left the gate locked and made
+  `onCharacterMessageRendered` abort at the top on **every turn** — silently
+  skipping all extraction, scene detection, continuity, and arcs. The handler
+  now ignores dry-runs via `isTrackableGeneration(type, dryRun)`. Found by the
+  real SillyTavern end-to-end harness, which had recorded zero memories across a
+  full roleplay; after the fix the same harness records natural session
+  memories, entities, a compaction summary, live prompt injection, and exact
+  rollback.
 - **Mid-chat delete rollback.** SillyTavern's `MESSAGE_DELETED` always passes
   the **new chat length**, never the deleted index. The handler now recovers the
   deleted turn by diffing surviving message object identities against a snapshot
