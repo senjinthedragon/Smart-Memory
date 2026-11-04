@@ -120,6 +120,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Extraction cursor is monotonic (never advances).** `lastExtractCutoff` is a
+  high-water mark. Swipe/edit/delete now use `lowerExtractCutoff(current, target)`
+  so a rollback rewinds it only when the target is before the cursor, and leaves
+  it untouched when the target is at/after the cursor (and leaves it unset when it
+  was never set). Previously deleting a turn beyond the watermark advanced the
+  cursor (observed 1 → 3 in a real run), permanently skipping un-extracted
+  surviving turns. Verified end-to-end.
 - **Dry-run generations no longer poison the generation gate (critical).**
   SillyTavern's `PromptManager` runs a post-message **dry-run**
   (`Generate('normal', {}, true)`) to compute token composition. It emits
