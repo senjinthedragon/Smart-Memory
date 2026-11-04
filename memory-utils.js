@@ -1909,3 +1909,21 @@ export function resolveDeletedIndexFromRefs(prevRefs, currChat, emittedLength) {
     ? Math.max(0, emittedLength - 1)
     : Math.max(0, chat.length - 1);
 }
+
+/**
+ * Returns true when a GENERATION_STARTED event should open the generation gate.
+ *
+ * SillyTavern emits GENERATION_STARTED as `(type, options, dryRun)`. Its
+ * PromptManager performs a post-message DRY-RUN (`Generate('normal', {}, true)`)
+ * to compute token composition; a dry-run returns before emitting
+ * MESSAGE_RECEIVED or GENERATION_ENDED, so treating it as a real generation
+ * would leave the gate locked and silently skip all extraction. Only real
+ * (non-dry-run) normal generations may open the gate.
+ *
+ * @param {string} type - the generation type (e.g. 'normal', 'quiet', 'swipe').
+ * @param {boolean} [dryRun] - ST's dry-run flag (true for prompt-composition runs).
+ * @returns {boolean}
+ */
+export function isTrackableGeneration(type, dryRun) {
+  return type === 'normal' && dryRun !== true;
+}

@@ -134,6 +134,7 @@ import {
   isDuplicateChatLoad,
   recapCompletionOwnsSlot,
   resolveDeletedIndexFromRefs,
+  isTrackableGeneration,
 } from './memory-utils.js';
 import { clearUnifiedSlot, maybeInjectUnified } from './unified-inject.js';
 import { registerSmartMemoryMacros } from './macros.js';
@@ -2503,14 +2504,14 @@ jQuery(async function () {
     // popup - showing it after the response arrives would be confusing.
     if (recapRunningForChat !== null) recapSuppressed = true;
   });
-  eventSource.on(event_types.GENERATION_STARTED, (type) => {
-    // Only track normal generations - quiet generations are background calls
-    // from other extensions (e.g. auto-summary) and do not produce the
-    // CHARACTER_MESSAGE_RENDERED events this flag is designed to suppress.
-    // Setting the flag for quiet types causes extraction to be silently
-    // skipped when another extension fires a quiet generation between
-    // MESSAGE_RECEIVED and CHARACTER_MESSAGE_RENDERED.
-    if (type === 'normal') {
+  eventSource.on(event_types.GENERATION_STARTED, (type, _options, dryRun) => {
+    // Only track real normal generations. ST's PromptManager performs a
+    // post-message DRY-RUN (Generate('normal', {}, true)) to compute token
+    // composition; a dry-run returns before emitting MESSAGE_RECEIVED or
+    // GENERATION_ENDED, so counting it would lock the gate and silently skip
+    // extraction on every turn. Quiet generations are other extensions'
+    // background calls and produce no CHARACTER_MESSAGE_RENDERED.
+    if (isTrackableGeneration(type, dryRun)) {
       applyGenerationGateEvent('start');
       generationStartTime = Date.now();
       startGenerationWatchdog();
