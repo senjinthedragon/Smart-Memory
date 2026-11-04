@@ -2089,6 +2089,7 @@ async function onGroupWrapperFinished({ type } = {}) {
                 const count = await extractSessionMemories(sessionWindow, branchChanged).catch(
                   (err) => {
                     console.error('[SmartMemory] Session extraction error:', err);
+                    extractionTierFailed = true;
                     return 0;
                   },
                 );
