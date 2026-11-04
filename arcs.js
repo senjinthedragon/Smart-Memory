@@ -66,6 +66,8 @@ import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
+import { safeStorageKey } from './memory-utils.js';
+import { takeStateSnapshot } from './state-ledger.js';
 
 // ---- Deduplication ------------------------------------------------------
 
@@ -178,6 +180,17 @@ export function loadArcs() {
 }
 
 /**
+ * Records a message-anchored state snapshot after a manual arc edit. Without
+ * this, the next swipe/delete rollback would restore an older snapshot and
+ * discard the user's manual change.
+ */
+function snapshotAfterManualEdit() {
+  const context = getContext();
+  const length = context.chat?.length ?? 0;
+  if (length > 0) takeStateSnapshot(length - 1);
+}
+
+/**
  * Persists the story arc array to chatMetadata.
  * @param {Array<{content: string, ts: number}>} arcs
  */
@@ -187,21 +200,34 @@ export async function saveArcs(arcs) {
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
   context.chatMetadata[META_KEY].storyArcs = arcs;
   await context.saveMetadata();
+  snapshotAfterManualEdit();
 }
 
 /**
  * Removes a single arc by its index in the arc array.
- * If the arc is persistent and characterName is provided, also removes it
- * from character-level storage so it no longer appears in future chats.
+ * If the arc is persistent, also removes it from the matching persistent store
+ * so it no longer appears in future chats: group-level storage when groupId is
+ * provided, otherwise character-level storage when characterName is provided.
  * @param {number} index
  * @param {string|null} [characterName]
+ * @param {string|null} [groupId]
  */
-export async function deleteArc(index, characterName = null) {
+export async function deleteArc(index, characterName = null, groupId = null) {
   const arcs = loadArcs();
   const arc = arcs[index];
   if (!arc) return;
 
-  if (arc.persistent && characterName) {
+  if (arc.persistent && groupId) {
+    // Group chats keep persistent arcs at the group level.
+    const persistent = loadGroupPersistentArcs(groupId);
+    const filtered = [];
+    for (const p of persistent) {
+      if (!(await arcIsDuplicate(p.content, arc.content))) filtered.push(p);
+    }
+    if (filtered.length !== persistent.length) {
+      saveGroupPersistentArcs(groupId, filtered);
+    }
+  } else if (arc.persistent && characterName) {
     const persistent = loadPersistentArcs(characterName);
     const filtered = [];
     for (const p of persistent) {
@@ -214,6 +240,7 @@ export async function deleteArc(index, characterName = null) {
 
   arcs.splice(index, 1);
   await saveArcs(arcs);
+  snapshotAfterManualEdit();
 }
 
 /**
@@ -248,6 +275,10 @@ export async function saveArcSummaries(summaries) {
   const context = getContext();
   if (!context.chatMetadata) context.chatMetadata = {};
   if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  // Cap stored arc summaries to the 50 most recent. Older summaries are only
+  // needed as canon input, which itself caps how many it reads, so retaining
+  // more than this only grows chatMetadata without benefit.
+  if (summaries.length > 50) summaries = summaries.slice(-50);
   context.chatMetadata[META_KEY].arcSummaries = summaries;
   await context.saveMetadata();
 }
@@ -274,7 +305,10 @@ export async function clearArcSummaries() {
  */
 export function loadPersistentArcs(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.persistent_arcs ?? [];
+  return (
+    extension_settings[MODULE_NAME]?.characters?.[safeStorageKey(characterName)]?.persistent_arcs ??
+    []
+  );
 }
 
 /**
@@ -286,9 +320,10 @@ export function savePersistentArcs(characterName, arcs) {
   if (!characterName) return;
   if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
   if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
-  if (!extension_settings[MODULE_NAME].characters[characterName])
-    extension_settings[MODULE_NAME].characters[characterName] = {};
-  extension_settings[MODULE_NAME].characters[characterName].persistent_arcs = arcs;
+  const key = safeStorageKey(characterName);
+  if (!extension_settings[MODULE_NAME].characters[key])
+    extension_settings[MODULE_NAME].characters[key] = {};
+  extension_settings[MODULE_NAME].characters[key].persistent_arcs = arcs;
   saveSettingsDebounced();
 }
 
@@ -301,7 +336,7 @@ export function savePersistentArcs(characterName, arcs) {
  */
 export function loadGroupPersistentArcs(groupId) {
   if (!groupId) return [];
-  return extension_settings[MODULE_NAME]?.group_arcs?.[groupId] ?? [];
+  return extension_settings[MODULE_NAME]?.group_arcs?.[safeStorageKey(groupId)] ?? [];
 }
 
 /**
@@ -313,7 +348,7 @@ export function saveGroupPersistentArcs(groupId, arcs) {
   if (!groupId) return;
   if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
   if (!extension_settings[MODULE_NAME].group_arcs) extension_settings[MODULE_NAME].group_arcs = {};
-  extension_settings[MODULE_NAME].group_arcs[groupId] = arcs;
+  extension_settings[MODULE_NAME].group_arcs[safeStorageKey(groupId)] = arcs;
   saveSettingsDebounced();
 }
 
@@ -325,7 +360,7 @@ export function saveGroupPersistentArcs(groupId, arcs) {
 export function pruneOrphanedGroupArcs() {
   const groupArcs = extension_settings[MODULE_NAME]?.group_arcs;
   if (!groupArcs) return;
-  const knownIds = new Set((getContext().groups ?? []).map((g) => String(g.id)));
+  const knownIds = new Set((getContext().groups ?? []).map((g) => safeStorageKey(String(g.id))));
   let changed = false;
   for (const id of Object.keys(groupArcs)) {
     if (!knownIds.has(id)) {
@@ -855,7 +890,7 @@ export async function extractArcs(messages, characterName = null, abortCheck = n
  * Injects active story arcs into the prompt via setExtensionPrompt.
  * Clears the slot if arc tracking is disabled or no arcs exist.
  */
-export function injectArcs() {
+export function injectArcs(budgetOverride = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.arcs_enabled) {
     setMacroContent(MACRO_NAMES.arcs, '');
@@ -875,7 +910,7 @@ export function injectArcs() {
   // Trim to token budget: drop oldest arcs (from the front) until we fit.
   // If a single arc still exceeds the budget, hard-truncate its content so the
   // injection is always within the cap regardless of individual entry length.
-  const budget = settings.arcs_inject_budget ?? 400;
+  const budget = budgetOverride ?? settings.arcs_inject_budget ?? 400;
   const fullTokens = estimateTokens(
     `Active story threads:\n${arcs.map((a) => `- ${a.content}`).join('\n')}`,
   );

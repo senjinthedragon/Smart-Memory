@@ -347,23 +347,54 @@ ARC: ${arcContent}${sceneSection}${memSection}`
 
 /**
  * Assembles the continuity check prompt.
- * @param {string} establishedFacts - Combined summary + memories as a text block.
- * @param {string} latestResponse - The last AI message to check against the facts.
+ *
+ * The recent transcript is the ground truth. Baseline notes are explicitly
+ * described as lagging so the checker does not mistake normal story progression
+ * (moved location, used an item, learned something, time passing) for a
+ * contradiction. Only permanent properties are eligible, and the model must
+ * return strict JSON whose quotes can be verified against the source text.
+ *
+ * @param {string} establishedFacts - Combined summary + memories as a baseline text block.
+ * @param {string} recentTranscript - The turns preceding the latest response as [USER]/[Name] lines.
+ * @param {string} latestResponse - The last AI message to check.
  * @returns {string} The complete prompt string.
  */
-export function buildContinuityPrompt(establishedFacts, latestResponse) {
+export function buildContinuityPrompt(establishedFacts, recentTranscript, latestResponse) {
   return (
     NO_ACTION_PREAMBLE +
-    `[CONTINUITY CHECK - Do NOT roleplay. Identify contradictions only.]
+    `[CONTINUITY CHECK - Do NOT roleplay. Identify genuine permanent contradictions only.]
 
-ESTABLISHED FACTS (from memories and summary):
+You are auditing a roleplay for continuity errors. A false positive is far worse than a missed one: telling the story that a past event did not happen causes severe narrative drift. Be extremely conservative.
+
+RECENT TRANSCRIPT (ground truth - this is what actually happened in the story, in order):
+${recentTranscript || '(no recent transcript available)'}
+
+BASELINE NOTES (written earlier - often lagging or outdated, and they do NOT include recent turns):
 ${establishedFacts}
 
-LATEST STORY RESPONSE:
+LATEST STORY RESPONSE (the newest AI message):
 ${latestResponse}
 
 ---
-Does the latest response contradict or conflict with any established fact? List each contradiction precisely and briefly. If there are none, output: NONE`
+EVIDENCE RULES - follow these exactly:
+1. The RECENT TRANSCRIPT is ground truth for what happened in the story.
+2. BASELINE NOTES were written earlier, are often lagging or outdated, and do not include recent turns.
+3. If the latest response differs from a baseline note, assume the story PROGRESSED, unless the note describes a PERMANENT property that nothing in the transcript could have changed.
+4. NEVER flag: location changes, items gained/lost/used, injuries, emotions, plans, relationship shifts, newly learned information, time passing, or anything merely not visible in the transcript.
+5. ONLY flag permanent properties: character names, species/race, physical appearance, fixed backstory, hard world rules, or established permanent deaths.
+6. If you are unsure, output no contradiction. Silence is always preferred over a false positive.
+7. ACTIVE IN-STORY TRANSFORMATIONS ARE PROGRESSION: If the response or recent transcript shows a trait being actively transformed, cast by a spell, dyed, disguised, injured, or changed in-scene (e.g. 'a spell turned her eyes crimson', 'she dyed her hair'), this is a story event/progression! NEVER flag it as a contradiction. Only flag unmotivated contradictions where an established permanent trait is suddenly described differently with NO in-story reason, action, or explanation whatsoever.
+
+For every contradiction you report:
+- "fact" must be copied verbatim from the BASELINE NOTES.
+- "response_quote" must be copied verbatim from the LATEST STORY RESPONSE.
+- "category" must be exactly one of: permanent_trait, backstory, world_rule, death.
+- "why_not_progression" must explain why this is a permanent property rather than ordinary story progression.
+
+Output strict JSON and nothing else, in exactly this shape:
+{"contradictions":[{"fact":"...","response_quote":"...","category":"permanent_trait|backstory|world_rule|death","why_not_progression":"..."}]}
+If nothing qualifies, or if you are unsure, output exactly:
+{"contradictions":[]}`
   );
 }
 
@@ -954,9 +985,14 @@ export function buildStateCardPrompt(excerpt, entityList) {
     `STRICT RULES - violations produce unusable output:\n` +
     `- ONLY include fields that are EXPLICITLY stated or DIRECTLY shown in the text.\n` +
     `  Do not infer, deduce, or reason about what is probably true.\n` +
+    `- To update an entity when a temporary condition or item has ENDED, HEALED, or\n` +
+    `  been DROPPED in this scene: write fieldname=cleared or fieldname=none\n` +
+    `  (or !carried_items, injuries=healed).\n` +
+    `- If an attribute (such as location) is simply UNMENTIONED or UNKNOWN in the\n` +
+    `  excerpt, OMIT the field entirely! Do NOT write location=unknown or location=none.\n` +
     `- A field you are not certain about MUST be omitted entirely. NEVER write\n` +
-    `  fieldname=unknown, fieldname=none, fieldname=not mentioned, or any similar\n` +
-    `  placeholder. Either you know the value from the text or the field is absent.\n` +
+    `  fieldname=unknown, fieldname=not mentioned, or any similar placeholder.\n` +
+    `  Either you know the value from the text or the field is absent.\n` +
     `- If an entity is not mentioned in the excerpt, do not output a line for it at all.\n` +
     `  An entity with no known fields produces no output - not a line of unknowns.\n` +
     `- If nothing is known about any entity, output: NONE\n\n` +

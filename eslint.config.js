@@ -43,4 +43,12 @@ export default [
       'no-console': 'off',
     },
   },
+  {
+    files: ['test-harness.mjs', 'tests/**/*.js'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+      },
+    },
+  },
 ];

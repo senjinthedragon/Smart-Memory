@@ -45,6 +45,7 @@ import {
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_SCENES } from './constants.js';
+import { replaceTemplate } from './template-utils.js';
 import { buildSceneDetectPrompt, SCENE_SUMMARY_PROMPT } from './prompts.js';
 import { detectSceneBreakHeuristic } from './parsers.js';
 import { smLog } from './logging.js';
@@ -187,7 +188,11 @@ export async function summarizeScene(sceneMessages) {
     if (!sceneText.trim()) return null;
 
     // Truncate to 2000 chars to keep the prompt cost reasonable on local hardware.
-    const prompt = SCENE_SUMMARY_PROMPT.replace('{{scene_text}}', sceneText.slice(0, 2000));
+    const prompt = replaceTemplate(
+      SCENE_SUMMARY_PROMPT,
+      '{{scene_text}}',
+      sceneText.slice(0, 2000),
+    );
 
     const response = await generateMemoryExtract(prompt, {
       responseLength: settings.scene_summary_length ?? 200,
@@ -317,7 +322,7 @@ export async function linkMemoriesToLastScene(memoryIds) {
  * Injects the scene history into the prompt via setExtensionPrompt.
  * Clears the slot if scene detection is disabled or no history exists.
  */
-export function injectSceneHistory() {
+export function injectSceneHistory(budgetOverride = null) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.scene_enabled) {
     setMacroContent(MACRO_NAMES.scenes, '');
@@ -337,7 +342,7 @@ export function injectSceneHistory() {
   // Trim to token budget: drop oldest scenes (from the front) until we fit.
   // If a single scene still exceeds the budget, hard-truncate so the injection
   // is always within the cap regardless of individual summary length.
-  const budget = settings.scene_inject_budget ?? 300;
+  const budget = budgetOverride ?? settings.scene_inject_budget ?? 300;
   const fullText = history.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
   const fullTokens = estimateTokens(`Previous scenes:\n${fullText}`);
   const trimmed = [...history];

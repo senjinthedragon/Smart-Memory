@@ -1,7 +1,7 @@
 ---
 name: Question / Support
 about: Need help getting something working or want to understand how something works
-title: "[Question] "
+title: '[Question] '
 labels: question
 assignees: ''
 ---

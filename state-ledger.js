@@ -29,10 +29,13 @@
  * loadStateLedger             - returns the full ledger map from chatMetadata
  * saveStateLedger             - persists the ledger to chatMetadata
  * getStateCard                - returns the fields object for a given entity, or null
+ * upsertStateCard             - validates, caps, stamps, merges, and prunes one state card write
  * setStateCard                - upserts a state card into the ledger
  * deleteStateCard             - removes a state card entry
  * migrateStateLedgerKey       - migrates a state card to a new key after a type change
  * clearStateLedger            - empties the entire ledger
+ * takeStateSnapshot           - records a message-anchored rollback-safe state snapshot
+ * rollbackStateToSnapshot     - restores state as of a message index (swipe/delete)
  * runStateCardExtraction      - runs the extraction pass for the current message window
  * injectStateLedger           - pushes the current-state block into the prompt
  * loadAndInjectStateLedger    - restores and re-injects on chat load
@@ -46,13 +49,27 @@ import {
 import { getContext, extension_settings } from '../../../extensions.js';
 import { MODULE_NAME, META_KEY, PROMPT_KEY_STATE_LEDGER, estimateTokens } from './constants.js';
 import { buildStateCardPrompt } from './prompts.js';
-import { parseStateCardResponse } from './parsers.js';
+export {
+  MAX_STATE_FIELD_LENGTH,
+  MAX_STATE_LEDGER_CARDS,
+  capStateFieldValues,
+  pruneStateLedger,
+} from './parsers.js';
+import {
+  parseStateCardResponse,
+  mergeStateCardFields,
+  capStateFieldValues,
+  pruneStateLedger,
+  MAX_STATE_LEDGER_CARDS,
+} from './parsers.js';
 import { loadCharacterEntityRegistry, loadSessionEntityRegistry } from './graph-migration.js';
 import { generateMemoryExtract } from './generate.js';
 import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
+import { takeSnapshotOnMeta, rollbackSnapshotOnMeta } from './state-snapshot.js';
+import { inferRetconStateUpdate } from './continuity-utils.js';
 
 // ---- Field schema -----------------------------------------------------------
 
@@ -133,6 +150,52 @@ export function getStateCard(name, type) {
 }
 
 /**
+ * Returns the chat index to anchor a manual-edit snapshot at. Manual edits
+ * happen at the current chat tip; returning -1 when the chat is empty keeps
+ * us from writing a meaningless snapshot for a chat with no turns.
+ *
+ * @returns {number}
+ */
+function currentChatIndex() {
+  const context = getContext();
+  const length = context.chat?.length ?? 0;
+  return length > 0 ? length - 1 : -1;
+}
+
+/**
+ * Records a message-anchored snapshot after a manual card edit. Without this,
+ * the next swipe/delete rollback would restore an older snapshot and discard
+ * the user's manual change.
+ */
+function snapshotAfterManualEdit() {
+  const index = currentChatIndex();
+  if (index >= 0) takeStateSnapshot(index);
+}
+
+/**
+ * Validated single write path for a state card. Every ledger mutation funnels
+ * through here so field capping, freshness stamping, collection-aware merging,
+ * and ledger pruning are enforced uniformly across extraction, manual edits,
+ * and durable retcons.
+ *
+ * The incoming fields are capped to MAX_STATE_FIELD_LENGTH, stamped with
+ * `lastUpdated: Date.now()` (always now - a model cannot spoof freshness),
+ * merged on top of the existing card, and the ledger is pruned back to
+ * MAX_STATE_LEDGER_CARDS.
+ *
+ * @param {Object} ledger - The full state ledger map (mutated in place).
+ * @param {string} key - Canonical ledger key (`name|type`).
+ * @param {Object} fields - Partial or full field object for this entity type.
+ * @returns {number} Number of cards pruned from the ledger by this call.
+ */
+export function upsertStateCard(ledger, key, fields) {
+  const capped = capStateFieldValues(fields);
+  capped.lastUpdated = Date.now();
+  ledger[key] = mergeStateCardFields(ledger[key] ?? {}, capped);
+  return pruneStateLedger(ledger);
+}
+
+/**
  * Upserts a state card into the ledger. Merges fields on top of any existing
  * card rather than replacing it - sparse update semantics.
  *
@@ -144,8 +207,11 @@ export function getStateCard(name, type) {
 export async function setStateCard(name, type, fields) {
   const ledger = loadStateLedger();
   const key = ledgerKey(name, type);
-  ledger[key] = { ...(ledger[key] ?? {}), ...fields };
+  // Collection-aware merge: a plain item list appends, a `{ removeItems }`
+  // descriptor removes matching items, and `''` clears the field outright.
+  upsertStateCard(ledger, key, fields);
   await saveStateLedger(ledger);
+  snapshotAfterManualEdit();
 }
 
 /**
@@ -162,6 +228,7 @@ export async function deleteStateCard(name, type) {
   if (!(key in ledger)) return;
   delete ledger[key];
   await saveStateLedger(ledger);
+  snapshotAfterManualEdit();
 }
 
 /**
@@ -199,6 +266,73 @@ export async function clearStateLedger() {
   await saveStateLedger({});
 }
 
+/**
+ * Applies a resolved/accepted durable retcon to the state ledger.
+ *
+ * When the retcon describes a state-card attribute (an injury, outfit, mood,
+ * location, goal, or carried item), the inferred entity's card is updated so
+ * the baseline follows the state the story has settled on. Retcons that do not
+ * map to the schema (e.g. eye colour) are ignored here and handled by the
+ * long-term memory supersession path instead.
+ *
+ * @param {Object} retcon
+ * @returns {boolean} True when a state card field was updated.
+ */
+export function applyRetconToStateLedger(retcon) {
+  const update = inferRetconStateUpdate(retcon);
+  if (!update) return false;
+
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  const meta = context.chatMetadata[META_KEY];
+  if (!meta.state_ledger || typeof meta.state_ledger !== 'object') meta.state_ledger = {};
+
+  const key = ledgerKey(update.name, update.type);
+  upsertStateCard(meta.state_ledger, key, update.fields);
+  context.saveMetadata()?.catch?.(console.error);
+  snapshotAfterManualEdit();
+  return true;
+}
+
+// ---- Message-anchored snapshots & rollback ----------------------------------
+
+/**
+ * Records a snapshot of the chat-scoped mutable state (state ledger, story
+ * arcs, perspectives/secrets, durable retcons) tagged with the given message
+ * index. Call after an extraction/state-update pass so a later swipe or delete
+ * can roll the state back to the last committed turn.
+ *
+ * @param {number} chatIndex - Chat message index this state reflects.
+ * @returns {Object|null} The recorded snapshot.
+ */
+export function takeStateSnapshot(chatIndex) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  const snapshot = takeSnapshotOnMeta(context.chatMetadata[META_KEY], chatIndex);
+  context.saveMetadata()?.catch?.(console.error);
+  return snapshot;
+}
+
+/**
+ * Rolls the chat-scoped mutable state back to the latest snapshot at or before
+ * `targetMsgIndex`, pruning every snapshot after it. Used when a message is
+ * swiped or deleted so facts, state cards, arcs, secrets, and retcons from the
+ * discarded branch never survive.
+ *
+ * @param {number} targetMsgIndex - Highest chat index whose state should survive.
+ * @returns {Object|null} The restored snapshot, or null when reset to empty.
+ */
+export function rollbackStateToSnapshot(targetMsgIndex) {
+  const context = getContext();
+  const meta = context.chatMetadata?.[META_KEY];
+  if (!meta) return null;
+  const restored = rollbackSnapshotOnMeta(meta, targetMsgIndex);
+  context.saveMetadata()?.catch?.(console.error);
+  return restored;
+}
+
 // ---- Extraction -------------------------------------------------------------
 
 /**
@@ -208,7 +342,8 @@ export async function clearStateLedger() {
  * against the recent messages, parses the response, and merges the results
  * into the stored ledger as sparse updates.
  *
- * @param {string|null} characterName - Card character name for LT registry lookup.
+ * @param {string|string[]|null} characterName - Card character name(s) for LT registry lookup.
+ *   Group chats pass every active member so entities are gathered across the whole group.
  * @param {Object[]} messages - Recent messages to extract state from.
  * @param {Function|null} [abortCheck] - Optional zero-arg function; if it returns true the write is skipped (chat switched).
  * @returns {Promise<number>} Number of entity cards updated.
@@ -225,10 +360,28 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
     if (!chatExcerpt.trim()) return 0;
 
     // Build entity list from both registries, filtered to types in scope.
-    const ltEntities = characterName ? loadCharacterEntityRegistry(characterName) : [];
+    // Group chats pass an array so entities from every active member are
+    // included instead of only the selected character.
+    const characterNames = Array.isArray(characterName)
+      ? characterName.filter(Boolean)
+      : characterName
+        ? [characterName]
+        : [];
+    // Seed the active card characters before consulting the registries. A chat
+    // can begin before any registry entity exists for the active character, so
+    // without this seed a valid [state:Elara:character] card would be rejected
+    // by the allowlist below and never extracted on the first pass.
+    const seedCharacters = characterNames.filter(Boolean);
+    const ltEntities = characterNames.flatMap((name) => loadCharacterEntityRegistry(name));
     const sessionEntities = loadSessionEntityRegistry();
     const seen = new Set();
     const entityList = [];
+    for (const name of seedCharacters) {
+      const k = ledgerKey(name, 'character');
+      if (seen.has(k)) continue;
+      seen.add(k);
+      entityList.push({ name, type: 'character' });
+    }
     for (const e of [...ltEntities, ...sessionEntities]) {
       if (!STATE_CARD_TYPES.has(e.type)) continue;
       const k = ledgerKey(e.name, e.type);
@@ -252,13 +405,38 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
       return 0;
     }
 
-    // Merge updates into the existing ledger.
+    // Merge updates into the existing ledger with collection-aware add/remove
+    // semantics so a partial removal never wipes untargeted items.
     if (abortCheck?.()) return 0;
     const ledger = loadStateLedger();
+
+    // Strict (name, type) whitelist. Only the canonical key for an entity the
+    // extension already knows about (present in a registry, or an active card
+    // character seeded above) may be merged. This rejects hallucinated entities
+    // AND type-confused cards (e.g. "elara|place" for the character Elara) so
+    // they can never enter the ledger or the injected prompt. The seed uses the
+    // canonical `name|character` key only - no widening beyond that.
+    const allowedKeys = new Set(entityList.map((e) => ledgerKey(e.name, e.type)));
+
     let count = 0;
+    let pruned = 0;
     for (const [key, fields] of updates) {
-      ledger[key] = { ...(ledger[key] ?? {}), ...fields };
+      if (!allowedKeys.has(key)) {
+        smLog(`[SmartMemory] State ledger: rejected unknown entity card "${key}".`);
+        continue;
+      }
+      // Every write goes through the validated upsert so cap + lastUpdated
+      // stamping + prune are enforced here as well as on the manual/retcon paths.
+      pruned += upsertStateCard(ledger, key, fields);
       count++;
+    }
+
+    // Keep the ledger bounded - prune oldest low-priority (non-character) cards
+    // first so metadata cannot grow without limit across long chats.
+    if (pruned > 0) {
+      smLog(
+        `[SmartMemory] State ledger: pruned ${pruned} card(s) over the ${MAX_STATE_LEDGER_CARDS} cap.`,
+      );
     }
     await saveStateLedger(ledger);
 
@@ -277,9 +455,10 @@ export async function runStateCardExtraction(characterName, messages, abortCheck
  * Returns an empty string when the ledger is empty.
  *
  * @param {Object} ledger - The full state ledger map.
+ * @param {number|null} [lastSeenMsg] - Highest message index reflected in the ledger.
  * @returns {string}
  */
-function buildStateLedgerBlock(ledger) {
+function buildStateLedgerBlock(ledger, lastSeenMsg = null) {
   const entries = Object.entries(ledger);
   if (entries.length === 0) return '';
 
@@ -298,10 +477,14 @@ function buildStateLedgerBlock(ledger) {
     byType[type].push(line);
   }
 
-  const lines = [];
+  const lines = [`[State Ledger as of turn #${lastSeenMsg ?? 'current'}]:`];
   for (const type of ['character', 'object', 'place', 'faction']) {
     if (byType[type]) lines.push(...byType[type]);
   }
+
+  // A ledger whose cards all have empty fields yields no content lines - treat
+  // it as empty so the injection slot is cleared rather than header-only.
+  if (lines.length === 1) return '';
 
   return lines.join('\n');
 }
@@ -328,7 +511,9 @@ export function injectStateLedger(updateTelemetry = false) {
   }
 
   const ledger = loadStateLedger();
-  const block = buildStateLedgerBlock(ledger);
+  const context = getContext();
+  const cutoff = context.chatMetadata?.[META_KEY]?.lastExtractCutoff;
+  const block = buildStateLedgerBlock(ledger, Number.isInteger(cutoff) ? cutoff : null);
 
   if (!block) {
     clear();
@@ -357,7 +542,7 @@ export function injectStateLedger(updateTelemetry = false) {
       PROMPT_KEY_STATE_LEDGER,
       content,
       settings.state_ledger_position ?? extension_prompt_types.IN_CHAT,
-      settings.state_ledger_depth ?? 1,
+      settings.state_ledger_depth ?? 2,
       false,
       settings.state_ledger_role ?? extension_prompt_roles.SYSTEM,
     );

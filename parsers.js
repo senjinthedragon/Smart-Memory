@@ -38,6 +38,7 @@
  * parseEpistemicResponse         - parses the five-tag knowledge map output from an epistemic extraction pass
  * parseEpistemicRetireIndices     - extracts the set of 1-based entry indices the model flagged for retirement
  * parseStateCardResponse         - parses structured current-state field output into a Map of key -> fields
+ * mergeStateCardFields           - applies parsed fields onto an existing card with collection add/remove semantics
  *
  * All new memory objects produced by the parse functions carry the full graph
  * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
@@ -103,7 +104,9 @@ export function parseExtractionOutput(text) {
     const type = match[1].toLowerCase();
     const modifiers = match[2]; // e.g. ":2:permanent" or ":2:permanent:entity=Senjin,Alex"
     const trailing = stripTrailingTag(match[3].trim());
-    const content = trailing.content;
+    // Nested/malformed bracket tags can leave leading `]` noise on the content
+    // (e.g. `[fact:...:entity=[Nested]] Content` yields `] Content`). Strip it.
+    const content = trailing.content.replace(/^[\]\s]+/, '').trim();
 
     if (!MEMORY_TYPES.includes(type) || content.length <= 5) continue;
 
@@ -121,12 +124,13 @@ export function parseExtractionOutput(text) {
       : (trailing.expiration ?? 'permanent');
 
     // Extract optional entity names list. Stops at the next colon so reordering
-    // does not bleed into other fields.
-    const entityMatch = modifiers.match(/entity=([^:[\]]*)/i);
+    // does not bleed into other fields. Nested/malformed brackets may leave a
+    // name wrapped in `[`/`]`; strip those before use.
+    const entityMatch = modifiers.match(/entity=([^:\n]*)/i);
     const rawEntityNames = entityMatch
       ? entityMatch[1]
           .split(',')
-          .map((n) => n.trim())
+          .map((n) => n.replace(/[[\]]/g, '').trim())
           .filter((n) => n.length > 0)
       : [];
 
@@ -183,7 +187,8 @@ export function parseSessionOutput(text) {
     const type = match[1].toLowerCase();
     const modifiers = match[2];
     const trailing = stripTrailingTag(match[3].trim());
-    const content = trailing.content;
+    // Same malformed/nested bracket resilience as parseExtractionOutput.
+    const content = trailing.content.replace(/^[\]\s]+/, '').trim();
 
     if (!SESSION_TYPES.includes(type) || content.length <= 3) continue;
 
@@ -197,11 +202,11 @@ export function parseSessionOutput(text) {
       ? expirationMatch[1].toLowerCase()
       : (trailing.expiration ?? 'session');
 
-    const entityMatch = modifiers.match(/entity=([^:[\]]*)/i);
+    const entityMatch = modifiers.match(/entity=([^:\n]*)/i);
     const rawEntityNames = entityMatch
       ? entityMatch[1]
           .split(',')
-          .map((n) => n.trim())
+          .map((n) => n.replace(/[[\]]/g, '').trim())
           .filter((n) => n.length > 0)
       : [];
 
@@ -415,10 +420,14 @@ function stripHtmlTags(text) {
  *
  * Returns null if none of the three sections are present (bad output).
  * Partial output (one or two sections found) is returned with the missing
- * sections as empty strings - a partial profile is better than no profile.
+ * sections as null rather than empty strings, so callers can distinguish an
+ * omitted section from one the model deliberately left blank - a partial
+ * profile is still better than no profile. All-present-but-empty output is
+ * returned as an object of empty strings (not null) so those sections can be
+ * cleared by the caller's three-state merge.
  *
  * @param {string} response - Raw model output from buildProfileGenerationPrompt.
- * @returns {{character_state: string, world_state: string, relationship_matrix: string}|null}
+ * @returns {{character_state: string|null, world_state: string|null, relationship_matrix: string|null}|null}
  */
 export function parseProfileOutput(response) {
   if (!response) return null;
@@ -433,18 +442,19 @@ export function parseProfileOutput(response) {
     return m ? m[1].trim() : null;
   }
 
-  const character_state = extractSection('character_state');
-  const world_state = extractSection('world_state');
-  const relationship_matrix = extractSection('relationship_matrix');
-
-  // All three missing = unusable response.
-  if (!character_state && !world_state && !relationship_matrix) return null;
-
-  return {
-    character_state: character_state ?? '',
-    world_state: world_state ?? '',
-    relationship_matrix: relationship_matrix ?? '',
+  const sections = {
+    character_state: extractSection('character_state'),
+    world_state: extractSection('world_state'),
+    relationship_matrix: extractSection('relationship_matrix'),
   };
+
+  // Distinguish "all sections absent" (unusable response) from "sections
+  // present but empty" (a deliberate clear). extractSection returns null only
+  // for an absent tag; a present-but-empty tag yields ''.
+  const anyPresent = Object.values(sections).some((v) => v !== null);
+  if (!anyPresent) return null;
+
+  return sections;
 }
 
 // ---- Trigger keyword parser ---------------------------------------------
@@ -486,8 +496,10 @@ export function parseTriggerResponse(response, memoryContent) {
 // ---- Relationship delta parser ------------------------------------------
 
 // Matches lines like "Senjin -> Asher: warm(high), cautious(low)"
-// The arrow can be -> or the unicode → character.
-const RELATIONSHIP_LINE_RE = /^([^→-]+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
+// The arrow can be -> or the unicode → character. The subject may contain
+// hyphens (Jean-Luc, Mary-Jane, Al-Haitham) - only the actual arrow token ends
+// it, so use a lookahead instead of excluding "-" outright.
+const RELATIONSHIP_LINE_RE = /^((?:(?!->|→)[^:])+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
 // Matches the inline magnitude suffix: word(low|medium|high)
 const INLINE_MAGNITUDE_RE = /\((\s*low|medium|high\s*)\)/i;
 const MAGNITUDE_KEYWORDS = new Set(['low', 'medium', 'high']);
@@ -661,6 +673,114 @@ export function detectSceneBreakHeuristic(messageText) {
   return SCENE_BREAK_PATTERNS.some((pattern) => pattern.test(messageText));
 }
 
+// ---- State Ledger bounds & pruning -----------------------------------------
+
+/**
+ * Maximum character length allowed for any single state card field string.
+ * Prevents prompt-injection or malformed model responses from bloating the
+ * ledger or token footprint.
+ */
+export const MAX_STATE_FIELD_LENGTH = 500;
+
+/**
+ * Maximum number of state cards retained in the ledger. When exceeded,
+ * non-character cards are pruned oldest-first so character state - the most
+ * narratively important - survives longest.
+ */
+export const MAX_STATE_LEDGER_CARDS = 100;
+
+/**
+ * Truncates a string to `max` characters without splitting a surrogate pair
+ * (which would leave a lone surrogate / broken emoji or rare CJK glyph).
+ *
+ * @param {string} value
+ * @param {number} max
+ * @returns {string}
+ */
+function safeTruncate(value, max) {
+  if (value.length <= max) return value;
+  let end = max;
+  const code = value.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return value.slice(0, end);
+}
+
+/**
+ * Truncates any string field longer than MAX_STATE_FIELD_LENGTH. Non-string
+ * values (partial-removal descriptors) pass through untouched. The card's
+ * top-level `lastUpdated` bookkeeping property is always preserved as-is so
+ * freshness-aware pruning keeps a correct ordering. Pure, so it is safe to
+ * call from tests.
+ *
+ * @param {Object} fields
+ * @returns {Object}
+ */
+export function capStateFieldValues(fields) {
+  const capped = {};
+  for (const [field, value] of Object.entries(fields ?? {})) {
+    if (field === 'lastUpdated') {
+      capped[field] = value;
+      continue;
+    }
+    capped[field] =
+      typeof value === 'string' && value.length > MAX_STATE_FIELD_LENGTH
+        ? safeTruncate(value, MAX_STATE_FIELD_LENGTH)
+        : value;
+  }
+  return capped;
+}
+
+/**
+ * Enforces MAX_STATE_LEDGER_CARDS by deleting cards in place. Non-character
+ * cards are removed first, oldest-first by their explicit `lastUpdated`
+ * timestamp (missing timestamps sort as 0, so legacy cards evict before freshly
+ * touched ones); if that is not enough to cover the excess, the oldest
+ * remaining cards are removed as well.
+ *
+ * Timestamp ordering (rather than object insertion order) means a frequently
+ * updated current card survives even if it was inserted before a stale one.
+ *
+ * @param {Object} ledger
+ * @param {number} [max=MAX_STATE_LEDGER_CARDS]
+ * @returns {number} Number of cards removed.
+ */
+export function pruneStateLedger(ledger, max = MAX_STATE_LEDGER_CARDS) {
+  const keys = Object.keys(ledger);
+  if (keys.length <= max) return 0;
+
+  const excess = keys.length - max;
+  let removed = 0;
+
+  // Pass 1: delete non-character cards oldest-first by lastUpdated. `sort` is
+  // stable, so cards sharing a timestamp (e.g. all lacking one) keep insertion
+  // order. Character cards are never touched in this pass.
+  const nonCharacterKeys = keys.filter((key) => {
+    const type = ledger[key]?.type ?? (key.includes('|') ? key.split('|')[1] : key.split(':')[1]);
+    return type !== 'character' && !key.endsWith('|character');
+  });
+  nonCharacterKeys.sort((a, b) => (ledger[a]?.lastUpdated ?? 0) - (ledger[b]?.lastUpdated ?? 0));
+  for (const key of nonCharacterKeys) {
+    if (removed >= excess) break;
+    delete ledger[key];
+    removed++;
+  }
+
+  // Pass 2: if still over the cap, delete the oldest remaining cards regardless
+  // of type, again ordered by lastUpdated so the most recently touched survive.
+  if (removed < excess) {
+    const remainingKeys = Object.keys(ledger).sort(
+      (a, b) => (ledger[a]?.lastUpdated ?? 0) - (ledger[b]?.lastUpdated ?? 0),
+    );
+    for (const key of remainingKeys) {
+      if (removed >= excess) break;
+      delete ledger[key];
+      removed++;
+    }
+  }
+
+  return removed;
+}
+
 // ---- Epistemic extraction parser ----------------------------------------
 
 // Matches: [hiding] Concealer from Target | content
@@ -723,11 +843,19 @@ export function parseEpistemicResponse(text) {
 const EPISTEMIC_RETIRE_LINE_RE = /^\[retire\]/i;
 
 /**
+ * Maximum number of existing entries the model may retire in a single
+ * epistemic extraction pass. Caps runaway `[retire]` output so one bad response
+ * cannot wipe a character's whole knowledge base.
+ */
+export const MAX_EPISTEMIC_RETIREMENTS = 5;
+
+/**
  * Extracts the set of 1-based entry indices the model flagged for retirement.
  *
  * Expects lines of the form `[retire] <number>` mixed in with the regular
- * epistemic output. Invalid or out-of-range indices are silently ignored by
- * the caller.
+ * epistemic output. Only positive integers are returned - zero, negatives, and
+ * non-numeric noise are ignored. At most MAX_EPISTEMIC_RETIREMENTS indices are
+ * returned per pass; further valid indices are dropped.
  *
  * Lenient parsing: accepts `[retire]3`, `[retire] #2`, `[retire] 1, 3`,
  * trailing punctuation, and other weak-model variations by extracting all
@@ -740,10 +868,18 @@ export function parseEpistemicRetireIndices(text) {
   const indices = new Set();
   if (!text) return indices;
   for (const raw of text.split('\n')) {
+    if (indices.size >= MAX_EPISTEMIC_RETIREMENTS) break;
     const trimmed = raw.trim();
     if (!EPISTEMIC_RETIRE_LINE_RE.test(trimmed)) continue;
     const nums = trimmed.replace(EPISTEMIC_RETIRE_LINE_RE, '').match(/\d+/g);
-    if (nums) nums.forEach((n) => indices.add(Number(n)));
+    if (!nums) continue;
+    for (const n of nums) {
+      const value = Number(n);
+      // Only 1-based positive integers are meaningful entry indices.
+      if (!Number.isInteger(value) || value <= 0) continue;
+      indices.add(value);
+      if (indices.size >= MAX_EPISTEMIC_RETIREMENTS) break;
+    }
   }
   return indices;
 }
@@ -765,6 +901,163 @@ const STATE_NOISE_VALUES = new Set([
   'na',
   'unspecified',
 ]);
+
+/**
+ * Collection-style fields whose values accumulate (injuries, carried items,
+ * environmental hazards, damage, disguises). Only these may be cleared by the
+ * natural-language end-state words below. Attribute fields (location, owner,
+ * mood, ...) must not be wiped by a placeholder like `none` - that usually just
+ * means "unmentioned in this excerpt".
+ */
+const REMOVABLE_COLLECTION_FIELDS = new Set([
+  'injuries',
+  'carried_items',
+  'hazards',
+  'damage',
+  'outfit_disguise',
+]);
+
+/** End-state words that clear a removable collection field outright. */
+const COLLECTION_CLEAR_VALUES = new Set([
+  'none',
+  'empty',
+  'healed',
+  'cleared',
+  'repaired',
+  'removed',
+  'all healed',
+  'all cleared',
+  'none left',
+  'nothing left',
+]);
+
+/** Attribute fields only clear on an explicit `cleared` (or `!`-prefix). */
+const ATTRIBUTE_CLEAR_VALUES = new Set(['cleared']);
+
+// `<collection>=healed: <item>` / `=dropped: <item>` removes a single item from
+// the stored list instead of wiping the whole field.
+const COLLECTION_PARTIAL_REMOVAL_RE = /^(?:healed|dropped|removed|cleared)\s*:\s*(.+)$/i;
+
+/**
+ * Collection-style fields that accumulate comma/semicolon-separated items.
+ * On merge these get add/remove semantics rather than being replaced wholesale.
+ */
+const STATE_COLLECTION_FIELDS = new Set([
+  'injuries',
+  'carried_items',
+  'hazards',
+  'damage',
+  'outfit_disguise',
+]);
+
+/**
+ * Splits a stored collection string into trimmed, non-empty items.
+ * @param {*} value
+ * @returns {string[]}
+ */
+function splitCollectionItems(value) {
+  return String(value ?? '')
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Case-insensitive item match: exact, substring, or all target tokens present
+ * in the item. Used for partial removals and de-duplication.
+ * @param {string} item
+ * @param {string} target
+ * @returns {boolean}
+ */
+function collectionItemMatches(item, target) {
+  const haystack = String(item ?? '')
+    .toLowerCase()
+    .trim();
+  const needle = String(target ?? '')
+    .toLowerCase()
+    .trim();
+  if (!haystack || !needle) return false;
+  if (haystack === needle || haystack.includes(needle)) return true;
+  const haystackTokens = haystack.split(/\s+/);
+  return needle.split(/\s+/).every((token) => haystackTokens.includes(token));
+}
+
+/**
+ * Appends items to a list, skipping any already present (either direction).
+ * @param {string[]} items
+ * @param {string[]} additions
+ * @returns {string[]}
+ */
+function appendUniqueItems(items, additions) {
+  const result = [...items];
+  for (const raw of additions) {
+    const item = String(raw ?? '').trim();
+    if (!item) continue;
+    const exists = result.some(
+      (existing) => collectionItemMatches(existing, item) || collectionItemMatches(item, existing),
+    );
+    if (!exists) result.push(item);
+  }
+  return result;
+}
+
+/**
+ * Applies parsed state-card fields onto an existing card with collection-aware
+ * add/remove semantics.
+ *
+ * Non-collection fields are replaced (with `''` clearing a field). Collection
+ * fields (`injuries`, `carried_items`, `hazards`, `damage`, `outfit_disguise`):
+ * - a `''` value clears the field entirely
+ * - a `{ removeItems }` descriptor removes matching items and keeps the rest
+ * - a plain string value appends its items if not already present
+ *
+ * Pure - no SillyTavern runtime dependency - so it can be unit-tested directly.
+ *
+ * The returned object is the top-level ledger card (not just a field bag): a
+ * fresh `lastUpdated` timestamp is stamped onto it so freshness-aware pruning
+ * in pruneStateLedger() can order cards by recency. The timestamp is a
+ * top-level property, kept separate from entity fields.
+ *
+ * @param {Object} [existing={}] - Current stored card fields.
+ * @param {Object} [incoming={}] - Parsed fields from parseStateCardResponse.
+ * @returns {Object} The merged card (with a fresh top-level lastUpdated).
+ */
+export function mergeStateCardFields(existing = {}, incoming = {}) {
+  const merged = { ...(existing ?? {}) };
+  for (const [field, value] of Object.entries(incoming ?? {})) {
+    if (!STATE_COLLECTION_FIELDS.has(field)) {
+      merged[field] = value;
+      continue;
+    }
+
+    const current = typeof merged[field] === 'string' ? splitCollectionItems(merged[field]) : [];
+
+    // Structured partial removal descriptor.
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const removeItems = Array.isArray(value.removeItems) ? value.removeItems : [];
+      const addItems = Array.isArray(value.addItems) ? value.addItems : [];
+      let items = current.filter(
+        (item) => !removeItems.some((r) => collectionItemMatches(item, r)),
+      );
+      items = appendUniqueItems(items, addItems);
+      merged[field] = items.join(', ');
+      continue;
+    }
+
+    // Explicit clear.
+    if (value === '' || value === null || value === undefined) {
+      merged[field] = '';
+      continue;
+    }
+
+    // Plain string value: append new items (deduped), never wipe the rest.
+    merged[field] = appendUniqueItems(current, splitCollectionItems(value)).join(', ');
+  }
+  // Stamp freshness at the card level so pruneStateLedger() can evict by
+  // recency rather than object insertion order.
+  merged.lastUpdated = Date.now();
+  return merged;
+}
 
 /**
  * Parses the structured state card extraction output into a Map of ledger key
@@ -800,26 +1093,111 @@ export function parseStateCardResponse(raw) {
     if (!name || !type || !rest) continue;
 
     const fields = {};
+    const clearedFields = new Set();
+    // field -> array of item names to remove from the stored collection.
+    const removalItems = new Map();
     for (const chunk of rest.split('|')) {
-      const eqIdx = chunk.indexOf('=');
+      const trimmedChunk = chunk.trim();
+      if (!trimmedChunk) continue;
+
+      // Bare clearing marker for a collection field: `!carried_items` (no '=').
+      // Only collection fields are recognised this way so a stray `!word` token
+      // cannot silently clear an unrelated attribute.
+      if (trimmedChunk.startsWith('!') && !trimmedChunk.includes('=')) {
+        const bareField = trimmedChunk.slice(1).trim().toLowerCase().replace(/\s+/g, '_');
+        if (REMOVABLE_COLLECTION_FIELDS.has(bareField)) clearedFields.add(bareField);
+        continue;
+      }
+
+      const eqIdx = trimmedChunk.indexOf('=');
       if (eqIdx === -1) continue;
-      const fieldName = chunk.slice(0, eqIdx).trim().toLowerCase().replace(/\s+/g, '_');
-      const value = chunk.slice(eqIdx + 1).trim();
-      if (!fieldName || !value) continue;
-      // Strip noise values - do not store placeholders.
-      if (STATE_NOISE_VALUES.has(value.toLowerCase())) continue;
+      const fieldName = trimmedChunk.slice(0, eqIdx).trim().toLowerCase().replace(/\s+/g, '_');
+      if (!fieldName) continue;
+      const value = trimmedChunk.slice(eqIdx + 1).trim();
+      const lowerValue = value.toLowerCase();
+      const isCollection = REMOVABLE_COLLECTION_FIELDS.has(fieldName);
+
+      // An empty value always clears the field outright.
+      if (value === '') {
+        clearedFields.add(fieldName);
+        continue;
+      }
+
+      if (isCollection) {
+        // `field=!item` removes a single item from the stored list rather than
+        // wiping the whole field (`field=!` alone still clears it).
+        if (value.startsWith('!')) {
+          const item = value.slice(1).trim();
+          if (!item) {
+            clearedFields.add(fieldName);
+          } else {
+            const list = removalItems.get(fieldName) ?? [];
+            list.push(item);
+            removalItems.set(fieldName, list);
+          }
+          continue;
+        }
+
+        // `field=healed: item` / `field=dropped: item` partial removal.
+        const partial = value.match(COLLECTION_PARTIAL_REMOVAL_RE);
+        if (partial) {
+          const list = removalItems.get(fieldName) ?? [];
+          list.push(partial[1].trim());
+          removalItems.set(fieldName, list);
+          continue;
+        }
+
+        // End-state words ("all healed", "none left", "cleared", "empty", ...)
+        // clear the whole collection field.
+        if (COLLECTION_CLEAR_VALUES.has(lowerValue)) {
+          clearedFields.add(fieldName);
+          continue;
+        }
+
+        // Strip other noise values - do not store placeholders.
+        if (STATE_NOISE_VALUES.has(lowerValue)) continue;
+
+        // Otherwise the value is a list of items to add/append.
+        fields[fieldName] = value;
+        continue;
+      }
+
+      // Attribute fields: an explicit `!`-prefix or `cleared` wipes the value.
+      // A placeholder like `location=none` is "unmentioned" and is skipped.
+      if (value.startsWith('!') || ATTRIBUTE_CLEAR_VALUES.has(lowerValue)) {
+        clearedFields.add(fieldName);
+        continue;
+      }
+      if (STATE_NOISE_VALUES.has(lowerValue)) continue;
       fields[fieldName] = value;
     }
 
-    // Drop the entry if no valid fields survived filtering.
-    if (Object.keys(fields).length === 0) continue;
+    // Drop the entry only if it contributes no values, clears, or removals.
+    if (Object.keys(fields).length === 0 && clearedFields.size === 0 && removalItems.size === 0) {
+      continue;
+    }
 
     const key = `${name.toLowerCase().trim()}|${type}`;
     // Merge with any earlier line for the same key (model may split across lines).
     // _name stores the original-case display name - the key itself is lowercased
     // for stable merging but the prompt should show the character's real name.
     const existing = result.get(key) ?? {};
-    result.set(key, { _name: name, ...existing, ...fields });
+    const merged = { _name: name, ...existing, ...fields };
+    // An empty string clears a field during the collection-aware merge in
+    // mergeStateCardFields (and state-ledger.js), which is how a field is wiped.
+    for (const fieldName of clearedFields) {
+      merged[fieldName] = '';
+    }
+    // Partial removals become structured descriptors the merge applies against
+    // the stored list, preserving items that were not targeted.
+    for (const [fieldName, items] of removalItems) {
+      const prior =
+        merged[fieldName] && typeof merged[fieldName] === 'object'
+          ? (merged[fieldName].removeItems ?? [])
+          : [];
+      merged[fieldName] = { removeItems: [...prior, ...items] };
+    }
+    result.set(key, merged);
   }
 
   return result;

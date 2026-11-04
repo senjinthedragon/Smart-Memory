@@ -33,6 +33,7 @@ import {
   setExtensionPrompt,
   saveSettingsDebounced,
   getMaxContextSize,
+  getCurrentChatId,
   stopGeneration,
 } from '../../../../script.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../../scripts/popup.js';
@@ -42,6 +43,7 @@ import {
   MODULE_NAME,
   META_KEY,
   PROMPT_KEY_LONG,
+  PROMPT_KEY_TRIGGERED,
   PROMPT_KEY_SESSION,
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
@@ -52,7 +54,7 @@ import {
   PROMPT_KEY_STATE_LEDGER,
   generateMemoryId,
 } from './constants.js';
-import { memory_sources, fetchOllamaModels } from './generate.js';
+import { memory_sources, fetchOllamaModels, abortCurrentMemoryGeneration } from './generate.js';
 import { runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
 import {
   extractAndStoreMemories,
@@ -100,16 +102,23 @@ import {
 } from './scenes.js';
 import { extractArcs, injectArcs, clearArcs, clearArcSummaries, loadArcSummaries } from './arcs.js';
 import { runModelTest } from './model-test.js';
+import {
+  migrateEpistemicStateLedgerPlacement,
+  migrateLegacyCharacterKeys,
+} from './settings-migration.js';
+import { getOperationRevision, sameGroupId } from './memory-utils.js';
+import { MACRO_NAMES, setMacroContent } from './macros.js';
 
 /** Set to true while a model test is running to allow cancellation. */
 let modelTestRunning = false;
-import { checkContinuity, generateRepair, injectRepair, clearRepair } from './continuity.js';
+import { checkContinuity, handleContinuityResult } from './continuity.js';
 import {
   getHardwareProfile,
   getEmbeddingBatch,
   clearEmbeddingFailed,
   saveEmbeddingApiKey,
   hasEmbeddingApiKey,
+  abortEmbeddingRequests,
 } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
 import { clearSessionEntityRegistry } from './graph-migration.js';
@@ -120,7 +129,12 @@ import {
   runStateCardExtraction,
 } from './state-ledger.js';
 import { generateProfiles, injectProfiles, clearProfiles, loadProfiles } from './profiles.js';
-import { clearUnifiedSlot, injectUnified, maybeInjectUnified } from './unified-inject.js';
+import {
+  clearUnifiedSlot,
+  injectUnified,
+  maybeInjectUnified,
+  invalidateUnifiedCache,
+} from './unified-inject.js';
 import { getTierHWStats, clearTierStats } from './trim-stats.js';
 import { showMemoryGraph } from './graph.js';
 import {
@@ -263,6 +277,12 @@ export const defaultSettings = {
 
   // Continuity
   continuity_response_length: 300,
+  // off | warn | repair. 'warn' (report only) is the safe default - the checker
+  // can only see baseline notes, so it must never silently steer the story.
+  continuity_mode: 'warn',
+  // Legacy flags kept for backward compatibility. continuity_auto_check still
+  // gates the Profile B post-turn check; continuity_auto_repair is migrated
+  // into continuity_mode on load when the new key is absent.
   continuity_auto_check: true,
   continuity_auto_repair: false,
 
@@ -292,14 +312,16 @@ export const defaultSettings = {
   epistemic_secondhand_framing: true,
   epistemic_response_length: 400,
   epistemic_inject_budget: 200,
-  epistemic_depth: 1,
+  // Injected near the generation point (IN_CHAT depth 2). Depth only applies to
+  // IN_CHAT prompts in SillyTavern; IN_PROMPT ignores it and sits at the top.
+  epistemic_depth: 2,
   epistemic_position: extension_prompt_types.IN_CHAT,
   epistemic_role: extension_prompt_roles.SYSTEM,
 
   // State Ledger (structured entity state cards)
   state_ledger_enabled: false,
   state_ledger_inject_budget: 200,
-  state_ledger_depth: 1,
+  state_ledger_depth: 2,
   state_ledger_position: extension_prompt_types.IN_CHAT,
   state_ledger_role: extension_prompt_roles.SYSTEM,
 
@@ -424,6 +446,50 @@ async function reinjectAfterBudgetChange(characterName) {
   injectStateLedger();
   maybeInjectUnified();
   updateTokenDisplay();
+}
+
+// Maps the tier slots that catch-up clears to their Smart Memory macro names.
+// clearTierPrompt uses this to also empty a tier's macro content, since macro
+// mode can keep a tier in the model context even after its prompt slot is
+// emptied. Tiers without a macro (or not cleared by catch-up) are absent.
+const TIER_MACRO_NAMES = {
+  [PROMPT_KEY_LONG]: MACRO_NAMES.longterm,
+  [PROMPT_KEY_TRIGGERED]: MACRO_NAMES.triggered,
+  [PROMPT_KEY_SESSION]: MACRO_NAMES.session,
+};
+
+/**
+ * Clears a single prompt slot after an injector resumed following cancellation.
+ * Every tier's inject function writes its slot through setExtensionPrompt, so
+ * clearing means writing an empty NONE-position prompt and invalidating the
+ * unified-injection cache that mirrors the tier content. Used by the catch-up
+ * routine when a chat switch lands during an injector's internal await and the
+ * injector then writes stale content into the newly-active chat.
+ *
+ * Macro mode and unified mode each keep a second copy of the tier content that
+ * the slot clear alone does not reach: the tier's {{smartmemory-*}} macro cache
+ * and the already-materialized unified block (slot + macro). Both are cleared
+ * here so a cancelled catch-up cannot leave a stale tier in the model context
+ * in any injection mode.
+ *
+ * @param {string} promptKey - A PROMPT_KEY_* constant identifying the tier slot.
+ */
+function clearTierPrompt(promptKey) {
+  setExtensionPrompt(promptKey, '', extension_prompt_types.NONE, 0);
+  invalidateUnifiedCache(promptKey);
+
+  // Macro mode: empty the tier's macro content so {{smartmemory-*}} stops
+  // returning the stale tier even though its individual slot is now empty.
+  const macroName = TIER_MACRO_NAMES[promptKey];
+  if (macroName) {
+    setMacroContent(macroName, '');
+  }
+
+  // Unified mode: injectUnified may already have merged this tier into the
+  // unified block. clearUnifiedSlot empties the unified prompt slot and its
+  // macro, and resets the content cache so the merged block no longer carries
+  // the stale tier.
+  clearUnifiedSlot();
 }
 
 // Minimum budget any tier will be reduced to during auto-tune, and the headroom
@@ -606,10 +672,22 @@ export function loadSettings() {
   if (!extension_settings[MODULE_NAME]) {
     extension_settings[MODULE_NAME] = {};
   }
+
+  // Capture the legacy continuity flags before defaults fill in the new key so
+  // users who enabled auto-repair keep that behaviour after upgrading.
+  const hadContinuityMode = extension_settings[MODULE_NAME].continuity_mode !== undefined;
+  const legacyAutoRepair = extension_settings[MODULE_NAME].continuity_auto_repair === true;
+
   for (const [key, value] of Object.entries(defaultSettings)) {
     if (extension_settings[MODULE_NAME][key] === undefined) {
       extension_settings[MODULE_NAME][key] = value;
     }
+  }
+
+  // Migration: continuity_auto_repair -> continuity_mode. Only runs when the
+  // new key was absent, so an explicit user choice is never overwritten.
+  if (!hadContinuityMode && legacyAutoRepair) {
+    extension_settings[MODULE_NAME].continuity_mode = 'repair';
   }
 
   // Migration: replace old bracket-wrapped template defaults with plain-text equivalents.
@@ -659,6 +737,23 @@ export function loadSettings() {
   ) {
     extension_settings[MODULE_NAME].consolidation_enabled =
       extension_settings[MODULE_NAME].longterm_consolidate;
+  }
+
+  // Migration: normalise epistemic/state-ledger injection placement to
+  // IN_CHAT depth 2. SillyTavern only honours depth for IN_CHAT (position 1);
+  // IN_PROMPT (position 2) sits at the very top. Both the legacy IN_CHAT depth-1
+  // default and the interim IN_PROMPT depth-0/2 default move to the near-end
+  // placement. An explicit custom position/depth is preserved. Pure helper so
+  // it is unit-testable; it also sets migrated_legacy_placement so this never
+  // runs again.
+  migrateEpistemicStateLedgerPlacement(extension_settings[MODULE_NAME], extension_prompt_types);
+
+  // Migration: move character data stored under the legacy underscore-encoded
+  // keys (_constructor/_prototype/___proto__) to the NUL-sentinel
+  // safeStorageKey form. Superseded encodings left these entries unreachable.
+  // Idempotent and never overwrites an entry that already uses the new key.
+  if (migrateLegacyCharacterKeys(extension_settings[MODULE_NAME])) {
+    saveSettingsDebounced();
   }
 }
 
@@ -736,7 +831,7 @@ export function bindSettingsUI(ctrl) {
     const characterName = ctrl.getSelectedCharacterName();
     const characterNames = (() => {
       if (!context.groupId) return characterName ? [characterName] : [];
-      const group = context.groups?.find((g) => g.id === context.groupId);
+      const group = context.groups?.find((g) => sameGroupId(g.id, context.groupId));
       if (!group) return characterName ? [characterName] : [];
       return group.members
         .filter((avatar) => !(group.disabled_members ?? []).includes(avatar))
@@ -1686,6 +1781,7 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
       const characterName = ctrl.getSelectedCharacterName();
       injectRelationshipHistory(characterName);
+      maybeInjectUnified();
     });
 
   $('#sm_relationships_inject_budget_value').text(s.relationships_inject_budget ?? 250);
@@ -1845,7 +1941,7 @@ export function bindSettingsUI(ctrl) {
       reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
-  $(`input[name="sm_epistemic_position"][value="${s.epistemic_position ?? 1}"]`).prop(
+  $(`input[name="sm_epistemic_position"][value="${s.epistemic_position ?? 0}"]`).prop(
     'checked',
     true,
   );
@@ -1855,7 +1951,7 @@ export function bindSettingsUI(ctrl) {
   });
 
   $('#sm_epistemic_depth')
-    .val(s.epistemic_depth ?? 1)
+    .val(s.epistemic_depth ?? 0)
     .on('input', function () {
       extension_settings[MODULE_NAME].epistemic_depth = parseInt($(this).val(), 10);
       saveSettingsDebounced();
@@ -1902,7 +1998,7 @@ export function bindSettingsUI(ctrl) {
       reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
-  $(`input[name="sm_state_ledger_position"][value="${s.state_ledger_position ?? 1}"]`).prop(
+  $(`input[name="sm_state_ledger_position"][value="${s.state_ledger_position ?? 0}"]`).prop(
     'checked',
     true,
   );
@@ -1912,7 +2008,7 @@ export function bindSettingsUI(ctrl) {
   });
 
   $('#sm_state_ledger_depth')
-    .val(s.state_ledger_depth ?? 1)
+    .val(s.state_ledger_depth ?? 0)
     .on('input', function () {
       extension_settings[MODULE_NAME].state_ledger_depth = parseInt($(this).val(), 10);
       saveSettingsDebounced();
@@ -2275,9 +2371,10 @@ export function bindSettingsUI(ctrl) {
         history.push({ summary, ts: Date.now() });
         if (history.length > max) history.splice(0, history.length - max);
         await saveSceneHistory(history);
-        // Reset the buffer - we just archived what was in it.
+        // Reset the buffer - we just archived what was in it. Keep the cursor at
+        // the end of the chat so the next render does not re-ingest the history.
         ctrl.sceneMessageBuffer = [];
-        ctrl.sceneBufferLastIndex = -1;
+        ctrl.sceneBufferLastIndex = context.chat.length - 1;
         injectSceneHistory();
         updateScenesUI();
         updateTokenDisplay();
@@ -2445,9 +2542,24 @@ export function bindSettingsUI(ctrl) {
     // extraction runs for every character, not just the one in the selector.
     // Solo chats collapse to a single-element array using the active character.
     const catchUpContext = getContext();
+
+    // H-3: pin this catch-up run to the chat/branch it started on, captured
+    // alongside catchUpContext. The shared pipeline functions re-read
+    // getContext() when they execute, so a chat switch (or a swipe/edit/delete
+    // that bumps the operation revision) mid-run would otherwise let old
+    // content be stored into the newly-active chat. catchUpCancelled() is
+    // threaded into every pipeline call and checked before each persistent
+    // write.
+    const catchUpChatId = getCurrentChatId();
+    const catchUpRev = getOperationRevision();
+    const catchUpCancelled = () =>
+      ctrl.catchUpCancelled === true ||
+      getOperationRevision() !== catchUpRev ||
+      getCurrentChatId() !== catchUpChatId;
+
     const catchUpCharacterNames = (() => {
       if (!catchUpContext.groupId) return [characterName];
-      const group = catchUpContext.groups?.find((g) => g.id === catchUpContext.groupId);
+      const group = catchUpContext.groups?.find((g) => sameGroupId(g.id, catchUpContext.groupId));
       if (!group) return [characterName];
       return group.members
         .filter((avatar) => !(group.disabled_members ?? []).includes(avatar))
@@ -2504,7 +2616,7 @@ export function bindSettingsUI(ctrl) {
       const catchUpTokenBudget = Math.max(500, Math.floor(getMaxContextSize(0) * 0.35));
       let i = 0;
       while (i < total) {
-        if (ctrl.catchUpCancelled) break;
+        if (catchUpCancelled()) break;
 
         // Yield to the browser event loop at the start of each chunk so the
         // UI remains responsive and the cancel button stays clickable even
@@ -2531,6 +2643,7 @@ export function bindSettingsUI(ctrl) {
 
         if (settings.longterm_enabled && !isFreshStart()) {
           for (const name of catchUpCharacterNames) {
+            if (catchUpCancelled()) break;
             // Filter chunk to this character's messages + user messages, matching
             // the Phase 2 per-character window filtering used in automatic extraction.
             const nameChunk = catchUpContext.groupId
@@ -2540,38 +2653,45 @@ export function bindSettingsUI(ctrl) {
             setStatusMessage(
               `Catching up... (${i}/${total} messages - extracting long-term for ${name})`,
             );
-            await extractAndStoreMemories(name, nameChunk, setStatusMessage).catch((err) => {
+            await extractAndStoreMemories(
+              name,
+              nameChunk,
+              setStatusMessage,
+              catchUpCancelled,
+            ).catch((err) => {
               console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
             });
             // Consolidate after each chunk so near-duplicates are collapsed before
             // the next chunk can add more similar entries.
-            if (settings.consolidation_enabled) {
+            if (settings.consolidation_enabled && !catchUpCancelled()) {
               setStatusMessage(`Catching up... (${i}/${total} messages - consolidating ${name})`);
-              await consolidateMemories(name).catch((err) => {
+              await consolidateMemories(name, false, catchUpCancelled).catch((err) => {
                 console.error('[SmartMemory] Catch-up long-term consolidation error (chunk):', err);
               });
             }
           }
         }
-        if (settings.session_enabled && !isFreshStart()) {
+        if (settings.session_enabled && !isFreshStart() && !catchUpCancelled()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - extracting session)`);
-          await extractSessionMemories(chunk).catch((err) => {
+          await extractSessionMemories(chunk, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up session extraction error (chunk):', err);
           });
-          setStatusMessage(`Catching up... (${i}/${total} messages - consolidating session)`);
-          await consolidateSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
-          });
+          if (!catchUpCancelled()) {
+            setStatusMessage(`Catching up... (${i}/${total} messages - consolidating session)`);
+            await consolidateSessionMemories(false, catchUpCancelled).catch((err) => {
+              console.error('[SmartMemory] Catch-up session consolidation error (chunk):', err);
+            });
+          }
         }
-        if (settings.arcs_enabled && !isFreshStart()) {
+        if (settings.arcs_enabled && !isFreshStart() && !catchUpCancelled()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - extracting arcs)`);
-          await extractArcs(chunk, characterName).catch((err) => {
+          await extractArcs(chunk, characterName, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
         }
-        if (isStateLedgerEnabled() && !isFreshStart()) {
+        if (isStateLedgerEnabled() && !isFreshStart() && !catchUpCancelled()) {
           setStatusMessage(`Catching up... (${i}/${total} messages - updating state ledger)`);
-          await runStateCardExtraction(characterName, chunk).catch((err) => {
+          await runStateCardExtraction(characterName, chunk, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up state ledger extraction error (chunk):', err);
           });
         }
@@ -2580,27 +2700,48 @@ export function bindSettingsUI(ctrl) {
         // actually stored, not just what was injected before catch-up started.
         // Wrap with .catch so an embedding failure here does not abort the
         // entire catch-up run via the outer catch block.
-        if (settings.longterm_enabled && characterName) {
-          await injectMemories(characterName).catch((err) => {
-            console.error('[SmartMemory] Catch-up inject long-term error:', err);
-          });
-        }
-        if (settings.session_enabled) {
-          await injectSessionMemories().catch((err) => {
-            console.error('[SmartMemory] Catch-up inject session error:', err);
-          });
-        }
-        if (settings.arcs_enabled) {
-          injectArcs();
-        }
-        if (settings.relationships_enabled) {
-          injectRelationshipHistory(characterName);
+        //
+        // injectMemories/injectSessionMemories await embedding-backed
+        // prioritisation internally, so a chat switch during that await lets
+        // them write the previous chat's content into the newly-active chat's
+        // slots. Re-check catchUpCancelled() after each awaited injector, clear
+        // the tier slots it may have written, and abort the rest of this batch.
+        reinjectChunk: {
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.longterm_enabled && characterName) {
+            await injectMemories(characterName).catch((err) => {
+              console.error('[SmartMemory] Catch-up inject long-term error:', err);
+            });
+            if (catchUpCancelled()) {
+              clearTierPrompt(PROMPT_KEY_LONG);
+              clearTierPrompt(PROMPT_KEY_TRIGGERED);
+              break reinjectChunk;
+            }
+          }
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.session_enabled) {
+            await injectSessionMemories().catch((err) => {
+              console.error('[SmartMemory] Catch-up inject session error:', err);
+            });
+            if (catchUpCancelled()) {
+              clearTierPrompt(PROMPT_KEY_SESSION);
+              break reinjectChunk;
+            }
+          }
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.arcs_enabled) {
+            injectArcs();
+          }
+          if (catchUpCancelled()) break reinjectChunk;
+          if (settings.relationships_enabled) {
+            injectRelationshipHistory(characterName);
+          }
         }
 
         // Advance lastExtractCutoff so the normal extraction window starts from
         // where catch-up left off rather than re-processing the same messages.
         const cuMeta = catchUpContext.chatMetadata?.[META_KEY];
-        if (cuMeta) {
+        if (cuMeta && !catchUpCancelled()) {
           const lastChunkMsg = chunk[chunk.length - 1];
           const chatIdx = lastChunkMsg
             ? catchUpContext.chat.lastIndexOf(lastChunkMsg)
@@ -2623,7 +2764,7 @@ export function bindSettingsUI(ctrl) {
         i += chunk.length;
       }
 
-      if (!ctrl.catchUpCancelled) {
+      if (!catchUpCancelled()) {
         // Scene: walk through the full chat detecting and summarizing scenes.
         // When scene_ai_detect is enabled, AI detection runs on each AI message
         // (matching normal flow). When disabled, the heuristic is used instead.
@@ -2652,7 +2793,7 @@ export function bindSettingsUI(ctrl) {
           };
 
           for (let msgIdx = 0; msgIdx < allMessages.length; msgIdx++) {
-            if (ctrl.catchUpCancelled) break;
+            if (catchUpCancelled()) break;
             const msg = allMessages[msgIdx];
             sceneBuffer.push(msg);
 
@@ -2688,11 +2829,16 @@ export function bindSettingsUI(ctrl) {
                 });
                 if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
               }
-              if (isEpistemicEnabled() && !isFreshStart()) {
+              if (isEpistemicEnabled() && !isFreshStart() && !catchUpCancelled()) {
                 setStatusMessage(
                   `Summarizing scene ${sceneCount}... (extracting epistemic knowledge)`,
                 );
-                await extractEpistemicKnowledge(sceneBuffer, characterName).catch((err) => {
+                await extractEpistemicKnowledge(
+                  sceneBuffer,
+                  characterName,
+                  '',
+                  catchUpCancelled,
+                ).catch((err) => {
                   console.error('[SmartMemory] Catch-up epistemic extraction error:', err);
                 });
               }
@@ -2701,7 +2847,7 @@ export function bindSettingsUI(ctrl) {
           }
 
           // Summarize any remaining messages after the last break as the current scene.
-          if (!ctrl.catchUpCancelled && sceneBuffer.length >= minMessages) {
+          if (!catchUpCancelled() && sceneBuffer.length >= minMessages) {
             const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
               console.error('[SmartMemory] Catch-up final scene summary failed:', err);
               return null;
@@ -2710,19 +2856,28 @@ export function bindSettingsUI(ctrl) {
               sceneHistory.push({ summary: sceneSummary, ts: Date.now(), source_memory_ids: [] });
               if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
             }
-            if (isEpistemicEnabled() && !isFreshStart()) {
+            if (isEpistemicEnabled() && !isFreshStart() && !catchUpCancelled()) {
               setStatusMessage('Extracting epistemic knowledge from final scene...');
-              await extractEpistemicKnowledge(sceneBuffer, characterName).catch((err) => {
+              await extractEpistemicKnowledge(
+                sceneBuffer,
+                characterName,
+                '',
+                catchUpCancelled,
+              ).catch((err) => {
                 console.error('[SmartMemory] Catch-up epistemic extraction error (final):', err);
               });
             }
           }
 
-          await saveSceneHistory(sceneHistory).catch((err) => {
-            console.error('[SmartMemory] Catch-up scene history save failed:', err);
-          });
+          if (!catchUpCancelled()) {
+            await saveSceneHistory(sceneHistory).catch((err) => {
+              console.error('[SmartMemory] Catch-up scene history save failed:', err);
+            });
+          }
           ctrl.sceneMessageBuffer = [];
-          ctrl.sceneBufferLastIndex = -1;
+          // Keep the cursor at the end of the chat so the next render does not
+          // re-ingest the entire history into the fresh scene buffer.
+          ctrl.sceneBufferLastIndex = context.chat.length - 1;
           updateTokenDisplay();
         }
 
@@ -2731,16 +2886,17 @@ export function bindSettingsUI(ctrl) {
         // across the whole chat). Forces consolidation regardless of threshold.
         if (settings.longterm_enabled && settings.consolidation_enabled) {
           for (const name of catchUpCharacterNames) {
+            if (catchUpCancelled()) break;
             setStatusMessage(`Consolidating long-term memories for ${name}...`);
-            await consolidateMemories(name, true).catch((err) => {
+            await consolidateMemories(name, true, catchUpCancelled).catch((err) => {
               console.error('[SmartMemory] Catch-up final consolidation failed:', err);
             });
           }
           updateTokenDisplay();
         }
-        if (settings.session_enabled) {
+        if (settings.session_enabled && !catchUpCancelled()) {
           setStatusMessage('Consolidating session memories...');
-          await consolidateSessionMemories(true).catch((err) => {
+          await consolidateSessionMemories(true, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up final session consolidation failed:', err);
           });
           updateTokenDisplay();
@@ -2748,9 +2904,9 @@ export function bindSettingsUI(ctrl) {
 
         // Short-term compaction runs once at the end - it uses the real token
         // count to decide what to include, so chunking doesn't apply.
-        if (settings.compaction_enabled) {
+        if (settings.compaction_enabled && !catchUpCancelled()) {
           setStatusMessage('Extracting short-term memories...');
-          await runCompaction({ includeLastMessage: true })
+          await runCompaction({ includeLastMessage: true, abortCheck: catchUpCancelled })
             .then((summary) => {
               if (summary) {
                 injectSummary(summary);
@@ -2766,10 +2922,11 @@ export function bindSettingsUI(ctrl) {
 
       // Generate character & world profiles once at the end of a completed run.
       // Skipped on cancel - partial data may produce low-quality profiles.
-      if (!ctrl.catchUpCancelled && settings.profiles_enabled) {
+      if (!catchUpCancelled() && settings.profiles_enabled) {
         for (const name of catchUpCharacterNames) {
+          if (catchUpCancelled()) break;
           setStatusMessage(`Generating character & world profiles for ${name}...`);
-          const profiles = await generateProfiles(name).catch((err) => {
+          const profiles = await generateProfiles(name, catchUpCancelled).catch((err) => {
             console.error('[SmartMemory] Catch-up profile generation failed:', err);
             return null;
           });
@@ -2787,33 +2944,62 @@ export function bindSettingsUI(ctrl) {
         }
       }
 
-      // Re-inject and refresh UI for everything processed so far, whether the
-      // run completed or was cancelled partway through.
-      await injectMemories(characterName);
-      injectRelationshipHistory(characterName);
-      injectSessionMemories();
-      injectSceneHistory();
-      injectArcs();
-      injectStateLedger();
-      // Reset the warn flag so the catch-up final inject can prompt if needed,
-      // then pass warn=true so a single exact-fit dialog fires if the full list
-      // exceeds the current budget.
-      resetEpistemicWarnFlag();
-      injectEpistemicKnowledge(characterName, characterName, false, true, true);
-      injectProfiles(characterName);
-      updateEntityPanel(characterName);
-      updateLongTermUI(characterName);
-      updateRelationshipHistoryUI(characterName);
-      updateEpistemicUI(characterName);
-      updateSessionUI();
-      updateScenesUI();
-      updateArcsUI();
-      updateProfilesUI(loadProfiles(characterName));
-      maybeInjectUnified();
-      updateTokenDisplay();
-      saveSettingsDebounced();
+      // Re-inject and refresh UI only when the run completed. A cancelled run
+      // may still be holding the previous chat's context, and injecting its
+      // character memories into the now-active chat would overwrite the new
+      // chat's slots. Partial extraction results are already persisted.
+      if (!catchUpCancelled()) {
+        finalReinject: {
+          if (catchUpCancelled()) break finalReinject;
+          await injectMemories(characterName);
+          // injectMemories awaits embedding-backed prioritisation internally,
+          // so a chat switch during that await lets it write the previous
+          // chat's content into the new chat's slots. Clear the tier and abort
+          // the rest of the reinjection if that happened.
+          if (catchUpCancelled()) {
+            clearTierPrompt(PROMPT_KEY_LONG);
+            clearTierPrompt(PROMPT_KEY_TRIGGERED);
+            break finalReinject;
+          }
+          if (catchUpCancelled()) break finalReinject;
+          injectRelationshipHistory(characterName);
+          if (catchUpCancelled()) break finalReinject;
+          // Await the session injector so a late write cannot land after the
+          // cancellation check below (it awaits embeddings internally too).
+          await injectSessionMemories();
+          if (catchUpCancelled()) {
+            clearTierPrompt(PROMPT_KEY_SESSION);
+            break finalReinject;
+          }
+          if (catchUpCancelled()) break finalReinject;
+          injectSceneHistory();
+          if (catchUpCancelled()) break finalReinject;
+          injectArcs();
+          if (catchUpCancelled()) break finalReinject;
+          injectStateLedger();
+          if (catchUpCancelled()) break finalReinject;
+          // Reset the warn flag so the catch-up final inject can prompt if needed,
+          // then pass warn=true so a single exact-fit dialog fires if the full list
+          // exceeds the current budget.
+          resetEpistemicWarnFlag();
+          injectEpistemicKnowledge(characterName, characterName, false, true, true);
+          if (catchUpCancelled()) break finalReinject;
+          injectProfiles(characterName);
+          updateEntityPanel(characterName);
+          updateLongTermUI(characterName);
+          updateRelationshipHistoryUI(characterName);
+          updateEpistemicUI(characterName);
+          updateSessionUI();
+          updateScenesUI();
+          updateArcsUI();
+          updateProfilesUI(loadProfiles(characterName));
+          maybeInjectUnified();
+          updateTokenDisplay();
+          saveSettingsDebounced();
+        }
+      }
 
-      if (ctrl.catchUpCancelled) {
+      if (catchUpCancelled()) {
         setStatusMessage('Catch-up cancelled.');
         toastr.warning('Catch-up cancelled. Partial results have been saved.', 'Smart Memory', {
           timeOut: 5000,
@@ -2840,6 +3026,12 @@ export function bindSettingsUI(ctrl) {
 
   $('#sm_cancel_catch_up').on('click', function () {
     ctrl.catchUpCancelled = true;
+    // Abort any in-flight memory model call immediately so cancellation does
+    // not wait for a long local generation to finish before taking effect.
+    // Embedding fetches are also aborted so a pending similarity/index request
+    // cannot keep the run alive or write after the chat has changed.
+    abortCurrentMemoryGeneration();
+    abortEmbeddingRequests();
     $(this).prop('disabled', true);
     setStatusMessage('Cancelling...');
   });
@@ -2893,7 +3085,9 @@ export function bindSettingsUI(ctrl) {
     updateEntityPanel(characterName);
     updateTokenDisplay();
     ctrl.sceneMessageBuffer = [];
-    ctrl.sceneBufferLastIndex = -1;
+    // Keep the cursor at the end of the chat so continuing the chat does not
+    // re-ingest the entire history into the fresh scene buffer.
+    ctrl.sceneBufferLastIndex = context.chat.length - 1;
     setStatusMessage('Chat context cleared.');
   });
 
@@ -2961,7 +3155,9 @@ export function bindSettingsUI(ctrl) {
     updateProfilesUI(null);
     updateTokenDisplay();
     ctrl.sceneMessageBuffer = [];
-    ctrl.sceneBufferLastIndex = -1;
+    // Keep the cursor at the end of the chat so continuing the chat does not
+    // re-ingest the entire history into the fresh scene buffer.
+    ctrl.sceneBufferLastIndex = context.chat.length - 1;
     setStatusMessage('Fresh start complete.');
     toastr.success(`All memories cleared for ${nameLabel}.`, 'Smart Memory', {
       timeOut: 4000,
@@ -3241,10 +3437,14 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
     });
 
-  $('#sm_auto_repair')
-    .prop('checked', s.continuity_auto_repair)
+  $('#sm_continuity_mode')
+    .val(s.continuity_mode ?? 'warn')
     .on('change', function () {
-      extension_settings[MODULE_NAME].continuity_auto_repair = $(this).prop('checked');
+      const mode = $(this).val();
+      extension_settings[MODULE_NAME].continuity_mode = mode;
+      // Keep the legacy flag in sync so older builds and external tooling that
+      // still read continuity_auto_repair see the same intent.
+      extension_settings[MODULE_NAME].continuity_auto_repair = mode === 'repair';
       saveSettingsDebounced();
     });
 
@@ -3370,8 +3570,10 @@ export function bindSettingsUI(ctrl) {
     setStatusMessage('Checking continuity...');
     $('#sm_continuity_result').hide().empty();
     try {
-      const contradictions = await checkContinuity(characterName);
-      if (contradictions.length === 0) {
+      const result = await checkContinuity(characterName);
+      const { mode, issues } = handleContinuityResult(result, characterName);
+
+      if (issues.length === 0) {
         $('#sm_continuity_result')
           .addClass('sm_continuity_clean')
           .removeClass('sm_continuity_warn')
@@ -3379,45 +3581,17 @@ export function bindSettingsUI(ctrl) {
           .show();
         setStatusMessage('Continuity OK.');
       } else {
-        const $result = $('#sm_continuity_result')
-          .addClass('sm_continuity_warn')
-          .removeClass('sm_continuity_clean');
-        $result.empty();
-        $result.append('<b>Contradictions found:</b>');
-        const $ul = $('<ul>');
-        contradictions.forEach((c) => $ul.append($('<li>').text(c)));
-        $result.append($ul).show();
-        setStatusMessage(
-          `${contradictions.length} contradiction${contradictions.length === 1 ? '' : 's'} found.`,
-        );
-
-        // If auto-repair is on, generate a corrective note and inject it for
-        // the next AI turn. The note is cleared automatically once that response
-        // is rendered by onCharacterMessageRendered.
-        if (extension_settings[MODULE_NAME].continuity_auto_repair) {
-          setStatusMessage('Generating repair...');
-          try {
-            const note = await generateRepair(contradictions, characterName);
-            injectRepair(note);
-            const $repairBlock = $('<div class="sm_repair_queued">');
-            $repairBlock.append($('<p>').text('Correction queued for next response:'));
-            $repairBlock.append($('<p class="sm_repair_note">').text(note));
-            const $cancel = $(
-              '<button class="menu_button sm_repair_cancel">Cancel correction</button>',
-            );
-            $cancel.on('click', () => {
-              clearRepair();
-              $repairBlock.remove();
-              setStatusMessage('Correction cancelled.');
-            });
-            $repairBlock.append($cancel);
-            $result.append($repairBlock);
-            setStatusMessage('Correction queued.');
-            toastr.info('Correction queued for next response.', 'Smart Memory');
-          } catch (repairErr) {
-            console.error('[SmartMemory] Repair generation failed:', repairErr);
-            setStatusMessage('Repair failed - see console.');
-          }
+        // handleContinuityResult already rendered the issue list and respected
+        // the continuity_mode setting (warn shows the list, repair queues a
+        // forward-only anchored note, off discards).
+        const count = issues.length;
+        const plural = count === 1 ? '' : 's';
+        if (mode === 'repair') {
+          setStatusMessage(`${count} contradiction${plural} found. Continuity note queued.`);
+        } else if (mode === 'off') {
+          setStatusMessage(`${count} contradiction${plural} found (continuity mode is off).`);
+        } else {
+          setStatusMessage(`${count} contradiction${plural} found.`);
         }
       }
     } catch (err) {

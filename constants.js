@@ -110,14 +110,36 @@ export const MEMORY_GENERATION_BUDGET = 8192;
 export const MAX_RETIRED_POOL = 100;
 
 /**
- * Rough token estimate for a string. Uses the standard ~4 chars-per-token
- * heuristic - accurate enough for budget enforcement without needing an async
- * tokenizer call.
+ * Conservative token-count heuristic for a string.
+ *
+ * This is NOT a tokenizer: it does not know the model's vocabulary, merge
+ * rules, or sub-word boundaries. It is a cheap, synchronous upper-ish bound
+ * used only for injection-budget enforcement and trim accounting, where being
+ * a little wrong is acceptable but an async tokenizer call is not.
+ *
+ * Counting is done per Unicode code point (iterating the string with
+ * `for...of`, which yields whole code points rather than UTF-16 code units),
+ * so astral-plane characters - emoji, rare CJK - are counted once instead of
+ * twice. Each code point is classified as non-Latin (CJK, Thai, Arabic,
+ * Devanagari, Cyrillic, Greek, Hebrew, and pictographic emoji) or Latin:
+ *   - non-Latin: ~1.5 tokens per character (dense scripts tokenize poorly)
+ *   - Latin:     ~0.25 tokens per character (~4 characters per token)
+ *
  * @param {string} text
- * @returns {number}
+ * @returns {number} Estimated token count (0 for empty/falsy input).
  */
+const NON_LATIN_RE =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Arabic}\p{Script=Devanagari}\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Hebrew}\p{Extended_Pictographic}]/u;
+
 export function estimateTokens(text) {
-  return Math.ceil((text?.length ?? 0) / 4);
+  if (!text) return 0;
+  let nonLatin = 0;
+  let latin = 0;
+  for (const ch of text) {
+    if (NON_LATIN_RE.test(ch)) nonLatin++;
+    else latin++;
+  }
+  return Math.ceil(nonLatin * 1.5 + latin / 4);
 }
 
 /**

@@ -5,12 +5,17 @@ import {
   buildCurrentSceneStateBlock,
   classifyTurn,
   hybridScore,
+  matchSubjectToMember,
   memoryUtilityScore,
+  normalizeEpistemicSubject,
+  partitionEpistemicEntriesBySubject,
   prioritizeMemories,
   reconcileTypeEntries,
   selectProtectedMemories,
   sortByTimeline,
+  splitSummarySections,
   trimByPriority,
+  truncateSummaryToBudget,
 } from '../memory-utils.js';
 
 test('trimByPriority keeps high-importance memories over low-importance ones', () => {
@@ -287,4 +292,354 @@ test('adaptiveBudgets preserves total budget while reallocating by turn type', (
   assert.equal(actionTotal, baseTotal);
   assert.ok(action.session > settings.session_inject_budget);
   assert.ok(action.longterm < settings.longterm_inject_budget);
+});
+
+// =========================================================================
+// Summary section truncation
+// =========================================================================
+
+function buildNineSectionSummary() {
+  return [
+    `1. Scene & Setting: ${'The ancient hall is cold and dark. '.repeat(12)}`,
+    `2. Characters Present: ${'Elara watches the door nervously. '.repeat(8)}`,
+    `3. Key Events: ${'They crossed the bridge and found the key. '.repeat(14)}`,
+    `4. Relationship Dynamics: ${'Trust is fragile between them. '.repeat(8)}`,
+    `5. Revealed Information: ${'The key opens the sealed gate. '.repeat(8)}`,
+    `6. Story Threads: ${'The oath remains unfulfilled. '.repeat(8)}`,
+    `7. User's Direction: ${'Keep the tone tense and quiet. '.repeat(8)}`,
+    '8. Current Moment: Elara stands at the sealed gate with the key in hand.',
+    '9. Next Beat: The gate opens and cold air rushes out.',
+  ].join('\n\n');
+}
+
+test('splitSummarySections parses numbered sections in order', () => {
+  const { sections } = splitSummarySections(buildNineSectionSummary());
+  assert.equal(sections.length, 9);
+  assert.equal(sections[0].num, 1);
+  assert.equal(sections[8].num, 9);
+  assert.match(sections[7].text, /Current Moment/);
+});
+
+test('truncateSummaryToBudget preserves Current Moment and Next Beat', () => {
+  const summary = buildNineSectionSummary();
+  const trimmed = truncateSummaryToBudget(summary, 120);
+
+  assert.ok(trimmed.length < summary.length);
+  assert.match(trimmed, /8\. Current Moment:/);
+  assert.match(trimmed, /Elara stands at the sealed gate/);
+  assert.match(trimmed, /9\. Next Beat:/);
+  assert.match(trimmed, /The gate opens and cold air rushes out/);
+  assert.doesNotMatch(trimmed, /\[truncated\]$/);
+});
+
+test('truncateSummaryToBudget keeps anchor sections even below their own budget', () => {
+  const summary = buildNineSectionSummary();
+  // Far too small for the tail alone - the anchors must still survive intact.
+  const trimmed = truncateSummaryToBudget(summary, 5);
+
+  assert.match(trimmed, /8\. Current Moment:/);
+  assert.match(trimmed, /Elara stands at the sealed gate/);
+  assert.match(trimmed, /9\. Next Beat:/);
+  assert.match(trimmed, /The gate opens and cold air rushes out/);
+});
+
+test('truncateSummaryToBudget falls back to tail truncation for unnumbered text', () => {
+  const text = 'A long unnumbered recollection without any section headers. '.repeat(40);
+  const trimmed = truncateSummaryToBudget(text, 20);
+
+  assert.ok(trimmed.length < text.length);
+  assert.match(trimmed, /\[truncated\]$/);
+});
+
+// =========================================================================
+// Epistemic partitioning
+// =========================================================================
+
+test('partitionEpistemicEntriesBySubject groups entries per member and skips outsiders', () => {
+  const entries = [
+    { type: 'knows', subject: 'Alice', content: 'the vault code' },
+    { type: 'suspects', subject: 'bob', content: 'Alice is lying' },
+    { type: 'knows', subject: 'Alice', content: 'where the key is' },
+    { type: 'knows', subject: 'Mallory', content: 'not a group member' },
+  ];
+
+  const { grouped, skipped } = partitionEpistemicEntriesBySubject(entries, ['Alice', 'Bob']);
+
+  assert.deepEqual(
+    grouped.get('Alice').map((e) => e.content),
+    ['the vault code', 'where the key is'],
+  );
+  assert.deepEqual(
+    grouped.get('Bob').map((e) => e.content),
+    ['Alice is lying'],
+  );
+  // Subject casing is canonicalised to the member name for storage.
+  assert.equal(grouped.get('Bob')[0].subject, 'Bob');
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].subject, 'Mallory');
+});
+
+test('matchSubjectToMember resolves first names, tokens, and partials', () => {
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Kael Draven']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Kael', ['Elara Voss', 'Kael Draven']), 'Kael Draven');
+  assert.equal(matchSubjectToMember('Picard', ['Jean-Luc Picard']), 'Jean-Luc Picard');
+  assert.equal(matchSubjectToMember('ELARA VOSS', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Draven', ['Kael Draven']), 'Kael Draven');
+  assert.equal(matchSubjectToMember('Nobody', ['Elara Voss', 'Kael Draven']), null);
+  assert.equal(matchSubjectToMember('', ['Elara Voss']), null);
+});
+
+test('matchSubjectToMember rejects substring false matches', () => {
+  // "Evan" must not match "Evangeline Cole" via arbitrary substring matching.
+  assert.equal(matchSubjectToMember('Evan', ['Evangeline Cole']), null);
+  assert.equal(matchSubjectToMember('Ange', ['Evangeline Cole']), null);
+  // A genuine bounded token still matches.
+  assert.equal(matchSubjectToMember('Cole', ['Evangeline Cole']), 'Evangeline Cole');
+});
+
+test('matchSubjectToMember refuses ambiguous first-name matches', () => {
+  // "Elara" matches both members - refuse rather than misattribute a secret.
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Elara Night']), null);
+  // Ambiguity only fires when multiple members genuinely match.
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Kael Draven']), 'Elara Voss');
+});
+
+test('partitionEpistemicEntriesBySubject skips ambiguous subjects instead of misattributing', () => {
+  const entries = [
+    { type: 'knows', subject: 'Elara', content: 'the vault code' },
+    { type: 'knows', subject: 'Kael', content: 'the ambush plan' },
+  ];
+
+  const { grouped, skipped } = partitionEpistemicEntriesBySubject(entries, [
+    'Elara Voss',
+    'Elara Night',
+    'Kael Draven',
+  ]);
+
+  assert.equal(grouped.get('Elara Voss').length, 0);
+  assert.equal(grouped.get('Elara Night').length, 0);
+  assert.equal(grouped.get('Kael Draven')[0].content, 'the ambush plan');
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].subject, 'Elara');
+});
+
+test('partitionEpistemicEntriesBySubject matches first names to full member names', () => {
+  const entries = [
+    { type: 'knows', subject: 'Elara', content: 'the vault code' },
+    { type: 'unaware', subject: 'Kael', content: 'the ambush plan' },
+    { type: 'knows', subject: 'Mallory', content: 'not a member' },
+  ];
+
+  const { grouped, skipped } = partitionEpistemicEntriesBySubject(entries, [
+    'Elara Voss',
+    'Kael Draven',
+  ]);
+
+  assert.equal(grouped.get('Elara Voss')[0].content, 'the vault code');
+  assert.equal(grouped.get('Elara Voss')[0].subject, 'Elara Voss');
+  assert.equal(grouped.get('Kael Draven')[0].content, 'the ambush plan');
+  assert.equal(grouped.get('Kael Draven')[0].subject, 'Kael Draven');
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].subject, 'Mallory');
+});
+
+// =========================================================================
+// Solo-chat epistemic subject matching (F1)
+// =========================================================================
+
+test('matchSubjectToMember: solo short-form subject resolves to the full card name', () => {
+  // buildEpistemicBlock filters entries with matchSubjectToMember(subject,
+  // [respondingChar]). A card named "Elara Voss" must still pick up entries the
+  // model emitted with the short form "Elara".
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Voss', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Elara Voss', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('ELARA', ['Elara Voss']), 'Elara Voss');
+  // An unrelated subject must not be pulled into the solo character's block.
+  assert.equal(matchSubjectToMember('Kael', ['Elara Voss']), null);
+});
+
+test('normalizeEpistemicSubject: canonicalises solo short-form subjects', () => {
+  assert.equal(normalizeEpistemicSubject('Elara', 'Elara Voss'), 'Elara Voss');
+  assert.equal(normalizeEpistemicSubject('ELARA VOSS', 'Elara Voss'), 'Elara Voss');
+  assert.equal(normalizeEpistemicSubject('Draven', 'Kael Draven'), 'Kael Draven');
+  // Unrelated subjects are left untouched.
+  assert.equal(normalizeEpistemicSubject('Kael Draven', 'Elara Voss'), 'Kael Draven');
+  assert.equal(normalizeEpistemicSubject('Mallory', 'Elara Voss'), 'Mallory');
+  // Substring false positives are not rewritten.
+  assert.equal(normalizeEpistemicSubject('Evan', 'Evangeline Cole'), 'Evan');
+  // No character name means no rewrite.
+  assert.equal(normalizeEpistemicSubject('Elara', ''), 'Elara');
+});
+
+// =========================================================================
+// Nested numbered lists inside Section 3
+// =========================================================================
+
+function buildNestedListSummary() {
+  return [
+    '1. Scene & Setting: The ancient hall is cold and dark.',
+    '2. Characters Present: Elara and Kael stand before the gate.',
+    '3. Key Events:',
+    '   7. They crossed the bridge at dawn.',
+    '   8. Fought the bandits in the mountain pass.',
+    '   9. Escaped the dungeon through a hidden tunnel.',
+    '4. Relationship Dynamics: Trust is fragile between them.',
+    '5. Revealed Information: The key opens the sealed gate.',
+    '6. Story Threads: The oath remains unfulfilled.',
+    "7. User's Direction: Keep the tone tense and quiet.",
+    '8. Current Moment: Elara stands at the sealed gate with the key in hand.',
+    '9. Next Beat: The gate opens and cold air rushes out.',
+  ].join('\n');
+}
+
+test('splitSummarySections ignores numbered lists nested inside Section 3', () => {
+  const { sections } = splitSummarySections(buildNestedListSummary());
+
+  assert.deepEqual(
+    sections.map((s) => s.num),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
+  );
+
+  const keyEvents = sections.find((s) => s.num === 3);
+  assert.match(keyEvents.text, /Fought the bandits/);
+  assert.match(keyEvents.text, /Escaped the dungeon/);
+
+  const revealed = sections.find((s) => s.num === 5);
+  assert.match(revealed.text, /Revealed Information/);
+  assert.match(revealed.text, /key opens the sealed gate/);
+
+  // Nested items 8 and 9 must not be mistaken for the real anchors.
+  assert.match(sections.find((s) => s.num === 8).text, /Current Moment/);
+  assert.match(sections.find((s) => s.num === 9).text, /Next Beat/);
+});
+
+test('truncateSummaryToBudget does not drop Section 5 when Section 3 has a nested list', () => {
+  const summary = buildNestedListSummary();
+  const trimmed = truncateSummaryToBudget(summary, 220);
+
+  assert.match(trimmed, /5\. Revealed Information:/);
+  assert.match(trimmed, /key opens the sealed gate/);
+  assert.match(trimmed, /8\. Current Moment:/);
+  assert.match(trimmed, /Elara stands at the sealed gate/);
+  assert.match(trimmed, /9\. Next Beat:/);
+  assert.match(trimmed, /The gate opens and cold air rushes out/);
+});
+
+// =========================================================================
+// Markdown-formatted summary headers
+// =========================================================================
+
+const CANONICAL_SECTION_TITLES = [
+  'Scene & Setting',
+  'Characters Present',
+  'Key Events',
+  'Relationship Dynamics',
+  'Revealed Information',
+  'Story Threads',
+  "User's Direction",
+  'Current Moment',
+  'Next Beat',
+];
+
+function buildSummaryWithFormatter(formatLine) {
+  return CANONICAL_SECTION_TITLES.map((title, i) => formatLine(i + 1, title)).join('\n\n');
+}
+
+test('splitSummarySections parses plain, markdown, and alternate-delimiter headers', () => {
+  const variants = [
+    (n, t) => `${n}. ${t}: Section body ${n}.`, // 3. Key Events:
+    (n, t) => `${n}. **${t}:** Section body ${n}.`, // 3. **Key Events:**
+    (n, t) => `**${n}. ${t}** Section body ${n}.`, // **3. Key Events**
+    (n, t) => `### ${n}. ${t} Section body ${n}.`, // ### 3. Key Events
+    (n, t) => `${n}) ${t}: Section body ${n}.`, // 3) Key Events:
+    (n, t) => `${n}: ${t}: Section body ${n}.`, // 3: Key Events:
+    (n, t) => `${n} - ${t} Section body ${n}.`, // 3 - Key Events
+  ];
+
+  for (const format of variants) {
+    const { sections } = splitSummarySections(buildSummaryWithFormatter(format));
+    assert.equal(
+      sections.length,
+      9,
+      `variant did not parse 9 sections: "${format(1, 'Scene & Setting')}"`,
+    );
+    assert.deepEqual(
+      sections.map((s) => s.num),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      `variant produced wrong section numbers: "${format(1, 'Scene & Setting')}"`,
+    );
+    assert.match(sections.find((s) => s.num === 8).text, /Current Moment/);
+    assert.match(sections.find((s) => s.num === 9).text, /Next Beat/);
+  }
+});
+
+test('truncateSummaryToBudget preserves anchors for markdown-formatted summaries', () => {
+  const summary = buildSummaryWithFormatter(
+    (n, t) => `### ${n}. ${t}\n${'The ancient hall is cold and dark. '.repeat(12)}`,
+  );
+  const trimmed = truncateSummaryToBudget(summary, 120);
+
+  assert.ok(trimmed.length < summary.length);
+  assert.match(trimmed, /Current Moment/);
+  assert.match(trimmed, /Next Beat/);
+});
+
+// =========================================================================
+// Scene buffer cursor contract
+// =========================================================================
+
+test('scene buffer cursor: end-of-chat index yields only newly appended messages', () => {
+  const chat = ['m0', 'm1', 'm2'];
+  let sceneBufferLastIndex = chat.length - 1; // 2, set at scene reset / chat load
+
+  // No history is ingested immediately after the cursor is set.
+  assert.deepEqual(chat.slice(sceneBufferLastIndex + 1), []);
+
+  // Only the newly appended turn is picked up.
+  chat.push('m3');
+  assert.deepEqual(chat.slice(sceneBufferLastIndex + 1), ['m3']);
+
+  sceneBufferLastIndex = chat.length - 1;
+  assert.deepEqual(chat.slice(sceneBufferLastIndex + 1), []);
+
+  // The legacy -1 cursor would re-ingest the whole history - the bug we fixed.
+  assert.equal(chat.slice(-1 + 1).length, chat.length);
+});
+
+// =========================================================================
+// N7 / 3.6: bidirectional epistemic subject matching
+// =========================================================================
+
+test('matchSubjectToMember: subject tokens may include a short member name (N7)', () => {
+  // A long subject can resolve to a short canonical member name.
+  assert.equal(matchSubjectToMember('Kael Draven', ['Kael']), 'Kael');
+  assert.equal(matchSubjectToMember('Elara Voss', ['Elara']), 'Elara');
+});
+
+test('matchSubjectToMember: honorific titles are stripped from either side (N7)', () => {
+  assert.equal(matchSubjectToMember('Lady Elara', ['Elara']), 'Elara');
+  assert.equal(matchSubjectToMember('Lady Elara', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('King Aldric', ['Aldric']), 'Aldric');
+  assert.equal(matchSubjectToMember('Elara', ['Lady Elara']), 'Lady Elara');
+});
+
+test('matchSubjectToMember: possessives and punctuation are cleaned (N7)', () => {
+  assert.equal(matchSubjectToMember("Elara's", ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Elara’s', ['Elara Voss']), 'Elara Voss');
+  assert.equal(matchSubjectToMember('Dr. Smith', ['Smith']), 'Smith');
+  assert.equal(matchSubjectToMember('Jean-Luc Picard', ['Picard']), 'Picard');
+});
+
+test('matchSubjectToMember: cleaning does not introduce substring false positives (N7)', () => {
+  assert.equal(matchSubjectToMember('Evan', ['Evangeline Cole']), null);
+  assert.equal(matchSubjectToMember('Ange', ['Evangeline Cole']), null);
+  assert.equal(matchSubjectToMember('Lady Evan', ['Evangeline Cole']), null);
+});
+
+test('matchSubjectToMember: bidirectional matching still refuses ambiguity (N7)', () => {
+  assert.equal(matchSubjectToMember('Elara', ['Elara Voss', 'Elara Night']), null);
+  assert.equal(matchSubjectToMember('Lady Elara', ['Elara Voss', 'Elara Night']), null);
+  // A longer subject containing both members' tokens is ambiguous too.
+  assert.equal(matchSubjectToMember('Elara Voss Night', ['Elara Voss', 'Elara Night']), null);
 });

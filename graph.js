@@ -112,6 +112,11 @@ const MAX_MEMORIES = 100; // max memory nodes rendered (top by importance)
 // All state lives here and is reset on close so there are no leaks.
 let gs = null; // active graph state, null when closed
 
+// Pending "reset layout" re-fit timer. Tracked at module scope so switching
+// chats (or closing the overlay) can cancel it before it fires against a
+// torn-down or replaced graph state.
+let resetTimeoutId = null;
+
 // ---- Public API -------------------------------------------------------------
 
 /**
@@ -898,8 +903,12 @@ function bindEvents(canvas, $overlay, characterName) {
     gs.camera = { x: 0, y: 0, scale: 1 };
     gs.alpha = 1.0;
     wakeGraph();
-    // Re-fit after the simulation has had a moment to settle.
-    setTimeout(() => {
+    // Re-fit after the simulation has had a moment to settle. Track the timer
+    // so a second reset click (or a close/chat switch) cancels the pending one
+    // instead of running a stale re-fit against replaced state.
+    if (resetTimeoutId) clearTimeout(resetTimeoutId);
+    resetTimeoutId = setTimeout(() => {
+      resetTimeoutId = null;
       if (gs) {
         for (let i = 0; i < 120; i++) tick();
         fitCameraToNodes();
@@ -986,7 +995,13 @@ function fitCameraToNodes() {
 /**
  * Closes and fully tears down the graph overlay.
  */
-function closeGraph() {
+export function closeGraph() {
+  // Always cancel a pending reset re-fit, even when graph state is already
+  // gone, so a queued timer cannot fire after teardown.
+  if (resetTimeoutId) {
+    clearTimeout(resetTimeoutId);
+    resetTimeoutId = null;
+  }
   if (!gs) return;
   cancelAnimationFrame(gs.rafId);
   gs._cleanup?.();
@@ -994,6 +1009,15 @@ function closeGraph() {
   if (overlay?.open) overlay.close();
   overlay?.remove();
   gs = null;
+}
+
+/**
+ * Public teardown hook. Call this on chat change (or any time the active chat
+ * context changes) to ensure the overlay and any pending reset re-fit timer are
+ * cleaned up instead of lingering against a stale graph.
+ */
+export function closeGraphModal() {
+  closeGraph();
 }
 
 /**

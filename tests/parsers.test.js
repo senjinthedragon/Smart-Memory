@@ -8,7 +8,11 @@ import {
   formatSummary,
   detectSceneBreakHeuristic,
   parseProfileOutput,
+  parseRelationshipDeltaResponse,
+  parseStateCardResponse,
+  mergeStateCardFields,
 } from '../parsers.js';
+import { buildStateCardPrompt } from '../prompts.js';
 
 // =========================================================================
 // parseExtractionOutput
@@ -240,11 +244,13 @@ test('parseArcOutput: parses [arc] lines', () => {
   assert.equal(typeof result.add[0].ts, 'number');
 });
 
-test('parseArcOutput: skips [arc] with content 5 chars or fewer', () => {
+test('parseArcOutput: skips [arc] with content 15 chars or fewer', () => {
   // 5 chars - skipped
   assert.equal(parseArcOutput('[arc] Quest', []).add.length, 0);
-  // 6 chars - accepted
-  assert.equal(parseArcOutput('[arc] Quests', []).add.length, 1);
+  // 15 chars - skipped (boundary is content.length > 15)
+  assert.equal(parseArcOutput('[arc] Quest complete!', []).add.length, 0);
+  // 38 chars - accepted
+  assert.equal(parseArcOutput('[arc] She promised to return before winter.', []).add.length, 1);
 });
 
 test('parseArcOutput: resolves arc with sufficient Jaccard overlap', () => {
@@ -510,7 +516,8 @@ Alex (character): close friend [confidence: 0.8]
   const result = parseProfileOutput(input);
   assert.ok(result !== null);
   assert.ok(result.character_state.includes('survive'));
-  assert.equal(result.world_state, '');
+  // Omitted sections are null (not ''), so callers can tell they were not produced.
+  assert.equal(result.world_state, null);
   assert.ok(result.relationship_matrix.includes('Alex'));
 });
 
@@ -537,4 +544,191 @@ test('parseProfileOutput: trims whitespace from sections', () => {
   assert.ok(result !== null);
   // Content should be trimmed but not empty
   assert.ok(result.character_state.length > 0);
+});
+
+// =========================================================================
+// parseRelationshipDeltaResponse
+// =========================================================================
+
+test('parseRelationshipDeltaResponse: hyphenated subject is parsed correctly', () => {
+  const result = parseRelationshipDeltaResponse('Jean-Luc -> Bob: fond(high)');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].subject, 'Jean-Luc');
+  assert.equal(result[0].target, 'Bob');
+  assert.deepEqual(result[0].updates, [{ word: 'fond', magnitude: 'high' }]);
+  assert.deepEqual(result[0].removals, []);
+});
+
+test('parseRelationshipDeltaResponse: hyphenated subject with unicode arrow', () => {
+  const result = parseRelationshipDeltaResponse('Mary-Jane → Bob: warm(low), cautious(medium)');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].subject, 'Mary-Jane');
+  assert.equal(result[0].target, 'Bob');
+  assert.deepEqual(result[0].updates, [
+    { word: 'warm', magnitude: 'low' },
+    { word: 'cautious', magnitude: 'medium' },
+  ]);
+});
+
+test('parseRelationshipDeltaResponse: preserves multi-hyphen names and removals', () => {
+  const result = parseRelationshipDeltaResponse('Al-Haitham -> Kaveh: distant(high), !trusting');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].subject, 'Al-Haitham');
+  assert.equal(result[0].target, 'Kaveh');
+  assert.deepEqual(result[0].updates, [{ word: 'distant', magnitude: 'high' }]);
+  assert.deepEqual(result[0].removals, ['trusting']);
+});
+
+// =========================================================================
+// parseStateCardResponse
+// =========================================================================
+
+test('parseStateCardResponse: none/empty clear fields and !item removes a single item', () => {
+  const result = parseStateCardResponse(
+    '[state:Kael:character] mood=calm | injuries=none | carried_items=!silver key | outfit_disguise=empty',
+  );
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.mood, 'calm');
+  // Total-clear signals become empty strings so the ledger merge wipes the value.
+  assert.equal(fields.injuries, '');
+  assert.equal(fields.outfit_disguise, '');
+  // A `!item` value is a PARTIAL removal descriptor, not a total clear.
+  assert.deepEqual(fields.carried_items, { removeItems: ['silver key'] });
+});
+
+test('parseStateCardResponse: healed:/dropped: remove a single sub-item', () => {
+  const result = parseStateCardResponse(
+    '[state:Kael:character] injuries=healed: graze on shoulder | carried_items=dropped: silver key',
+  );
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.deepEqual(fields.injuries, { removeItems: ['graze on shoulder'] });
+  assert.deepEqual(fields.carried_items, { removeItems: ['silver key'] });
+});
+
+test('parseStateCardResponse: all-healed and none-left clear a collection field', () => {
+  const healed = parseStateCardResponse('[state:Kael:character] injuries=all healed');
+  assert.equal(healed.get('kael|character').injuries, '');
+  const noneLeft = parseStateCardResponse('[state:Kael:character] carried_items=none left');
+  assert.equal(noneLeft.get('kael|character').carried_items, '');
+});
+
+test('mergeStateCardFields: partial removal keeps untargeted items', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: { removeItems: ['graze'] } },
+  );
+  assert.equal(merged.injuries, 'broken arm');
+});
+
+test('mergeStateCardFields: partial removal of a non-first item keeps the rest', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: { removeItems: ['broken arm'] } },
+  );
+  assert.equal(merged.injuries, 'graze on shoulder');
+});
+
+test('mergeStateCardFields: removing every item clears the field', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: { removeItems: ['graze', 'broken arm'] } },
+  );
+  assert.equal(merged.injuries, '');
+});
+
+test('mergeStateCardFields: total clear wipes the whole collection', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'graze on shoulder, broken arm' },
+    { injuries: '' },
+  );
+  assert.equal(merged.injuries, '');
+});
+
+test('mergeStateCardFields: adding new items appends without duplicating', () => {
+  const merged = mergeStateCardFields(
+    { injuries: 'broken arm' },
+    { injuries: 'broken arm, sprained wrist' },
+  );
+  assert.equal(merged.injuries, 'broken arm, sprained wrist');
+});
+
+test('mergeStateCardFields: non-collection fields are replaced like before', () => {
+  const merged = mergeStateCardFields(
+    { mood: 'calm', location: 'tavern' },
+    { mood: 'angry', location: 'cleared' },
+  );
+  assert.equal(merged.mood, 'angry');
+  assert.equal(merged.location, 'cleared');
+});
+
+test('parseStateCardResponse: clear-only entry is retained so the clear propagates', () => {
+  const result = parseStateCardResponse('[state:Kael:character] injuries=none');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.injuries, '');
+});
+
+test('parseStateCardResponse: unrelated noise values are still skipped', () => {
+  const result = parseStateCardResponse(
+    '[state:Kael:character] mood=unknown | active_goal=find the key',
+  );
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.active_goal, 'find the key');
+  assert.equal('mood' in fields, false);
+});
+
+test('parseStateCardResponse: location=none is an unmentioned placeholder, not a clear', () => {
+  const result = parseStateCardResponse('[state:Kael:character] location=none | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.mood, 'calm');
+  // `none` on an attribute means "unmentioned" - it must neither store nor clear.
+  assert.equal('location' in fields, false);
+  assert.equal(fields.location, undefined);
+});
+
+test('parseStateCardResponse: injuries=healed clears a collection field', () => {
+  const result = parseStateCardResponse('[state:Kael:character] injuries=healed | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.injuries, '');
+  assert.equal(fields.mood, 'calm');
+});
+
+test('parseStateCardResponse: bare !carried_items clears the collection field', () => {
+  const result = parseStateCardResponse('[state:Kael:character] !carried_items | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.carried_items, '');
+  assert.equal(fields.mood, 'calm');
+});
+
+test('parseStateCardResponse: explicit cleared still clears an attribute field', () => {
+  const result = parseStateCardResponse('[state:Kael:character] location=cleared');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal(fields.location, '');
+});
+
+test('parseStateCardResponse: injuries=unknown is skipped, neither stored nor cleared', () => {
+  const result = parseStateCardResponse('[state:Kael:character] injuries=unknown | mood=calm');
+  const fields = result.get('kael|character');
+  assert.ok(fields);
+  assert.equal('injuries' in fields, false);
+  assert.equal(fields.mood, 'calm');
+});
+
+test('buildStateCardPrompt: documents clearing vs. unmentioned attributes', () => {
+  const prompt = buildStateCardPrompt('Kael: I sheathe my sword.', [
+    { name: 'Kael', type: 'character' },
+  ]);
+
+  assert.match(prompt, /ENDED, HEALED, or/);
+  assert.match(prompt, /fieldname=cleared or fieldname=none/);
+  assert.match(prompt, /!carried_items/);
+  assert.match(prompt, /UNMENTIONED or UNKNOWN/);
+  assert.match(prompt, /Do NOT write location=unknown or location=none/);
 });

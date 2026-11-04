@@ -7,6 +7,190 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Chat & branch operation revision tokens.** Introduced `operationRevision`,
+  `bumpOperationRevision()`, and `branchChanged()` guards. The guarded async
+  pipelines (long-term extraction and consolidation, session, arc, state-ledger,
+  epistemic, continuity, and profile extraction, plus canon generation, and the
+  full catch-up routine) abort before any write when a chat switch, swipe, edit,
+  or delete changes the branch. Chat changes invalidate synchronously at event
+  receipt (revision, load-id, and active request aborts) before the debounced
+  UI/load restoration runs. On rollback, chat-scoped state is restored and
+  persistent long-term memories whose real source range lies after the rollback
+  point (for the current chat) are pruned. Provenance is conservative:
+  memories with missing, incomplete, or other-chat provenance are kept.
+  Duplicate `CHAT_CHANGED`/`CHAT_LOADED` events for the same chat are coalesced
+  into one logical revision bump, and the debounced load routine re-checks the
+  load/revision identity after every await.
+  _Limitation:_ cancellation is transport-enforced for Ollama and
+  OpenAI-compatible sources and for embeddings; main-API, WebLLM, and
+  connection-profile generation remain host-managed, so for those the revision
+  guard prevents the stale write rather than aborting the underlying request.
+- **Strict entity allowlist for State Ledger.** State card extraction now admits
+  only canonical `(name, type)` pairs drawn from the active entity registry plus
+  seeded `character` entries for active characters, and rejects unknown or
+  mismatched-type cards. Field strings are capped at 500 characters and total
+  retained cards are bounded to 100 with character-preferential, freshness-aware
+  pruning. Manual edits and durable-retcon updates route through the same
+  validated `upsertStateCard`.
+- **Unicode-aware token budgeting.** `estimateTokens` now counts by Unicode code
+  point and weights non-Latin scripts (CJK, Thai, Arabic, Devanagari, Cyrillic,
+  Greek, Hebrew, emoji) at ~1.5 tokens/char to reduce prompt-overflow risk on
+  international roleplays. It is a conservative heuristic, not a tokenizer.
+- **Multi-controller abort and abort-aware retries.** `generate.js` tracks a set
+  of active AbortControllers and makes retry delays abort-aware, so swipes and
+  cancellations immediately abort in-flight Ollama and OpenAI-compatible
+  network activity. `embeddings.js` tracks and aborts its own in-flight
+  embedding requests, and branch-change handlers invoke both.
+- **Legacy storage-key migration.** A one-time, idempotent
+  `migrateLegacyCharacterKeys` moves pre-existing underscore-encoded character
+  stores (`_constructor`, `_prototype`, `___proto__`) onto the collision-free
+  NUL-sentinel encoding so previously-stored data stays reachable.
+- **Generation-identity watchdog.** The 90-second `generationInProgress`
+  fail-safe watchdog is token-scoped so a stale timer cannot clear a newer
+  generation's gate. Generation start/terminal events are correlated
+  (`correlateGenerationGate`) with FIFO pending slots and event-kind pairing:
+  `GENERATION_STOPPED` and `GENERATION_ENDED` for the same generation coalesce
+  once, a terminal with no pending generation is a no-op, and an outstanding
+  pair's timestamp/kind are preserved across a new generation so a delayed
+  complement is still recognised. The explicit policy is **prefer extraction
+  safety**: when two orderings are indistinguishable (a delayed old `ENDED` vs a
+  new generation's own `ENDED`), the gate is held rather than risk extracting
+  partial streaming text; the hold is bounded by the 90-second watchdog and by
+  chat switch/reset. Normal completion (`MESSAGE_RECEIVED`) is authoritative: it
+  consumes its pending slot and the watchdog is retained whenever any pending
+  slot remains, so an ambiguity-collapsed terminal cannot strand a slot with no
+  recovery path.
+- **Complete tier clearing.** Cancelled catch-up clears the tier's extension
+  slot, macro content, and the materialized unified prompt/cache so stale
+  context cannot linger in macro or unified injection modes.
+- **Provenance hardening and lifecycle correlation.** Source ranges must be
+  non-negative and ordered (`start <= end`) to count as usable, and chat ids are
+  normalized (`String(...)`) consistently across provenance union, rollback, and
+  UI source links. Generation start/terminal events are paired FIFO
+  (`correlateGenerationGate`) so a delayed stop from an old generation cannot
+  clear a newer generation's gate. Duplicate chat-load events coalesce even when
+  the chat id is temporarily null, using the chat metadata reference as a
+  secondary lifecycle token, and stale detached recap callbacks no longer mutate
+  a newer chat's loader/status.
+- **Metadata bounding and retention caps.** Arc summaries are capped to 50 recent
+  items, canon prompt arc summary inputs are capped to 20, and epistemic entries are
+  capped to 100 per chat. Epistemic `[retire]` directives are guarded against mass
+  wipes and bounded to 5 valid positive integers per pass.
+- **Partial profile merge preservation.** Model profile generations that produce
+  partial XML sections now merge into existing stored profiles rather than
+  overwriting unmentioned sections with blank strings.
+- **Prototype pollution protection.** The collision-free `safeStorageKey` helper
+  (NUL-sentinel encoding) guards object keys against `__proto__`, `constructor`,
+  and `prototype` and is applied across character and group stores
+  (`longterm.js`, `canon.js`, `epistemic.js`, `graph-migration.js`, `arcs.js`).
+- **Shared group ID coercion helper.** `sameGroupId` unifies number/string group
+  ID comparisons across UI, settings, and memory tiers.
+- **Unified cache invalidation for relationships and triggered memories.** Explicit
+  clears of relationship history and triggered memory slots invalidate their unified
+  cache entries, and toggling relationships rebuilds unified prompt injection.
+- **Unicode-aware entity linking.** Re-linking now uses Unicode-aware word
+  boundaries for accented and non-Latin scripts, and substring matching with a
+  lower length floor for spaceless scripts (CJK/Thai). Names such as `Zoë`,
+  `Éowyn`, `José`, `Ødegård`, `Мария`, and `艾拉` now link correctly, while
+  `King Aldric` no longer links via “making”, `Ann` via “Joanna”, or `Eli` via
+  “believes”.
+- **State-following durable retcons.** When a retcon expires or the user accepts
+  the changed state, the old long-term memory is retired via `superseded_by`,
+  the resolved fact becomes the new baseline, and matching state-card attributes
+  are updated. This stops the same contradiction from being re-flagged after the
+  retcon window closes.
+- **Manual-edit snapshots.** Setting/deleting state cards, saving/deleting arcs,
+  and saving/clearing epistemic knowledge now record a message-anchored
+  snapshot, so a later swipe cannot silently wipe a manual edit.
+- **Mid-chat edit rollback.** Editing an already-extracted message now rolls
+  state back to the turn before the edit, rewinds the extraction cursor and
+  scene buffer, clears any queued repair, and refreshes the UI.
+- **Bidirectional epistemic subject matching.** Subjects now resolve in both
+  directions (`Kael Draven` → `Kael`, `Lady Elara` → `Elara`) after stripping
+  possessives, punctuation, and honorific titles. Ambiguous matches are still
+  refused rather than misattributed.
+- **`agents.md`** documenting the architecture, tier model, rollback system,
+  design decisions, and revision history.
+- **Partitioned epistemic knowledge for group chats.** Group scenes now run a unified epistemic extraction that partitions entries by character name into each member's respective perspective store.
+- **Explicit state card field clearing syntax.** State card responses can now explicitly clear stored attributes using `!field` or `field=none/empty`.
+- **Remote embedding CORS proxy support.** OpenAI-compatible embeddings targeting remote or cloud endpoints now route through SillyTavern's `/proxy/<url>` middleware.
+- **Unified injection mode coverage.** Added Relationships, Perspectives, and State ledger tiers to unified injection ordering.
+
+### Fixed
+
+- **Partial extraction failure no longer loses turns.** If any memory-producing
+  tier (session, long-term, epistemic, arcs, state ledger) throws during a pass —
+  e.g. a transient provider 5xx — the pipeline now leaves `lastExtractCutoff`
+  (and the post-pass state snapshot) unadvanced, so the same window is retried on
+  the next pass instead of being marked permanently processed. Previously a
+  failed tier was logged and swallowed while the cursor still advanced, silently
+  losing those turns' facts forever. Applied to both solo and group pipelines.
+- **Extraction cursor is monotonic (never advances).** `lastExtractCutoff` is a
+  high-water mark. Swipe/edit/delete now use `lowerExtractCutoff(current, target)`
+  so a rollback rewinds it only when the target is before the cursor, and leaves
+  it untouched when the target is at/after the cursor (and leaves it unset when it
+  was never set). Previously deleting a turn beyond the watermark advanced the
+  cursor (observed 1 → 3 in a real run), permanently skipping un-extracted
+  surviving turns. Verified end-to-end.
+- **Dry-run generations no longer poison the generation gate (critical).**
+  SillyTavern's `PromptManager` runs a post-message **dry-run**
+  (`Generate('normal', {}, true)`) to compute token composition. It emits
+  `GENERATION_STARTED` but never `MESSAGE_RECEIVED` or `GENERATION_ENDED`, so
+  treating it as a real generation left the gate locked and made
+  `onCharacterMessageRendered` abort at the top on **every turn** — silently
+  skipping all extraction, scene detection, continuity, and arcs. The handler
+  now ignores dry-runs via `isTrackableGeneration(type, dryRun)`. Found by the
+  real SillyTavern end-to-end harness, which had recorded zero memories across a
+  full roleplay; after the fix the same harness records natural session
+  memories, entities, a compaction summary, live prompt injection, and exact
+  rollback.
+- **Mid-chat delete rollback.** SillyTavern's `MESSAGE_DELETED` always passes
+  the **new chat length**, never the deleted index. The handler now recovers the
+  deleted turn by diffing surviving message object identities against a snapshot
+  captured on load/send/receive (`resolveDeletedIndexFromRefs`), so deleting a
+  message in the middle of a chat rolls state back to the turn before it and
+  prunes later snapshots — instead of rolling back to the chat tip. Verified in
+  a real SillyTavern end-to-end run: deleting index 5 of a 15-message chat
+  rewinds `lastExtractCutoff` to exactly 4 and prunes later snapshots, and a
+  "delete from here" range delete targets the deleted start index exactly.
+- **Epistemic and State Ledger placement.** SillyTavern only honours depth for
+  `IN_CHAT`; `IN_PROMPT` ignores it and sits at the very top. Both tiers now
+  default to `IN_CHAT` depth 2 (near the end of the prompt), and the migration
+  normalises both the legacy `IN_CHAT` depth-1 default and the interim
+  `IN_PROMPT` depth-0/2 default. Explicit custom placements are preserved, and
+  the migration is skipped once `migrated_legacy_placement` is set.
+- **Rollback extraction cursor.** Rolling back a swipe/delete now rewinds
+  `lastExtractCutoff`, so the rewritten turns are extracted again instead of
+  being skipped by the next pass.
+- **Group-chat durable retcon notes.** The standing durable-retcon note is now
+  injected for every member in a round, while retcon lifetimes still decrement
+  only once per full round.
+- **Continuity transformation precision.** Possessive constructions such as
+  “The spell turned Elara's eyes green” are recognised as active
+  transformations, and a sentence about a different attribute (for example a
+  cloak turning blue) can no longer suppress an eye-colour contradiction.
+- **Continuity checks no longer nudge the story backward.** The checker now
+  receives the recent transcript as ground truth and is told that baseline
+  notes lag behind it, so normal progression (moving, using an item, learning
+  something, time passing) is not treated as a contradiction. Only permanent
+  properties are eligible, and each reported issue must quote the response and
+  the baseline verbatim before it is acted on. The default mode is "Notify
+  only"; optional auto-repair uses a forward-only note that never retracts or
+  re-narrates events already written. The note is anchored to the message it was
+  checked against, so swiping, editing, or deleting that message discards it.
+- **Summary truncation budget anchoring.** Replaced naive tail-truncation with section-aware truncation (`truncateSummaryToBudget`) preserving Current Moment and Next Beat anchor sections.
+- **Assistant message swipe handling.** Assistant swipes now cleanly rewind the scene message buffer and pop discarded turns to prevent scene corruption.
+- **Periodic epistemic extraction.** Extraction passes now perform periodic lightweight epistemic refreshes so character perspectives remain up to date between rare scene breaks.
+- **Adaptive budget race condition.** In-place mutation of `extension_settings` during extraction has been eliminated; injectors accept per-turn budget overrides to prevent debounced saves persisting temporary values.
+- **Background generation abort on chat switch or cancellation.** Running LLM requests are cleanly aborted when switching chats or cancelling catch-up.
+- **Group arc persistence and deletion.** Arc deletion now respects `groupId`, properly pruning persistent group arcs so deleted threads do not resurrect on reload.
+- **Entity registry protection.** Empty memory passes no longer wipe entity registries, and seeded character entities are preserved.
+- **Safe template replacement.** Implemented `replaceTemplate` across prompt formatting sites to prevent `$` capture sequence corruption in roleplay dialogue and memory content.
+- **Canon token estimate read the wrapper object instead of its text.** The
+  per-character token breakdown always reported zero canon tokens.
+
 ## [1.8.3] - 2026-10-01
 
 ### Fixed
@@ -676,7 +860,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Status message during relationship history extraction**: the extraction
   status indicator in the settings panel now shows `Extracting relationship
-  history...` while the relationship history model call is in progress, matching
+history...` while the relationship history model call is in progress, matching
   the feedback already shown for other extraction tiers.
 
 - **Contextual relevance for long-term memories**: the hybrid scorer now applies a

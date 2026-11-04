@@ -30,24 +30,30 @@
  * is not available, or the API call fails - so the system degrades gracefully
  * for users who have not configured an embedding source.
  *
- * getEmbeddingBatch        - fetches vectors for multiple texts in one API call
+ * getEmbeddingBatch        - fetches vectors for multiple texts in one API call; accepts an optional AbortSignal
  * cosineSimilarity         - re-exported from similarity.js for callers that import here
  * batchVerify              - compares candidates against existing memories; returns
  *                            passed (new), superseded (pattern-confirmed updates),
  *                            uncertain (same-topic pairs for model confirmation), and
  *                            rejected (duplicates)
  * clearEmbeddingCache      - clears the in-session cache (call on chat change)
+ * abortEmbeddingRequests   - aborts every in-flight embedding fetch (call on swipe/edit/delete)
  * hasEmbeddingFailed       - returns true when an embedding call has failed this session
  * clearEmbeddingFailed     - resets the failure flag (call when the user re-enables or reconfigures)
  * getHardwareProfile       - returns the active hardware profile ('a' or 'b')
  * saveEmbeddingApiKey - writes the API key to extension_settings
  * hasEmbeddingApiKey  - returns true when an API key is configured
+ *
+ * Cancellation scope note: only the embedding HTTP fetches issued here are
+ * transport-cancellable. Main-API, WebLLM, and connection-profile generation in
+ * generate.js is host-managed (SillyTavern owns the request) and cannot be
+ * aborted from this module.
  */
 
 import { extension_settings } from '../../../extensions.js';
-import { saveSettingsDebounced } from '../../../../script.js';
+import { saveSettingsDebounced, getRequestHeaders } from '../../../../script.js';
 import { MODULE_NAME } from './constants.js';
-import { memory_sources } from './generate.js';
+import { memory_sources, isLocalUrl } from './generate.js';
 import { cosineSimilarity, jaccardSimilarity, hasStateChangeMarker } from './similarity.js';
 
 // In-session embedding cache: normalized text -> vector.
@@ -60,14 +66,107 @@ const embeddingCache = new Map();
 let embeddingWarnedThisSession = false;
 
 /**
+ * Holds every AbortController for currently in-flight embedding fetches. A Set
+ * rather than a single slot because concurrent passes can overlap. Module-level
+ * so index.js can cancel from outside the call stack via abortEmbeddingRequests()
+ * when a swipe/edit/delete is requested. Local to this module (not shared with
+ * generate.js) so the two cancellation domains stay independent.
+ */
+const activeEmbeddingAbortControllers = new Set();
+
+/**
+ * Cancels every in-flight embedding fetch immediately. Aborts each tracked
+ * controller and clears the set; the aborted fetches resolve to an empty result
+ * and callers fall back to keyword matching. Has no effect if no embedding
+ * request is currently running.
+ *
+ * Cancellation scope: this only aborts embedding HTTP requests issued by this
+ * module. Main-API/WebLLM/connection-profile generation in generate.js is
+ * host-managed and is not transport-cancellable here.
+ */
+export function abortEmbeddingRequests() {
+  for (const controller of activeEmbeddingAbortControllers) {
+    try {
+      controller.abort();
+    } catch {
+      // Ignore controllers that have already been aborted or disposed.
+    }
+  }
+  activeEmbeddingAbortControllers.clear();
+}
+
+/**
+ * Returns true when running inside a browser (SillyTavern's front-end context).
+ * Node-based tooling and unit tests have no `window`, so they always take the
+ * direct-fetch path.
+ * @returns {boolean}
+ */
+function isBrowserContext() {
+  return typeof window !== 'undefined';
+}
+
+/**
+ * POSTs an embedding request, routing remote/cloud endpoints through
+ * SillyTavern's server-side CORS proxy when running in a browser.
+ *
+ * Local addresses (localhost, private network ranges) are contacted directly -
+ * they do not trigger browser CORS restrictions. Cloud providers such as OpenAI
+ * reject cross-origin browser requests, so they are sent through `/proxy/<url>`
+ * (SillyTavern's CORS proxy middleware) using ST's request headers. If the proxy
+ * is disabled or unavailable we fall back to a direct request so local
+ * reverse-proxies and same-origin setups still work.
+ *
+ * @param {string} url - Fully-qualified embedding endpoint URL.
+ * @param {Object} payload - JSON request body.
+ * @param {string} [apiKey] - Optional bearer token for OpenAI-compatible APIs.
+ * @param {AbortSignal} [signal] - Cancels the request when aborted.
+ * @returns {Promise<Response>}
+ */
+async function fetchEmbeddingEndpoint(url, payload, apiKey = '', signal) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  const body = JSON.stringify(payload);
+
+  // Only absolute HTTP(S) targets outside the local network need the proxy.
+  // Relative/same-origin URLs are already served by SillyTavern.
+  const isRemoteHttp = /^https?:\/\//i.test(url) && !isLocalUrl(url);
+  if (isRemoteHttp && isBrowserContext()) {
+    try {
+      const response = await fetch(`/proxy/${url}`, {
+        method: 'POST',
+        headers: { ...getRequestHeaders(), ...headers },
+        body,
+        signal,
+      });
+      if (response.ok) return response;
+      // Non-2xx usually means the CORS proxy is disabled (config.yaml) or the
+      // upstream rejected the request. Fall through to a direct attempt.
+    } catch {
+      // Network error reaching the proxy - fall through to a direct attempt.
+      // A caller-triggered abort is surfaced by the direct fetch below, which
+      // also receives the signal and rejects immediately when it is aborted.
+    }
+  }
+
+  return fetch(url, { method: 'POST', headers, body, signal });
+}
+
+/**
  * Fetches embedding vectors for a list of texts in a single API call.
  * Texts already in the cache are not re-fetched. Returns a Map from
  * normalized text to vector. Any text that fails (bad response, network
  * error) will be absent from the returned Map - callers fall back to Jaccard.
+ *
+ * The request is tracked in a module-level Set so abortEmbeddingRequests() can
+ * cancel it; an optional caller-supplied signal is linked so either source can
+ * abort the fetch. Aborted requests resolve to the partial result (usually
+ * empty) without logging a failure toast.
+ *
  * @param {string[]} texts
+ * @param {AbortSignal} [signal] - Optional caller signal to cancel the fetch.
  * @returns {Promise<Map<string, number[]>>}
  */
-export async function getEmbeddingBatch(texts) {
+export async function getEmbeddingBatch(texts, signal) {
   const settings = extension_settings[MODULE_NAME];
   const result = new Map();
 
@@ -94,20 +193,32 @@ export async function getEmbeddingBatch(texts) {
   const model = settings.embedding_model || 'nomic-embed-text';
   const keep = settings.embedding_keep ?? false;
   const source = settings.embedding_source ?? 'ollama';
+  // Remote endpoints in the browser require SillyTavern's CORS proxy; this lets
+  // the catch block explain the real cause when the request fails.
+  const isRemoteHttp = /^https?:\/\//i.test(baseUrl) && !isLocalUrl(baseUrl);
+
+  // One controller per request, registered so abortEmbeddingRequests() can
+  // cancel it. A caller-supplied signal is linked in so either aborts the fetch.
+  const controller = new AbortController();
+  const onCallerAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onCallerAbort, { once: true });
+  }
+  activeEmbeddingAbortControllers.add(controller);
 
   try {
     let vectors;
     if (source === 'openai_compatible') {
       // OpenAI-compatible endpoint: /v1/embeddings
       // Response shape: { data: [{ embedding: [...] }, ...] }
-      const headers = { 'Content-Type': 'application/json' };
       const apiKey = settings.embedding_api_key || '';
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-      const response = await fetch(`${baseUrl}/v1/embeddings`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ input: uncached, model }),
-      });
+      const response = await fetchEmbeddingEndpoint(
+        `${baseUrl}/v1/embeddings`,
+        { input: uncached, model },
+        apiKey,
+        controller.signal,
+      );
       if (!response.ok) return result;
       const data = await response.json();
       if (!Array.isArray(data?.data)) return result;
@@ -115,16 +226,17 @@ export async function getEmbeddingBatch(texts) {
     } else {
       // Ollama endpoint: /api/embed
       // Response shape: { embeddings: [[...], ...] }
-      const response = await fetch(`${baseUrl}/api/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const response = await fetchEmbeddingEndpoint(
+        `${baseUrl}/api/embed`,
+        {
           input: uncached,
           model,
           keep_alive: keep ? -1 : undefined,
           truncate: true,
-        }),
-      });
+        },
+        '',
+        controller.signal,
+      );
       if (!response.ok) return result;
       const data = await response.json();
       if (!Array.isArray(data?.embeddings)) return result;
@@ -138,17 +250,37 @@ export async function getEmbeddingBatch(texts) {
         result.set(uncached[i], vector);
       }
     }
-  } catch {
+  } catch (err) {
+    // A swipe/edit/delete (or an explicit abortEmbeddingRequests() call) aborted
+    // this request - stay silent and let the caller fall back to keyword matching.
+    if (err?.name === 'AbortError' || controller.signal.aborted) {
+      return result;
+    }
     // Network error, model not found, server not running - callers fall back to Jaccard.
     // Warn once per session so the user knows deduplication quality is degraded.
+    console.error('[SmartMemory] Embedding request failed:', err);
     if (!embeddingWarnedThisSession) {
       embeddingWarnedThisSession = true;
-      toastr?.warning(
-        'Embedding model unreachable - falling back to keyword matching. Check your embedding URL and model name.',
-        'Smart Memory',
-        { timeOut: 8000 },
-      );
+      // A remote endpoint contacted directly from the browser is almost always
+      // blocked by CORS. SillyTavern can proxy it, but only when enabled in
+      // config.yaml. Give the user the exact fix rather than a generic warning.
+      if (isRemoteHttp && isBrowserContext()) {
+        toastr?.error(
+          'Remote embedding API failed (likely blocked by CORS). In SillyTavern, set enableCORSProxy: true in config.yaml and restart, or switch to a local Ollama embedding model.',
+          'Smart Memory',
+          { timeOut: 12000 },
+        );
+      } else {
+        toastr?.warning(
+          'Embedding model unreachable - falling back to keyword matching. Check your embedding URL and model name.',
+          'Smart Memory',
+          { timeOut: 8000 },
+        );
+      }
     }
+  } finally {
+    activeEmbeddingAbortControllers.delete(controller);
+    signal?.removeEventListener?.('abort', onCallerAbort);
   }
 
   return result;

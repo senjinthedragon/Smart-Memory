@@ -75,12 +75,37 @@ function getRequestLimit(responseLength) {
 }
 
 /**
- * Holds the AbortController for the currently running Ollama or OpenAI-compat
- * fetch, or null when no external generation is in progress. This is module-level
- * rather than per-call so index.js can cancel it from outside the call stack via
- * abortCurrentMemoryGeneration() when a swipe is requested.
+ * Holds every AbortController for currently running Ollama or OpenAI-compat
+ * fetches. A Set rather than a single slot because retries create a fresh
+ * controller per attempt, so more than one could exist briefly. Module-level so
+ * index.js can cancel from outside the call stack via
+ * abortCurrentMemoryGeneration() when a swipe/edit/delete is requested.
  */
-let memoryAbortController = null;
+const activeAbortControllers = new Set();
+
+/**
+ * Sleeps for the given duration, resolving early if the signal aborts. Used in
+ * place of a bare setTimeout in the retry paths so an in-flight retry can be
+ * cancelled immediately by abortCurrentMemoryGeneration() instead of holding
+ * the caller open for the full RETRY_DELAY_MS.
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<void>}
+ */
+function abortableSleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
 
 /**
  * Strips reasoning blocks from a raw model response using SillyTavern's
@@ -112,16 +137,22 @@ function stripThinkingBlocks(text) {
 
 /**
  * Cancels any in-flight Ollama or OpenAI-compat memory generation immediately.
- * The aborted fetch returns an empty string to its caller, which the existing
- * empty-response guards in compaction.js and the extraction functions treat as
- * "nothing to do" - the operation is silently skipped rather than erroring.
+ * Aborts every tracked controller (there can be more than one during a retry
+ * cycle) and clears the set. The aborted fetch returns an empty string to its
+ * caller, which the existing empty-response guards in compaction.js and the
+ * extraction functions treat as "nothing to do" - the operation is silently
+ * skipped rather than erroring.
  * Has no effect if no external generation is currently running.
  */
 export function abortCurrentMemoryGeneration() {
-  if (memoryAbortController) {
-    memoryAbortController.abort();
-    memoryAbortController = null;
+  for (const c of activeAbortControllers) {
+    try {
+      c.abort();
+    } catch {
+      // Ignore controllers that have already been aborted or disposed.
+    }
   }
+  activeAbortControllers.clear();
 }
 
 /** Available LLM sources for memory operations. */
@@ -238,7 +269,7 @@ async function generateOllama(
   const streaming = typeof onChunk === 'function';
 
   const thisController = new AbortController();
-  memoryAbortController = thisController;
+  activeAbortControllers.add(thisController);
   try {
     const response = await fetch(`${url}/api/chat`, {
       method: 'POST',
@@ -284,7 +315,7 @@ async function generateOllama(
     if (err.name === 'AbortError') return '';
     throw err;
   } finally {
-    if (memoryAbortController === thisController) memoryAbortController = null;
+    activeAbortControllers.delete(thisController);
   }
 }
 
@@ -297,7 +328,7 @@ async function generateOllama(
  * @param {string} url
  * @returns {boolean}
  */
-function isLocalUrl(url) {
+export function isLocalUrl(url) {
   try {
     const { hostname } = new URL(url);
     // Strip brackets from IPv6 addresses (e.g. [::1] -> ::1)
@@ -357,7 +388,7 @@ async function generateOpenAICompat(
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const thisController = new AbortController();
-    memoryAbortController = thisController;
+    activeAbortControllers.add(thisController);
     const local = isLocalUrl(baseUrl);
     const streaming = local && typeof onChunk === 'function';
     try {
@@ -437,7 +468,8 @@ async function generateOpenAICompat(
       // permanent errors (auth failure, bad request) that retrying won't fix.
       if ((response.status >= 500 || response.status === 429) && attempt < MAX_RETRIES) {
         if (thisController.signal.aborted) return '';
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        await abortableSleep(RETRY_DELAY_MS, thisController.signal);
+        if (thisController.signal.aborted) return '';
         continue;
       }
       throw new Error(`OpenAI Compatible API responded with ${response.status}`);
@@ -447,12 +479,13 @@ async function generateOpenAICompat(
       // as 5xx: transient failures that a retry may resolve.
       if (attempt < MAX_RETRIES && !err.message.includes('responded with 4')) {
         if (thisController.signal.aborted) return '';
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        await abortableSleep(RETRY_DELAY_MS, thisController.signal);
+        if (thisController.signal.aborted) return '';
         continue;
       }
       throw err;
     } finally {
-      if (memoryAbortController === thisController) memoryAbortController = null;
+      activeAbortControllers.delete(thisController);
     }
   }
   // Unreachable but satisfies linters.

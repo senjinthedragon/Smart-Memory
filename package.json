@@ -5,9 +5,13 @@
   "description": "Smart Memory - SillyTavern extension",
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "test": "node test-harness.mjs",
+    "test": "node test-harness.mjs && node --test tests/*.test.js",
     "test:live": "node test-harness.mjs --live",
-    "test:parsers": "node test-harness.mjs --parsers"
+    "test:parsers": "node test-harness.mjs --parsers",
+    "test:unit": "node --test tests/*.test.js",
+    "lint": "eslint .",
+    "format": "prettier --write *.js *.mjs tests/**/*.js",
+    "format:check": "prettier --check *.js *.mjs tests/**/*.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

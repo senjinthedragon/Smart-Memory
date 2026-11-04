@@ -34,18 +34,50 @@
  *                             accepts embedFn, lastTurnText, w5, and recentText in context
  * classifyTurn              - heuristic turn-type classifier (dialogue/action/transition/intimate)
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
+ * splitSummarySections      - splits a formatted short-term summary into numbered sections
+ * truncateSummaryToBudget   - trims earlier summary sections while preserving Current Moment and Next Beat
+ * matchSubjectToMember      - resolves an epistemic subject to a group member (exact/token/prefix)
+ * normalizeEpistemicSubject - canonicalises a solo-chat subject to the card character name
+ * STOPWORDS                 - the shared significant-word stoplist (3+ char tokens)
+ * setSmartMemoryLogger      - injects the logger used by the pure helpers (kept runtime-free)
+ * partitionEpistemicEntriesBySubject - groups group-chat epistemic entries into per-character buckets
+ * sameGroupId               - null-safe, string-coerced group-id comparison
+ * safeStorageKey            - guards special object keys (__proto__, constructor, prototype)
+ * escapeHtml                - escapes a value for safe HTML text/attribute interpolation
+ * computeSourceRange        - resolves the real chat range covered by a set of extraction-window messages
+ * unionSourceRanges         - conservative provenance union for synthesized consolidated entries
+ * memorySupportedAfterRollback - conservative rollback predicate: keeps missing/incomplete/other-chat provenance
+ * correlateGenerationGate   - pure FIFO correlation of generation start/terminal events for the in-flight gate
+ * isDuplicateChatLoad       - coalesces duplicate CHAT_CHANGED/CHAT_LOADED signals by id or chatMetadata identity
+ * recapCompletionOwnsSlot   - decides whether a detached recap completion may still touch the active UI
  *
  * Note: this module has no SillyTavern runtime dependencies. Embedding calls are injected via
  * the embedFn parameter so tests can run under plain Node without loading extensions.js.
  */
 
 import { cosineSimilarity, jaccardSimilarity } from './similarity.js';
+import { estimateTokens } from './constants.js';
+
+// Module-level logger, injectable so these pure helpers stay importable under
+// plain Node (logging.js pulls in the SillyTavern runtime). Production code
+// wires this to smLog via setSmartMemoryLogger() on module load.
+let smLog = () => {};
+
+/**
+ * Injects the Smart Memory logger used by the pure helpers (for example the
+ * ambiguous-epistemic-subject warning). Kept injectable so this module has no
+ * runtime dependency on logging.js or the SillyTavern runtime.
+ * @param {(...args: any[]) => void} fn
+ */
+export function setSmartMemoryLogger(fn) {
+  if (typeof fn === 'function') smLog = fn;
+}
 
 function tokenSet(text) {
   return new Set((text || '').toLowerCase().split(/\s+/).filter(Boolean));
 }
 
-const STOPWORDS = new Set([
+export const STOPWORDS = new Set([
   'a',
   'an',
   'and',
@@ -907,4 +939,1013 @@ export function adaptiveBudgets(settings, turnType) {
   }
 
   return adjusted;
+}
+
+// ---- Summary section helpers ------------------------------------------------
+
+// Canonical summary section titles, keyed by section number. A numbered line is
+// only treated as a section header when its title matches the canonical title
+// for that number. Without this, numbered lists inside Section 3 (Key Events)
+// - e.g. "8. Fought the bandits" - are mis-identified as Sections 8 and 9, which
+// corrupts truncation by treating story beats as the Current Moment/Next Beat.
+const SUMMARY_SECTION_TITLES = {
+  1: /^scene\s*(?:&|and)\s*setting\b/i,
+  2: /^characters?\s+present\b/i,
+  3: /^key\s+events?\b/i,
+  4: /^relationship\s+dynamics\b/i,
+  5: /^revealed\s+information\b/i,
+  6: /^story\s+threads?\b/i,
+  7: /^user'?s?\s+direction\b/i,
+  8: /^current\s+moment\b/i,
+  9: /^next\s+beat\b/i,
+};
+
+// Matches a normalized numbered line, e.g. "3. Key Events", "3) Key Events",
+// "3: Key Events", or "3 - Key Events". The captured title is validated against
+// SUMMARY_SECTION_TITLES before use.
+const SUMMARY_SECTION_HEADER_RE = /^([1-9])\s*[.):-]\s*(.+)$/;
+
+/**
+ * Normalizes a raw summary line by stripping markdown heading and emphasis
+ * markers and a trailing delimiter, so plain ("3. Key Events:") and
+ * markdown-decorated forms ("### 3. Key Events", "3. **Key Events:**",
+ * "**3. Key Events**", "3) Key Events:") all collapse to the same "N. Title"
+ * shape before the numbered-header pattern is applied.
+ * @param {string} line
+ * @returns {string}
+ */
+function normalizeSummaryHeaderLine(line) {
+  return String(line ?? '')
+    .replace(/^[ \t]*(?:#{1,6}\s+)?/, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/[:\-–—]\s*$/, '')
+    .trim();
+}
+
+/**
+ * Splits a formatted short-term summary into its numbered sections.
+ *
+ * Returns the text before the first section as `preamble` and one entry per
+ * recognised section. Only lines whose number maps to a canonical section title
+ * count as headers, so numbered lists nested inside a section's body are ignored.
+ * Section numbers must increase monotonically for the same reason - a nested
+ * "8." inside Section 3 is rejected once Section 3 has been seen.
+ *
+ * Markdown decorations are tolerated: `### N. Title`, `N. **Title:**`,
+ * `**N. Title**`, `N) Title:`, and `N. Title:` all parse.
+ *
+ * Any text that does not follow the numbered format keeps the whole input in
+ * `preamble` with an empty `sections` array.
+ *
+ * @param {string} summary
+ * @returns {{ preamble: string, sections: Array<{num: number, text: string}> }}
+ */
+export function splitSummarySections(summary) {
+  const text = String(summary ?? '');
+  const lines = text.split('\n');
+
+  const headers = [];
+  let lastNum = 0;
+  let offset = 0;
+  for (const rawLine of lines) {
+    const lineStart = offset;
+    offset += rawLine.length + 1; // account for the '\n' separator
+
+    const match = normalizeSummaryHeaderLine(rawLine).match(SUMMARY_SECTION_HEADER_RE);
+    if (!match) continue;
+
+    const num = Number(match[1]);
+    const title = match[2].trim();
+    const titlePattern = SUMMARY_SECTION_TITLES[num];
+    if (!titlePattern || !titlePattern.test(title)) continue;
+    // Enforce monotonic numbering so numbered sub-items inside Section 3
+    // ("8. Fought the bandits") cannot be misread as Sections 8 and 9.
+    if (num <= lastNum) continue;
+
+    headers.push({ num, index: lineStart });
+    lastNum = num;
+  }
+
+  if (headers.length === 0) return { preamble: text.trim(), sections: [] };
+
+  const preamble = text.slice(0, headers[0].index).trim();
+  const sections = headers.map((header, i) => {
+    const start = header.index;
+    const end = i + 1 < headers.length ? headers[i + 1].index : text.length;
+    return { num: header.num, text: text.slice(start, end).trim() };
+  });
+  return { preamble, sections };
+}
+
+/**
+ * Truncates a plain string to a token budget, cutting from the end.
+ * Falls back to the original string when the budget is not a positive number.
+ *
+ * @param {string} text
+ * @param {number} budget
+ * @returns {string}
+ */
+function truncateTextTail(text, budget) {
+  if (!Number.isFinite(budget) || budget <= 0) return text;
+  if (estimateTokens(text) <= budget) return text;
+  const ratio = budget / estimateTokens(text);
+  const sliceAt = Math.max(1, Math.floor(text.length * ratio));
+  const boundary = text.lastIndexOf('.', sliceAt);
+  const cut = boundary > sliceAt * 0.8 ? boundary + 1 : sliceAt;
+  return `${text.slice(0, cut)} ... [truncated]`;
+}
+
+/**
+ * Head-truncates a numbered section so its most recent content survives.
+ * The section heading is preserved and a short marker is inserted.
+ *
+ * @param {{num: number, text: string}} section
+ * @param {number} maxTokens
+ * @returns {string}
+ */
+function headTruncateSection(section, maxTokens) {
+  if (!Number.isFinite(maxTokens) || maxTokens <= 0) return section.text;
+  if (estimateTokens(section.text) <= maxTokens) return section.text;
+
+  // Preserve the "N. Title:" heading. Sections without one get a generic header.
+  const headingMatch = section.text.match(/^\s*(\d+\.\s*[^:\n]*:)/);
+  const heading = headingMatch ? headingMatch[1] : `${section.num}. `;
+  const body = headingMatch
+    ? section.text.slice((headingMatch.index ?? 0) + heading.length)
+    : section.text;
+  const marker = ' ... [earlier content trimmed]\n';
+  const overhead = estimateTokens(heading + marker);
+  const bodyBudget = Math.max(1, Math.floor(maxTokens - overhead));
+  const ratio = Math.min(1, bodyBudget / Math.max(1, estimateTokens(body)));
+  let sliceAt = Math.max(1, Math.floor(body.length * ratio));
+  let tail = body.slice(body.length - sliceAt);
+
+  // Start at a line/sentence boundary when one is close to the cut point.
+  const lineBreak = tail.indexOf('\n');
+  if (lineBreak >= 0 && lineBreak < tail.length * 0.35) {
+    tail = tail.slice(lineBreak + 1);
+  } else {
+    const sentence = tail.indexOf('. ');
+    if (sentence >= 0 && sentence < tail.length * 0.35) {
+      tail = tail.slice(sentence + 2);
+    }
+  }
+
+  return `${heading}${marker}${tail}`.trim();
+}
+
+/**
+ * Truncates a formatted short-term summary while preserving the most valuable
+ * tail sections - Current Moment (8) and Next Beat (9). Earlier narrative
+ * sections are kept in priority order (Key Events first), and Section 3 is
+ * head-truncated when only a partial section fits.
+ *
+ * When no numbered sections can be parsed, falls back to end truncation.
+ *
+ * @param {string} summary
+ * @param {number} budget - Maximum estimated tokens.
+ * @returns {string}
+ */
+export function truncateSummaryToBudget(summary, budget) {
+  const text = String(summary ?? '');
+  const maxTokens = Number(budget);
+  if (!Number.isFinite(maxTokens) || maxTokens <= 0) return text;
+  if (estimateTokens(text) <= maxTokens) return text;
+
+  const { preamble, sections } = splitSummarySections(text);
+  if (sections.length === 0) return truncateTextTail(text, maxTokens);
+
+  // Sections 8 and 9 are the anchors the model needs to continue the scene.
+  const tailSections = sections.filter((s) => s.num >= 8);
+  if (tailSections.length === 0) return truncateTextTail(text, maxTokens);
+
+  const tailText = tailSections.map((s) => s.text).join('\n\n');
+  const tailTokens = estimateTokens(tailText);
+  const marker = '... [earlier summary sections trimmed]';
+  const markerTokens = estimateTokens(marker);
+
+  // If the anchor sections alone exceed the budget, keep them intact rather
+  // than cutting the Current Moment. They are the highest-value content.
+  if (tailTokens >= maxTokens) return tailText;
+
+  let remaining = maxTokens - tailTokens - markerTokens;
+
+  // Earlier sections retained in priority order. Event chronology (3) matters
+  // most; scene dressing (1) is the first thing to sacrifice.
+  const priority = [3, 6, 5, 2, 4, 7, 1];
+  const keptHead = new Map();
+  for (const num of priority) {
+    const section = sections.find((s) => s.num === num);
+    if (!section) continue;
+    const sectionTokens = estimateTokens(section.text);
+    if (sectionTokens <= remaining) {
+      keptHead.set(num, section.text);
+      remaining -= sectionTokens;
+    } else if (num === 3 && remaining > 40) {
+      keptHead.set(num, headTruncateSection(section, remaining));
+      remaining = 0;
+    }
+  }
+
+  const headText = [...keptHead.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, value]) => value)
+    .join('\n\n');
+  const trimmedHead = headText ? `${headText}\n\n${marker}` : marker;
+  return `${preamble ? `${preamble}\n\n` : ''}${trimmedHead}\n\n${tailText}`;
+}
+
+/**
+ * Resolves an epistemic subject to one of the group's canonical member names.
+ *
+ * Weak models rarely echo a full member name in the subject field: they write
+ * the first name, a surname, a partial form, or add a title ("Lady Elara" for
+ * "Elara Voss", "Kael Draven" for "Kael", "Picard" for "Jean-Luc Picard").
+ * Both sides are cleaned first (possessives, punctuation, casing) and honorific
+ * titles are stripped, then matching is bidirectional:
+ *
+ * - exact match after cleaning
+ * - member tokens include the subject ("Elara" -> "Elara Voss")
+ * - subject tokens include the member ("Kael Draven" -> "Kael")
+ * - cleaned member without title equals cleaned subject without title
+ *   ("Lady Elara" -> "Elara")
+ *
+ * Arbitrary substring matching is deliberately NOT used: "Evan" must not match
+ * "Evangeline Cole". When more than one member matches the subject, the match is
+ * refused (returns null) rather than guessing - putting a secret into the wrong
+ * character's store is worse than dropping it.
+ *
+ * @param {string} subject
+ * @param {string[]} memberNames
+ * @returns {string|null} The canonical member name, or null when no member
+ *   matches or the match is ambiguous.
+ */
+export function matchSubjectToMember(subject, memberNames) {
+  const cleanedSubject = cleanPersonName(subject);
+  if (!cleanedSubject) return null;
+
+  const names = Array.isArray(memberNames) ? memberNames.filter(Boolean) : [];
+  if (names.length === 0) return null;
+
+  const subjectTokens = nameTokens(cleanedSubject);
+  const subjectNoTitle = stripHonorifics(cleanedSubject);
+  const subjectNoTitleTokens = nameTokens(subjectNoTitle);
+
+  const matches = [];
+  const matchedKeys = new Set();
+
+  for (const member of names) {
+    const cleanedMember = cleanPersonName(member);
+    if (!cleanedMember) continue;
+
+    const memberTokens = nameTokens(cleanedMember);
+    const memberNoTitle = stripHonorifics(cleanedMember);
+    const memberNoTitleTokens = nameTokens(memberNoTitle);
+
+    const exact = cleanedMember === cleanedSubject;
+    const exactNoTitle =
+      Boolean(subjectNoTitle) && Boolean(memberNoTitle) && subjectNoTitle === memberNoTitle;
+    // "Elara" is contained in "Elara Voss" (and "Lady Elara" in "Elara Voss").
+    const memberIncludesSubject = tokensIncludeAll(memberTokens, subjectNoTitleTokens);
+    // "Kael Draven" contains the member "Kael" (and the member "Lady Elara"
+    // contains "Elara" once the title is stripped).
+    const subjectIncludesMember = tokensIncludeAll(subjectTokens, memberNoTitleTokens);
+
+    if (exact || exactNoTitle || memberIncludesSubject || subjectIncludesMember) {
+      if (!matchedKeys.has(cleanedMember)) {
+        matchedKeys.add(cleanedMember);
+        matches.push(member);
+      }
+    }
+  }
+
+  if (matches.length === 0) return null;
+
+  // Ambiguity guard: more than one member matched, so the subject cannot be
+  // attributed without risk. Refuse rather than silently pick the first.
+  if (matches.length > 1) {
+    smLog(
+      `[SmartMemory] Ambiguous epistemic subject "${subject}" matched multiple members - skipped to prevent misattribution.`,
+    );
+    return null;
+  }
+
+  return matches[0];
+}
+
+// Honorific/title words stripped before comparing epistemic subjects to member
+// names. A title is never part of the identity we need to resolve.
+const EPISTEMIC_HONORIFIC_TITLES = new Set([
+  'lady',
+  'lord',
+  'sir',
+  'captain',
+  'dr',
+  'doctor',
+  'king',
+  'queen',
+  'prince',
+  'princess',
+]);
+
+/**
+ * Cleans a person name for epistemic subject matching: lowercases, strips
+ * possessive "'s"/"’s", replaces punctuation (including hyphens) with spaces,
+ * and collapses whitespace.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+function cleanPersonName(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/['’]s(?=[\s.,;:!?'"”’)\]]|$)/g, '')
+    .replace(/[^\p{L}\p{N}\s_-]/gu, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Splits an already-cleaned name into non-empty tokens.
+ * @param {string} cleaned
+ * @returns {string[]}
+ */
+function nameTokens(cleaned) {
+  return String(cleaned ?? '')
+    .split(' ')
+    .filter(Boolean);
+}
+
+/**
+ * Removes honorific/title tokens from a cleaned name.
+ * @param {string} cleaned
+ * @returns {string}
+ */
+function stripHonorifics(cleaned) {
+  return nameTokens(cleaned)
+    .filter((token) => !EPISTEMIC_HONORIFIC_TITLES.has(token))
+    .join(' ');
+}
+
+/**
+ * Returns true when every token in `subset` appears in `container`.
+ * An empty subset is not considered a match.
+ *
+ * @param {string[]} container
+ * @param {string[]} subset
+ * @returns {boolean}
+ */
+function tokensIncludeAll(container, subset) {
+  return subset.length > 0 && subset.every((token) => container.includes(token));
+}
+
+/**
+ * Canonicalises an epistemic subject to the solo card character name.
+ *
+ * In a solo chat the card name may be a full name ("Elara Voss") while weak
+ * models emit only the short form ("Elara") in the subject field. Injection
+ * filters entries by subject, so an unreconciled short form would be silently
+ * dropped. This returns the card name when the subject resolves to it and the
+ * original subject otherwise - unrelated subjects are never rewritten, so a
+ * multi-character scene cannot misattribute entries to the card character.
+ *
+ * @param {string} subject
+ * @param {string} characterName
+ * @returns {string} The canonical subject (or the original when unmatched).
+ */
+export function normalizeEpistemicSubject(subject, characterName) {
+  if (!characterName) return subject;
+  const match = matchSubjectToMember(subject, [characterName]);
+  return match ?? subject;
+}
+
+/**
+ * Partitions parsed epistemic entries into per-character buckets.
+ *
+ * Group extraction returns entries for several characters in one response.
+ * Each entry is assigned to the group member whose name matches its subject
+ * using matchSubjectToMember (exact, first-name/token, prefix/suffix, or
+ * substring). Entries whose subject is not a group member are returned in
+ * `skipped` so the caller can log them rather than storing them under an
+ * arbitrary key.
+ *
+ * @param {Array<{subject?: string}>} entries
+ * @param {string[]} memberNames
+ * @returns {{ grouped: Map<string, Array<Object>>, skipped: Array<Object> }}
+ */
+export function partitionEpistemicEntriesBySubject(entries, memberNames) {
+  const names = [];
+  const seen = new Set();
+  for (const raw of memberNames ?? []) {
+    if (!raw) continue;
+    const name = String(raw);
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+
+  const grouped = new Map();
+  for (const name of names) grouped.set(name, []);
+
+  const skipped = [];
+  for (const entry of entries ?? []) {
+    const name = matchSubjectToMember(entry?.subject, names);
+    if (!name) {
+      skipped.push(entry);
+      continue;
+    }
+    grouped.get(name).push({ ...entry, subject: name });
+  }
+
+  return { grouped, skipped };
+}
+
+/**
+ * Compares two group ids for equality after coercing both to strings.
+ *
+ * Group ids are stored as numbers in SillyTavern's group list but frequently
+ * compared against a context.groupId that may be a string (or vice versa),
+ * so a strict `===` check silently fails to match the active group. Nullish
+ * values never match, so a missing groupId cannot equal a missing id.
+ *
+ * @param {*} a
+ * @param {*} b
+ * @returns {boolean}
+ */
+export function sameGroupId(a, b) {
+  return a != null && b != null && String(a) === String(b);
+}
+
+/**
+ * Normalises a string used as an object storage key so prototype-polluting
+ * names cannot reach the prototype chain.
+ *
+ * `__proto__`, `constructor`, and `prototype` as bare keys on a plain object
+ * either mutate Object.prototype or resolve to inherited members instead of
+ * the caller's data. Prefixing such keys with a NUL sentinel keeps them as
+ * ordinary own properties. A NUL (`\u0000`) cannot appear in a user-typed
+ * character name or group id, so the encoded form can never collide with a
+ * real name - including a name that literally starts with an underscore such
+ * as "_constructor". Keys that already carry the sentinel are prefixed again
+ * so the encoding is injective. Non-strings collapse to an empty string, which
+ * preserves the previous falsy-key behaviour at call sites.
+ *
+ * @param {*} key
+ * @returns {string}
+ */
+export function safeStorageKey(key) {
+  if (typeof key !== 'string') return '';
+  const trimmed = key.trim();
+  // Prefix reserved/inherited property names and any already-encoded key with a
+  // NUL sentinel so a real name like "_constructor" can never collide with the
+  // encoded form of "constructor".
+  if (
+    trimmed.startsWith('\u0000') ||
+    trimmed === '__proto__' ||
+    trimmed === 'constructor' ||
+    trimmed === 'prototype'
+  ) {
+    return '\u0000' + trimmed;
+  }
+  return trimmed;
+}
+
+/**
+ * Escapes a value for safe interpolation into HTML text or quoted attribute
+ * values. All five HTML-significant characters are encoded, so both element
+ * content and double/single-quoted attributes are safe.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+let operationRevision = 0;
+
+/**
+ * Increments the chat & branch operation revision token.
+ * Called whenever a chat changes, message is swiped, edited, deleted, or cancelled.
+ * @returns {number} The new revision token.
+ */
+export function bumpOperationRevision() {
+  operationRevision += 1;
+  return operationRevision;
+}
+
+/**
+ * Returns the current operation revision token.
+ * @returns {number}
+ */
+export function getOperationRevision() {
+  return operationRevision;
+}
+
+/**
+ * Resolves the real chat range covered by a set of extraction-window messages.
+ *
+ * Extraction windows can be sparse: group chats pass a per-character FILTERED
+ * array, so the window's chat indices cannot be derived from its length. Each
+ * message is located by identity (`chat.indexOf(m)`); when some messages were
+ * cloned or replaced they cannot be found, and the resulting min/max would be
+ * too narrow to faithfully bracket the window. `complete` records whether every
+ * message was located so callers can preserve provenance conservatively.
+ *
+ * @param {Array<object>} messages
+ * @param {Array<object>} chat
+ * @returns {{start: number, end: number, complete: boolean}}
+ *   start/end are the min/max real indices found; complete is true only when
+ *   EVERY message was located (so the range faithfully brackets the window).
+ */
+export function computeSourceRange(messages, chat) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { start: 0, end: 0, complete: false };
+  }
+
+  const found = [];
+  for (const m of messages) {
+    const idx = Array.isArray(chat) ? chat.indexOf(m) : -1;
+    if (idx >= 0) found.push(idx);
+  }
+
+  const complete = found.length === messages.length && found.length > 0;
+  if (found.length > 0) {
+    return { start: Math.min(...found), end: Math.max(...found), complete };
+  }
+  return { start: 0, end: 0, complete: false };
+}
+
+/**
+ * Returns true when a `[start, end]` pair is a usable source range: both bounds
+ * are non-negative integers and the interval is not reversed. Anything else
+ * (missing, non-integer, negative, or `start > end`) is malformed provenance.
+ * @param {unknown} start
+ * @param {unknown} end
+ * @returns {boolean}
+ */
+function isUsableSourceRange(start, end) {
+  return Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end >= 0 && start <= end;
+}
+
+/**
+ * Returns true when a stored memory's support survives a rollback to
+ * targetMsgIndex. Conservative by design: when provenance is missing,
+ * incomplete, malformed, or belongs to another chat, the memory is KEPT
+ * (returns true). Only a memory whose every recorded source range is valid and
+ * starts after the rollback point - and whose provenance is otherwise certain -
+ * is considered unsupported.
+ *
+ * Chat identity is compared in normalized string form so a memory stored with a
+ * numeric chat id (`1`) is not misclassified as "another chat" when the host
+ * reports the string form (`'1'`), or vice versa. This mirrors the normalized
+ * `source_chat_id` written by unionSourceRanges().
+ *
+ * @param {object} mem
+ * @param {number} targetMsgIndex
+ * @param {string|number|null} currentChatId
+ * @returns {boolean}
+ */
+export function memorySupportedAfterRollback(mem, targetMsgIndex, currentChatId) {
+  const ranges = mem?.source_messages;
+  if (!Array.isArray(ranges) || ranges.length === 0) return true;
+
+  // Only prune memories whose provenance explicitly records THIS chat. If the
+  // memory has no chat id, or this context has none, or they differ, it cannot
+  // be safely attributed to the discarded branch, so it is kept.
+  if (
+    mem?.source_chat_id == null ||
+    currentChatId == null ||
+    String(mem.source_chat_id) !== String(currentChatId)
+  ) {
+    return true;
+  }
+
+  // Partial lookup (cloned/replaced messages) yields a range that does not
+  // faithfully bracket the window, so treat the memory as uncertain and keep it.
+  if (mem?.source_incomplete === true) return true;
+
+  // Only a fully valid provenance set can be pruned. Any malformed range
+  // (non-array, non-integer, negative, or reversed) makes the provenance
+  // uncertain, so the memory is kept rather than risk deleting real support.
+  const starts = [];
+  for (const range of ranges) {
+    if (!Array.isArray(range)) return true;
+    const [start, end] = range;
+    if (!isUsableSourceRange(start, end)) return true;
+    starts.push(start);
+  }
+  if (starts.length === 0) return true;
+
+  return Math.min(...starts) <= targetMsgIndex;
+}
+
+/**
+ * Unions the provenance of several contributing memories for a synthesized
+ * consolidated entry. Conservative: provenance is incomplete unless EVERY
+ * contributor has a usable explicit chat id (all equal after normalization) and
+ * at least one usable range, and no contributor carries a malformed range.
+ *
+ * A synthesized composite has no single source, so it inherits the deduped
+ * union of every contributor's usable `[start, end]` ranges. This preserves
+ * older support instead of keeping only the most recent range (which would let
+ * the rollback pruner delete the entry even though earlier supporting messages
+ * survive). Any contributor that lacks a usable range, lacks a non-empty chat
+ * id, is flagged `source_incomplete`, draws from a different chat, or carries a
+ * malformed range forces `source_incomplete = true` so the rollback predicate
+ * keeps the entry.
+ *
+ * Only non-negative, non-reversed integer ranges count as usable: an impossible
+ * range such as `[99, -1]` must never be treated as certain provenance, or the
+ * rollback predicate could trust it and delete a memory that a discarded branch
+ * cannot actually account for.
+ *
+ * Chat ids are normalized with `String(...)` at write time and returned in that
+ * canonical form so numeric `1` and string `'1'` are treated as the same chat
+ * everywhere. memorySupportedAfterRollback compares the same normalized form,
+ * so a mixed-representation union that reports "complete" is not later
+ * classified as another chat and retained forever.
+ *
+ * Kept free of SillyTavern runtime imports so it stays importable under plain
+ * Node in tests.
+ *
+ * @param {Array<object>} memories - Contributing memory objects.
+ * @returns {{source_messages: Array<[number, number]>, source_chat_id: string|null, source_incomplete: boolean}}
+ */
+export function unionSourceRanges(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) {
+    return { source_messages: [], source_chat_id: null, source_incomplete: true };
+  }
+
+  const ranges = [];
+  const seenRanges = new Set();
+  // Keyed by the normalized string form so numeric/string chat ids compare
+  // equal; the canonical string is also what we return, so downstream
+  // comparisons (rollback predicate, UI source links) rely on one
+  // representation.
+  const chatIds = new Set();
+  let allHaveRanges = true;
+  let allHaveChatId = true;
+  let incomplete = false;
+
+  for (const mem of memories) {
+    // A missing contributor (or one with non-array source_messages) cannot be
+    // attributed, so the merged provenance must stay incomplete.
+    if (!mem || !Array.isArray(mem.source_messages)) {
+      incomplete = true;
+      allHaveRanges = false;
+    }
+    if (mem?.source_incomplete === true) incomplete = true;
+
+    let usableRanges = 0;
+    const list = Array.isArray(mem?.source_messages) ? mem.source_messages : [];
+    for (const range of list) {
+      // Only non-negative, non-reversed integer intervals are trusted. Any
+      // malformed entry makes the union incomplete so an impossible range can
+      // never masquerade as certain provenance and delete a memory on rollback.
+      if (!Array.isArray(range) || !isUsableSourceRange(range[0], range[1])) {
+        incomplete = true;
+        continue;
+      }
+      const [start, end] = range;
+      usableRanges += 1;
+      const key = `${start}:${end}`;
+      if (seenRanges.has(key)) continue;
+      seenRanges.add(key);
+      ranges.push([start, end]);
+    }
+    if (usableRanges === 0) allHaveRanges = false;
+
+    const chatId = mem?.source_chat_id;
+    if (chatId == null || String(chatId) === '') {
+      allHaveChatId = false;
+    } else {
+      chatIds.add(String(chatId));
+    }
+  }
+
+  const sourceIncomplete = incomplete || !allHaveRanges || !allHaveChatId || chatIds.size > 1;
+  const sourceChatId = allHaveChatId && chatIds.size === 1 ? chatIds.values().next().value : null;
+
+  return {
+    source_messages: ranges,
+    source_chat_id: sourceChatId,
+    source_incomplete: sourceIncomplete,
+  };
+}
+
+/**
+ * Coalesce window (ms) for collapsing SillyTavern's back-to-back terminal
+ * generation events. `stopGeneration()` emits GENERATION_STOPPED and then,
+ * via hideStopButton(), GENERATION_ENDED for the SAME aborted generation.
+ * Treating both as independent terminals would dequeue a generation twice and
+ * clear a newer generation's gate.
+ */
+export const GENERATION_TERMINAL_COALESCE_MS = 100;
+
+/**
+ * Pure correlation state machine for the `generationInProgress` gate.
+ *
+ * SillyTavern's terminal generation events carry no generation id, so a terminal
+ * emitted for generation A can be delivered after generation B has already
+ * started (the audit's delayed-cancel case). Treating every terminal as
+ * authoritative for the active gate would clear B's gate mid-stream and let
+ * intermediate CHARACTER_MESSAGE_RENDERED events run extraction on partial,
+ * unstable text.
+ *
+ * To correlate without host ids we pair starts and terminals FIFO: each `start`
+ * enqueues one pending generation, each terminal consumes one, and the gate is
+ * cleared only when the last pending generation terminates. A delayed terminal
+ * for an already-superseded generation therefore advances the queue without
+ * clearing a newer generation's gate, while a genuine immediate cancel has
+ * exactly one pending generation and still clears at once (preserving the
+ * immediate-stop fix).
+ *
+ * Terminal events are distinguished by kind: `'stopped'` (GENERATION_STOPPED)
+ * and `'ended'` (GENERATION_ENDED). stopGeneration() emits STOPPED immediately
+ * followed by ENDED for the SAME aborted generation, so the second event of that
+ * pair must NOT consume a second generation. The `awaitingPair` field records
+ * the complement expected next: processing a STOPPED consumes one pending slot
+ * and sets `awaitingPair = 'ended'`; a subsequent ENDED within
+ * GENERATION_TERMINAL_COALESCE_MS of the STOPPED is recognised as the pair,
+ * clears `awaitingPair`, and does NOT consume another slot. Because pairing is
+ * keyed on event kind (not on elapsed time alone), a delayed STOPPED/ENDED pair
+ * for an older generation can never be mistaken for a newer generation's real
+ * terminal.
+ *
+ * `'terminal'` is retained as a generic alias that always consumes one pending
+ * slot and never pairs, for callers/tests that do not distinguish the kind.
+ *
+ * `start` enqueues a slot but deliberately preserves BOTH `awaitingPair` and
+ * `lastTerminalAt`: the outstanding pair's timestamp must survive the start
+ * boundary so a delayed ENDED that belongs to the prior STOPPED can still be
+ * recognized and collapsed instead of consuming the newly started generation.
+ * A terminal older than the coalescing window simply will not collapse (correct
+ * - it becomes a normal consume for a genuinely new generation).
+ *
+ * `complete` (MESSAGE_RECEIVED) is authoritative evidence that one generation
+ * finished and produced a committed message. It consumes one pending slot and
+ * clears any outstanding terminal-pair expectation. This self-heals the pending
+ * count when an ambiguous ENDED was treated as an older generation's pair rather
+ * than the just-completed generation's terminal.
+ *
+ * Lifecycle policy: PREFER EXTRACTION SAFETY. With anonymous host events the
+ * orderings `start A -> stopped A -> start B -> ended A` (a delayed old pair that
+ * must not consume B) and `start A -> stopped A -> start B -> ended B` (B's own
+ * terminal) are indistinguishable. When a matching complement arrives inside the
+ * coalescing window it is treated as the outstanding pair and B's gate is held.
+ * This is deliberate: a wrongly-cleared gate would run extraction on partial
+ * streaming text (data corruption), whereas a held gate only delays extraction
+ * and is bounded by the 90s watchdog and by chat switch/reset.
+ *
+ * Bounded recovery: an unresolved pair can never affect a later generation
+ * indefinitely. `awaitingPair` is rewritten on every terminal that consumes a
+ * slot (re-armed to `'ended'` after a STOPPED, otherwise `null`) and `reset`
+ * clears it unconditionally. Pairing also requires
+ * `now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS`, and `lastTerminalAt`
+ * is a concrete timestamp from the STOPPED that armed the pair, so a much-later
+ * terminal cannot collapse and is consumed normally.
+ *
+ * Residual constraint: host events carry no generation id, so an unpaired
+ * STOPPED can leave an outstanding pair expectation until its complement,
+ * MESSAGE_RECEIVED, or reset resolves it. MESSAGE_RECEIVED consumes its pending
+ * slot authoritatively; runtime code retains the watchdog whenever any pending
+ * slot remains, so unresolved work is bounded by the watchdog or a chat
+ * switch/reset. If the awaited complement arrives after its slot was already
+ * cleared, it resolves (clears) the pair instead of lingering and swallowing a
+ * later generation's normal terminal. The failure mode stays conservative
+ * (extraction briefly suppressed), never partial-text extraction.
+ *
+ * @param {{pending?: number, inProgress?: boolean, awaitingPair?: ('stopped'|'ended'|null), lastTerminalAt?: number}} state
+ * @param {'start'|'complete'|'stopped'|'ended'|'terminal'|'reset'} event
+ * @param {number} [now] - Monotonic ms timestamp for terminal coalescing.
+ * @returns {{pending: number, inProgress: boolean, awaitingPair: ('stopped'|'ended'|null), lastTerminalAt: number}}
+ */
+export function correlateGenerationGate(state, event, now = 0) {
+  const pending = Number.isInteger(state?.pending) && state.pending > 0 ? state.pending : 0;
+  const inProgress = state?.inProgress === true;
+  const awaitingPair =
+    state?.awaitingPair === 'stopped' || state?.awaitingPair === 'ended'
+      ? state.awaitingPair
+      : null;
+  const lastTerminalAt =
+    typeof state?.lastTerminalAt === 'number' && Number.isFinite(state.lastTerminalAt)
+      ? state.lastTerminalAt
+      : -Infinity;
+
+  switch (event) {
+    case 'start':
+      // A new generation opens the gate and enqueues one pending slot. Preserve
+      // BOTH the outstanding pair and its timestamp: resetting `lastTerminalAt`
+      // would make `awaitingPair` unsatisfiable, so a delayed ENDED belonging to
+      // the prior STOPPED could never collapse and would wrongly consume this
+      // new generation. A terminal older than the coalescing window still won't
+      // collapse, so it becomes a normal consume for a genuinely new generation.
+      return { pending: pending + 1, inProgress: true, awaitingPair, lastTerminalAt };
+    case 'complete': {
+      // MESSAGE_RECEIVED is authoritative evidence that one generation completed
+      // and committed a message. Consume that slot rather than waiting for a
+      // trailing terminal event: the latter may be an ambiguous old pair, and
+      // retaining this slot could poison later generation accounting.
+      const nextPending = pending > 0 ? pending - 1 : 0;
+      return {
+        pending: nextPending,
+        inProgress: nextPending > 0,
+        awaitingPair: null,
+        lastTerminalAt,
+      };
+    }
+    case 'stopped':
+    case 'ended':
+    case 'terminal': {
+      const kind = event === 'terminal' ? null : event; // 'stopped' | 'ended' | null
+      // No pending generation: this terminal belongs to an already-cleared gate.
+      // It must NOT advance the coalescing marker (that could suppress the next
+      // real terminal). If it is exactly the complement we were awaiting, clear
+      // the pair so it does not linger and swallow a later generation's normal
+      // terminal; any other stale terminal leaves the pair state untouched.
+      if (pending <= 0) {
+        const nextAwaitingPair = kind && awaitingPair === kind ? null : awaitingPair;
+        return { pending: 0, inProgress: false, awaitingPair: nextAwaitingPair, lastTerminalAt };
+      }
+      // Collapse the paired complement (STOPPED then ENDED, or ENDED then
+      // STOPPED) for the SAME generation, only within the coalescing window.
+      // Event-kind keying prevents a newer generation's real terminal from being
+      // swallowed by a delayed older pair.
+      if (kind && awaitingPair === kind && now - lastTerminalAt < GENERATION_TERMINAL_COALESCE_MS) {
+        return { pending, inProgress, awaitingPair: null, lastTerminalAt: now };
+      }
+      // Consume exactly one pending generation. Bounded recovery: this always
+      // rewrites awaitingPair (re-armed to 'ended' after a STOPPED, otherwise
+      // null), and reset clears it too, so an unresolved pair cannot affect a
+      // later generation indefinitely.
+      const nextPending = pending - 1;
+      const nextAwaiting = kind === 'stopped' ? 'ended' : null;
+      return {
+        pending: nextPending,
+        inProgress: nextPending > 0,
+        awaitingPair: nextAwaiting,
+        lastTerminalAt: now,
+      };
+    }
+    case 'reset':
+      return { pending: 0, inProgress: false, awaitingPair: null, lastTerminalAt: -Infinity };
+    default:
+      return { pending, inProgress, awaitingPair, lastTerminalAt };
+  }
+}
+
+/**
+ * Returns true when a chat-load signal duplicates the previous one within the
+ * coalescing window. CHAT_CHANGED and CHAT_LOADED fire for the same load, so the
+ * caller must only advance chatLoadId / the operation revision once.
+ *
+ * The strongest identity is the normalized chat id. When it is temporarily
+ * unavailable (getCurrentChatId() returns null during a load), fall back to the
+ * chatMetadata object reference - a per-load lifecycle token, since SillyTavern
+ * creates a fresh object per loaded chat. If neither side exposes an identity we
+ * cannot prove duplication, so we do not coalesce (never swallow a real switch).
+ *
+ * @param {{id: string|null, meta: object|null}} previous
+ * @param {{id: string|null, meta: object|null}} next
+ * @param {number} elapsedMs
+ * @returns {boolean}
+ */
+export function isDuplicateChatLoad(previous, next, elapsedMs) {
+  if (!(elapsedMs >= 0) || elapsedMs >= 300) return false;
+  if (next?.id != null && previous?.id != null) return previous.id === next.id;
+  if (next?.meta != null && previous?.meta != null) return previous.meta === next.meta;
+  return false;
+}
+
+/**
+ * Returns true when a detached recap completion still owns the active recap
+ * slot and may therefore touch the loader, status text, and suppression flag.
+ *
+ * The recap promise is detached from onChatChangedImpl, so it can resolve after
+ * the user has switched chats and a different recap has claimed the slot.
+ * Ownership must be *proven*, never assumed: a `null === null` metadata
+ * comparison is not proof that this completion belongs to the current chat.
+ *
+ * Proof is established by either:
+ * - a load id (`chatLoadId`) supplied on either side - the strongest identity,
+ *   and valid even when `chatMetadata` is null. Both sides must match; a
+ *   mismatch means a different chat load now owns the UI.
+ * - otherwise, a non-null, identical `chatMetadata` object reference. When no
+ *   load id is supplied, two null metadata values are treated as unproven.
+ *
+ * Even when identity matches, if both metadata references are present they must
+ * agree, and a slot now held by another activity handle makes this completion
+ * stale.
+ *
+ * @param {object} p
+ * @param {object|null} p.capturedMeta - chatMetadata the recap was generated for.
+ * @param {object|null} p.currentMeta - getContext().chatMetadata at resolution.
+ * @param {JQuery|null} p.capturedHandle - activity loader captured at start.
+ * @param {JQuery|null} p.activeHandle - current activeRecapHandle.
+ * @param {number|null} [p.capturedLoadId] - chatLoadId captured at recap start.
+ * @param {number|null} [p.currentLoadId] - chatLoadId at resolution.
+ * @returns {boolean}
+ */
+export function recapCompletionOwnsSlot({
+  capturedMeta,
+  currentMeta,
+  capturedHandle,
+  activeHandle,
+  capturedLoadId,
+  currentLoadId,
+}) {
+  if (capturedLoadId != null || currentLoadId != null) {
+    // A load id is a valid ownership proof even when metadata is null; a
+    // mismatch means a different chat load now owns the UI.
+    if (capturedLoadId !== currentLoadId) return false;
+  } else if (capturedMeta == null || currentMeta == null || capturedMeta !== currentMeta) {
+    // No load id: only a non-null, identical metadata reference proves we still
+    // own the slot. `null === null` is NOT ownership.
+    return false;
+  }
+  // Identity matched. If both metadata references are present they must agree
+  // (a matching load id cannot vouch for a different chat's metadata object).
+  if (capturedMeta != null && currentMeta != null && capturedMeta !== currentMeta) return false;
+  // Another recap has claimed the active slot since this one started.
+  if (activeHandle != null && activeHandle !== capturedHandle) return false;
+  return true;
+}
+
+/**
+ * Derives the index of the message SillyTavern just deleted.
+ *
+ * SillyTavern emits MESSAGE_DELETED with the NEW chat length, never the deleted
+ * index. Surviving messages keep their object references across the host's
+ * splice, so the deleted turn is found by locating the first index where the
+ * current chat diverges from the last captured reference snapshot. Correct for
+ * both a single mid-chat delete and a "delete from here" range delete.
+ *
+ * Pure and runtime-free so it can be unit-tested under Node.
+ *
+ * @param {Array<object>|null} prevRefs - object references captured before the delete.
+ * @param {Array<object>} currChat - the surviving chat array.
+ * @param {number} emittedLength - the value ST passed (the new chat length).
+ * @returns {number} index of the deleted message in the pre-delete chat.
+ */
+export function resolveDeletedIndexFromRefs(prevRefs, currChat, emittedLength) {
+  const chat = Array.isArray(currChat) ? currChat : [];
+  if (Array.isArray(prevRefs)) {
+    const n = Math.min(prevRefs.length, chat.length);
+    for (let i = 0; i < n; i++) {
+      if (chat[i] !== prevRefs[i]) return i;
+    }
+    if (chat.length <= prevRefs.length) return chat.length;
+    return Math.max(0, chat.length - 1);
+  }
+  return Number.isInteger(emittedLength)
+    ? Math.max(0, emittedLength - 1)
+    : Math.max(0, chat.length - 1);
+}
+
+/**
+ * Returns true when a GENERATION_STARTED event should open the generation gate.
+ *
+ * SillyTavern emits GENERATION_STARTED as `(type, options, dryRun)`. Its
+ * PromptManager performs a post-message DRY-RUN (`Generate('normal', {}, true)`)
+ * to compute token composition; a dry-run returns before emitting
+ * MESSAGE_RECEIVED or GENERATION_ENDED, so treating it as a real generation
+ * would leave the gate locked and silently skip all extraction. Only real
+ * (non-dry-run) normal generations may open the gate.
+ *
+ * @param {string} type - the generation type (e.g. 'normal', 'quiet', 'swipe').
+ * @param {boolean} [dryRun] - ST's dry-run flag (true for prompt-composition runs).
+ * @returns {boolean}
+ */
+export function isTrackableGeneration(type, dryRun) {
+  return type === 'normal' && dryRun !== true;
+}
+
+/**
+ * Returns the extraction cursor after a rollback must only ever move BACKWARD.
+ *
+ * `lastExtractCutoff` is a high-water mark: turns at or before it have already
+ * been fed to extraction. A rollback (swipe/edit/delete) may need to rewind it so
+ * discarded turns are re-extracted, but it must never ADVANCE it — doing so would
+ * mark un-extracted surviving turns as already processed and skip them forever.
+ * (A delete whose target lies after the current cursor must therefore leave the
+ * cursor untouched.)
+ *
+ * @param {number|null|undefined} current - the existing cutoff (null when unset).
+ * @param {number} target - the rollback target index.
+ * @returns {number} the lowered cursor, or the existing value when already lower.
+ */
+export function lowerExtractCutoff(current, target) {
+  const t = Math.max(0, target);
+  // Never extracted yet (cursor unset): nothing to rewind, so leave it unset
+  // rather than advancing it and skipping un-extracted surviving turns.
+  if (!Number.isInteger(current)) return current;
+  return current > t ? t : current;
 }

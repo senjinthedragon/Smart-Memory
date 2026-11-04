@@ -47,6 +47,7 @@ import {
 import { getContext, extension_settings } from '../../../extensions.js';
 import { generateMemoryExtract } from './generate.js';
 import { estimateTokens, MODULE_NAME, META_KEY, PROMPT_KEY_PROFILES } from './constants.js';
+import { replaceTemplate } from './template-utils.js';
 import { loadCharacterMemories, formatMemoriesForPrompt } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 import { loadCharacterEntityRegistry } from './graph-migration.js';
@@ -99,7 +100,10 @@ async function saveProfiles(profiles, characterName) {
 export function areProfilesStale(thresholdMs = DEFAULT_STALE_THRESHOLD_MS, characterName) {
   const profiles = loadProfiles(characterName);
   if (!profiles) return true;
-  return Date.now() - (profiles.generated_at ?? 0) > thresholdMs;
+  // Coerce before comparing: a missing or non-numeric generated_at (e.g. from
+  // an older stored shape) is treated as 0 so those profiles always regenerate.
+  const generatedAt = Number(profiles.generated_at) || 0;
+  return Date.now() - generatedAt > thresholdMs;
 }
 
 // ---- Generation ---------------------------------------------------------
@@ -161,7 +165,21 @@ export async function generateProfiles(characterName, abortCheck = null) {
       return null;
     }
 
-    const profiles = { ...parsed, generated_at: Date.now() };
+    // Merge with any previously stored sections. Weak models frequently emit
+    // only one or two of the three sections; overwriting wholesale would blank
+    // the missing sections and drop context the AI was already relying on.
+    // Three states from parseProfileOutput: null = section absent (preserve the
+    // stored value), '' = present but intentionally empty (replace, i.e. clear
+    // an obsolete section), non-empty = replace.
+    const existing = loadProfiles(characterName) || {};
+    const mergeSection = (parsedVal, existingVal) =>
+      parsedVal === null ? (existingVal ?? '') : parsedVal;
+    const profiles = {
+      character_state: mergeSection(parsed.character_state, existing.character_state),
+      world_state: mergeSection(parsed.world_state, existing.world_state),
+      relationship_matrix: mergeSection(parsed.relationship_matrix, existing.relationship_matrix),
+      generated_at: Date.now(),
+    };
     if (abortCheck?.()) return null;
     await saveProfiles(profiles, characterName);
     return profiles;
@@ -210,7 +228,7 @@ function formatProfiles(profiles, budget) {
  * Clears the slot if profiles are disabled, the character is unknown, or nothing is stored.
  * @param {string} [characterName]
  */
-export function injectProfiles(characterName) {
+export function injectProfiles(characterName, budgetOverride = null) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.profiles_enabled) {
@@ -228,7 +246,7 @@ export function injectProfiles(characterName) {
     return;
   }
 
-  const budget = settings.profiles_inject_budget ?? 200;
+  const budget = budgetOverride ?? settings.profiles_inject_budget ?? 200;
   const sections = [
     profiles.character_state,
     profiles.world_state,
@@ -245,7 +263,7 @@ export function injectProfiles(characterName) {
   }
 
   const template = settings.profiles_template ?? '{{profiles}}';
-  const content = template.replace('{{profiles}}', text);
+  const content = replaceTemplate(template, '{{profiles}}', text);
   reportTierTrimStats(PROMPT_KEY_PROFILES, estimateTokens(content), fullTokens);
 
   setMacroContent(MACRO_NAMES.profiles, content);
