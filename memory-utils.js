@@ -1927,3 +1927,25 @@ export function resolveDeletedIndexFromRefs(prevRefs, currChat, emittedLength) {
 export function isTrackableGeneration(type, dryRun) {
   return type === 'normal' && dryRun !== true;
 }
+
+/**
+ * Returns the extraction cursor after a rollback must only ever move BACKWARD.
+ *
+ * `lastExtractCutoff` is a high-water mark: turns at or before it have already
+ * been fed to extraction. A rollback (swipe/edit/delete) may need to rewind it so
+ * discarded turns are re-extracted, but it must never ADVANCE it — doing so would
+ * mark un-extracted surviving turns as already processed and skip them forever.
+ * (A delete whose target lies after the current cursor must therefore leave the
+ * cursor untouched.)
+ *
+ * @param {number|null|undefined} current - the existing cutoff (null when unset).
+ * @param {number} target - the rollback target index.
+ * @returns {number} the lowered cursor, or the existing value when already lower.
+ */
+export function lowerExtractCutoff(current, target) {
+  const t = Math.max(0, target);
+  // Never extracted yet (cursor unset): nothing to rewind, so leave it unset
+  // rather than advancing it and skipping un-extracted surviving turns.
+  if (!Number.isInteger(current)) return current;
+  return current > t ? t : current;
+}

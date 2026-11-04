@@ -135,6 +135,7 @@ import {
   recapCompletionOwnsSlot,
   resolveDeletedIndexFromRefs,
   isTrackableGeneration,
+  lowerExtractCutoff,
 } from './memory-utils.js';
 import { clearUnifiedSlot, maybeInjectUnified } from './unified-inject.js';
 import { registerSmartMemoryMacros } from './macros.js';
@@ -2688,9 +2689,9 @@ jQuery(async function () {
     const rollbackTarget = messageId - 1;
 
     // Set the cursor before rollback so the same metadata save persists it.
-    // The cursor itself is clamped at 0; the state rollback target is not, so
-    // editing the very first turn resets state instead of preserving it.
-    if (meta) meta.lastExtractCutoff = Math.max(0, rollbackTarget);
+    // The cursor only ever moves backward (see lowerExtractCutoff); editing a
+    // turn after the cursor leaves it untouched.
+    if (meta) meta.lastExtractCutoff = lowerExtractCutoff(meta.lastExtractCutoff, rollbackTarget);
     rollbackStateToSnapshot(rollbackTarget);
     prunePersistentMemoriesAfterRollback(
       rollbackTarget,
@@ -2735,8 +2736,11 @@ jQuery(async function () {
     const targetIndex = Math.max(0, deletedIndex - 1);
     const meta = context.chatMetadata?.[META_KEY];
     // Rewind the extraction cursor so deleted/rewritten turns are re-extracted
-    // rather than skipped by the next pass.
-    if (meta) meta.lastExtractCutoff = Math.max(0, targetIndex);
+    // rather than skipped by the next pass. The cursor is a high-water mark and
+    // must only move backward: deleting a turn that lies AFTER the cursor leaves
+    // the cursor untouched (otherwise un-extracted surviving turns would be
+    // skipped forever).
+    if (meta) meta.lastExtractCutoff = lowerExtractCutoff(meta.lastExtractCutoff, targetIndex);
     rollbackStateToSnapshot(targetIndex);
     prunePersistentMemoriesAfterRollback(
       targetIndex,

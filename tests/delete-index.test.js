@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveDeletedIndexFromRefs } from '../memory-utils.js';
+import { resolveDeletedIndexFromRefs, lowerExtractCutoff } from '../memory-utils.js';
 
 // SillyTavern emits MESSAGE_DELETED with the NEW chat length, never the deleted
 // index. These tests pin the object-identity diff that recovers the deleted turn.
@@ -50,4 +50,24 @@ test('resolveDeletedIndexFromRefs: identity diff distinguishes duplicate content
 test('resolveDeletedIndexFromRefs: falls back to the emitted new-length when no snapshot exists', () => {
   assert.equal(resolveDeletedIndexFromRefs(null, [{}, {}], 5), 4);
   assert.equal(resolveDeletedIndexFromRefs(null, [], undefined), 0);
+});
+
+// lastExtractCutoff is a high-water mark and must only move backward.
+test('lowerExtractCutoff: lowers the cursor for a rollback before it', () => {
+  assert.equal(lowerExtractCutoff(10, 3), 3);
+  assert.equal(lowerExtractCutoff(10, 9), 9);
+});
+
+test('lowerExtractCutoff: never advances the cursor', () => {
+  assert.equal(lowerExtractCutoff(1, 3), 1);
+  assert.equal(lowerExtractCutoff(5, 5), 5);
+});
+
+test('lowerExtractCutoff: leaves an unset cursor unset', () => {
+  assert.equal(lowerExtractCutoff(null, 3), null);
+  assert.equal(lowerExtractCutoff(undefined, 3), undefined);
+});
+
+test('lowerExtractCutoff: clamps the target at zero', () => {
+  assert.equal(lowerExtractCutoff(10, -5), 0);
 });
